@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>HIIT Tracker</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+:root {
+  --accent: #8fbb9f;
+  --accent-dim: #8fbb9f20;
+  --green: #7aab83;
+  --green-dim: #7aab8328;
+  --gold: #d4b87a;
+  --red: #c47878;
+  --bg: #111111;
+  --surface: #1c1c1c;
+  --surface2: #262626;
+  --border: rgba(255,255,255,0.14);
+  --border2: rgba(255,255,255,0.24);
+  --text: #f2ede6;
+  --muted: rgba(232,227,220,0.85);
+  --font: 'Courier New', monospace;
+}
+
+html, body { height: 100%; overflow: hidden; }
+body {
+  background: var(--bg); color: var(--text); font-family: var(--font);
+  display: flex; flex-direction: column;
+  height: 100vh; height: -webkit-fill-available;
+}
+.app-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 20px 12px;
+  background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.app-title { font-size: 15px; font-weight: 900; letter-spacing: 4px; color: var(--text); opacity: .85; }
+.streak-badge {
+  display: flex; align-items: center; gap: 5px;
+  background: var(--surface2); border-radius: 20px;
+  padding: 5px 12px; font-size: 15px; font-weight: 700;
+  border: 1px solid var(--border2); color: var(--gold);
+}
+.tab-nav { display: flex; background: var(--bg); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab-btn {
+  flex: 1; padding: 11px 4px; font-size: 13px; font-family: var(--font);
+  font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+  background: none; border: none; color: rgba(232,227,220,0.78); cursor: pointer;
+  border-bottom: 2px solid transparent; transition: color .2s;
+}
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-content { flex: 1; overflow-y: auto; overflow-x: hidden; }
+.tab-panel { display: none; padding: 20px; padding-bottom: 40px; }
+.tab-panel.active { display: block; }
+.row-between { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+.section-title { font-size: 14px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; font-weight: 700; }
+.week-score { font-size: 22px; font-weight: 900; color: var(--accent); }
+.week-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 5px; margin-bottom: 22px; }
+.day-cell { display: flex; flex-direction: column; align-items: center; gap: 5px; }
+.day-label { font-size: 13px; letter-spacing: 1px; color: var(--muted); text-transform: uppercase; font-weight: 600; }
+.day-dot {
+  width: 36px; height: 36px; border-radius: 50%;
+  border: 1.5px solid var(--border2);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; transition: all .2s; cursor: default; user-select: none;
+}
+.day-dot.clickable { cursor: pointer; }
+.day-dot.clickable:active { transform: scale(.88); }
+.day-dot.today-ring { border-color: var(--accent); }
+.day-dot.done { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+.day-dot.missed { opacity: .22; }
+.day-dot.future { opacity: .15; border-style: dashed; }
+.stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
+.stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
+.stat-value { font-size: 34px; font-weight: 900; color: var(--accent); line-height: 1; }
+.stat-value.gold { color: var(--gold); }
+.stat-label { font-size: 13px; letter-spacing: 2px; color: var(--muted); margin-top: 4px; text-transform: uppercase; font-weight: 600; }
+.log-btn {
+  width: 100%; padding: 17px; border: none; border-radius: 12px;
+  font-family: var(--font); font-size: 15px; font-weight: 900;
+  letter-spacing: 3px; cursor: pointer; transition: all .2s;
+  text-transform: uppercase; margin-bottom: 22px;
+}
+.log-btn.active { background: var(--green); color: var(--bg); }
+.log-btn.active:active { transform: scale(.98); }
+.log-btn.done-today { background: transparent; color: var(--green); border: 1.5px solid rgba(122,171,131,.45); cursor: default; opacity: .8; }
+.streaks-title { font-size: 14px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; font-weight: 700; }
+.streak-row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 13px 16px; margin-bottom: 8px; }
+.streak-rank { font-size: 16px; color: var(--text); width: 22px; flex-shrink: 0; }
+.streak-bar-wrap { flex: 1; }
+.streak-bar-track { height: 4px; background: var(--surface2); border-radius: 2px; overflow: hidden; }
+.streak-bar-fill { height: 100%; border-radius: 2px; background: var(--accent); transition: width .6s ease; }
+.streak-bar-fill.gold { background: var(--gold); }
+.streak-days { font-size: 22px; font-weight: 900; color: var(--accent); width: 44px; text-align: right; flex-shrink: 0; }
+.streak-days.gold { color: var(--gold); }
+.streak-unit { font-size: 12px; color: var(--muted); margin-top: 2px; letter-spacing: 1px; font-weight: 600; }
+.streak-empty { text-align: center; padding: 20px; font-size: 14px; color: var(--muted); letter-spacing: 2px; }
+.settings-section { margin-bottom: 26px; }
+.settings-label { font-size: 14px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; font-weight: 700; }
+.setting-row { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.setting-name { font-size: 16px; font-weight: 700; }
+.setting-sub { font-size: 14px; color: var(--muted); margin-top: 2px; font-weight: 500; }
+.toggle { width: 44px; height: 24px; background: var(--surface2); border: 1px solid var(--border2); border-radius: 12px; position: relative; cursor: pointer; transition: background .3s; flex-shrink: 0; }
+.toggle.on { background: var(--accent); border-color: var(--accent); }
+.toggle::after { content:''; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #fff; top: 2px; left: 2px; transition: left .3s; }
+.toggle.on::after { left: 22px; }
+.time-input { background: var(--surface2); border: 1px solid var(--border2); color: var(--text); font-family: var(--font); font-size: 17px; font-weight: 700; border-radius: 8px; padding: 7px 10px; text-align: center; letter-spacing: 1px; width: 88px; }
+.notif-btn { width: 100%; padding: 13px; background: var(--surface); border: 1px solid var(--border2); border-radius: 12px; color: var(--text); font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; opacity: .8; }
+.notif-btn.granted { border-color: var(--green); color: var(--green); opacity: 1; }
+.danger-btn { width: 100%; padding: 13px; background: none; border: 1px solid rgba(196,120,120,.5); border-radius: 12px; color: var(--red); font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; }
+.toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(70px); background: var(--surface2); color: var(--text); border: 1px solid var(--border2); font-family: var(--font); font-weight: 700; font-size: 14px; letter-spacing: 2px; padding: 10px 20px; border-radius: 50px; transition: transform .35s cubic-bezier(.34,1.56,.64,1); z-index: 999; white-space: nowrap; }
+.toast.show { transform: translateX(-50%) translateY(0); }
+.timer-wrap { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: space-between; padding: 24px 20px 36px; background: #111111; transition: background .8s; position: relative; }
+.timer-wrap.rest-mode { background: #111410; }
+.t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
+.timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
+</style>
+</head>
+<body>
+<audio id="wa" loop style="display:none" playsinline></audio>
+<div class="app-header">
+  <div class="app-title">HIIT TRACKER</div>
+  <div class="streak-badge">🔥 <span id="streak-count">0</span>&thinsp;<span style="opacity:.55;font-size:13px;color:var(--text)">jours</span></div>
+</div>
+<div class="tab-nav">
+  <button class="tab-btn active" onclick="showTab('dashboard',this)">SUIVI</button>
+  <button class="tab-btn" onclick="showTab('timer',this)">TIMER</button>
+  <button class="tab-btn" onclick="showTab('settings',this)">RÉGLAGES</button>
+</div>
+<div class="tab-content">
+  <div id="tab-dashboard" class="tab-panel active">
+    <div class="row-between"><span class="section-title">Cette semaine</span><span class="week-score" id="week-score">0 / 5</span></div>
+    <div class="week-grid" id="week-grid"></div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak actuel</div></div>
+      <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total séances</div></div>
+    </div>
+    <button class="log-btn active" id="log-btn" onclick="logWorkout()">✓ Séance effectuée !</button>
+    <div class="streaks-title">Top 3 streaks</div>
+    <div id="top-streaks"></div>
+  </div>
+  <div id="tab-timer" class="tab-panel" style="padding:0">
+    <div class="timer-wrap" id="timer-wrap">
+      <div class="t-glow"></div>
+      <div style="width:100%;max-width:400px;z-index:1">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <span id="t-phase" style="font-size:13px;letter-spacing:3px;color:var(--muted);text-transform:uppercase">ÉCHAUFFEMENT</span>
+          <span id="t-total" style="font-size:13px;letter-spacing:2px;color:var(--muted)">15:00</span>
+        </div>
+        <div style="height:2px;background:rgba(255,255,255,.12);border-radius:2px;overflow:hidden">
+          <div id="t-bar" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 1s linear,background .8s"></div>
+        </div>
+      </div>
+      <div style="z-index:1;display:flex;flex-direction:column;align-items:center">
+        <svg width="250" height="250" style="overflow:visible">
+          <circle cx="125" cy="125" r="105" fill="none" stroke="rgba(255,255,255,.10)" stroke-width="13"/>
+          <circle id="t-arc" cx="125" cy="125" r="105" fill="none" stroke-width="13" stroke-linecap="round" transform="rotate(-90 125 125)" style="transition:stroke-dashoffset 1s linear,stroke .8s"/>
+          <text id="t-cd" x="125" y="130" text-anchor="middle" dominant-baseline="central" font-size="88" font-weight="900" font-family="Courier New" style="display:none;fill:var(--accent)"></text>
+          <text id="t-time" x="125" y="112" text-anchor="middle" font-size="64" font-weight="900" font-family="Courier New" fill="#f2ede6"></text>
+          <text id="t-ex" x="125" y="155" text-anchor="middle" font-size="14" font-weight="700" font-family="Courier New" letter-spacing="2" style="fill:var(--accent);text-transform:uppercase"></text>
+        </svg>
+        <div id="t-next" style="margin-top:6px;font-size:13px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;min-height:16px"></div>
+      </div>
+      <div style="width:100%;max-width:400px;z-index:1">
+        <div id="t-list" style="background:rgba(255,255,255,.04);border-radius:14px;padding:11px 14px;border:1px solid var(--border);margin-bottom:16px"></div>
+        <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
+      </div>
+    </div>
+  </div>
+  <div id="tab-settings" class="tab-panel">
+    <div class="settings-section">
+      <div class="settings-label">Rappels</div>
+      <div class="setting-row"><div><div class="setting-name">Rappel quotidien</div><div class="setting-sub">Si pas encore entraîné</div></div><div class="toggle" id="reminder-toggle" onclick="toggleReminder()"></div></div>
+      <div class="setting-row" id="time-row" style="display:none"><div class="setting-name">Heure</div><input type="time" class="time-input" id="reminder-time" value="19:00" onchange="saveReminderTime()"></div>
+      <button class="notif-btn" id="notif-perm-btn" onclick="requestNotifPermission()" style="margin-top:8px">Activer les notifications</button>
+      <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">Fonctionne quand l'app est ouverte en fond de tâche.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Objectif</div>
+      <div class="setting-row">
+        <div class="setting-name">Séances / semaine</div>
+        <select id="goal-select" onchange="saveGoal()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px">
+          <option value="3">3 ×</option><option value="4">4 ×</option><option value="5" selected>5 ×</option><option value="6">6 ×</option>
+        </select>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Données</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:10px;line-height:1.6">Tes données sont sauvegardées localement. Télécharger une mise à jour n'efface pas les données.</div>
+      <button class="danger-btn" onclick="resetData()">Réinitialiser toutes les données</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+const KEYS={workouts:'hiit_workouts_v1',goal:'hiit_goal_v1',reminderOn:'hiit_reminderOn_v1',reminderTime:'hiit_reminderTime_v1'};
+const S={get:(k,d)=>{try{const v=localStorage.getItem(k);return v!==null?JSON.parse(v):d;}catch{return d;}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}}};
+let workouts=S.get(KEYS.workouts,[]),goal=S.get(KEYS.goal,5),reminderOn=S.get(KEYS.reminderOn,false),reminderTime=S.get(KEYS.reminderTime,'19:00'),reminderTO=null;
+const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
+const hasTrainedToday=()=>workouts.includes(todayStr());
+const ds=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+function logWorkout(silent=false){const t=todayStr();if(workouts.includes(t))return;workouts.unshift(t);S.set(KEYS.workouts,workouts);if(!silent)showToast('Séance enregistrée ✓');renderDashboard();}
+function toggleDay(dstr){if(workouts.includes(dstr)){workouts=workouts.filter(d=>d!==dstr);showToast('Séance retirée');}else{workouts.push(dstr);workouts.sort((a,b)=>b.localeCompare(a));showToast('Séance ajoutée ✓');}S.set(KEYS.workouts,workouts);renderDashboard();}
+function getCurrentStreak(){let n=0,d=new Date();if(!workouts.includes(ds(d)))d.setDate(d.getDate()-1);while(workouts.includes(ds(d))){n++;d.setDate(d.getDate()-1);}return n;}
+function getAllStreaks(){if(workouts.length===0)return[];const sorted=[...workouts].sort();const streaks=[];let len=1;for(let i=1;i<sorted.length;i++){const diff=Math.round((new Date(sorted[i])-new Date(sorted[i-1]))/86400000);if(diff===1){len++;}else{streaks.push(len);len=1;}}streaks.push(len);return streaks.sort((a,b)=>b-a);}
+function getWeekDates(){const now=new Date(),day=now.getDay();const mon=new Date(now);mon.setDate(now.getDate()-(day===0?6:day-1));mon.setHours(0,0,0,0);return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});}
+const DAYS=['L','M','M','J','V','S','D'],MEDALS=['🥇','🥈','🥉'];
+function renderDashboard(){
+  const today=todayStr(),now=new Date(),weekDates=getWeekDates();
+  const weekDone=weekDates.filter(d=>workouts.includes(ds(d))).length;
+  document.getElementById('week-score').textContent=`${weekDone} / ${goal}`;
+  const grid=document.getElementById('week-grid');grid.innerHTML='';
+  weekDates.forEach((d,i)=>{
+    const dstr=ds(d),isToday=dstr===today,isFuture=d>now&&!isToday,isPast=!isToday&&!isFuture;
+    const isDone=workouts.includes(dstr),isMissed=isPast&&!isDone,isClickable=!isFuture;
+    const cell=document.createElement('div');cell.className='day-cell';
+    const dot=document.createElement('div');
+    let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=' done';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
+    dot.className=cls;dot.textContent=isDone?'✓':'';
+    if(isClickable){dot.onclick=()=>toggleDay(dstr);dot.title=isDone?'Retirer la séance':'Ajouter une séance';}
+    const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
+    cell.append(dot,lbl);grid.appendChild(cell);
+  });
+  const streak=getCurrentStreak();
+  document.getElementById('streak-count').textContent=streak;document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
+  const btn=document.getElementById('log-btn');
+  if(hasTrainedToday()){btn.className='log-btn done-today';btn.textContent="✓ Déjà entraîné aujourd'hui";}else{btn.className='log-btn active';btn.textContent='✓ Séance effectuée !';}
+  const top3=getAllStreaks().slice(0,3),maxVal=top3[0]||1,container=document.getElementById('top-streaks');
+  if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
+  container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
+}
+function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active');if(name==='dashboard')renderDashboard();}
+function toggleReminder(){reminderOn=!reminderOn;S.set(KEYS.reminderOn,reminderOn);document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';reminderOn?scheduleReminder():clearTimeout(reminderTO);}
+function saveReminderTime(){reminderTime=document.getElementById('reminder-time').value;S.set(KEYS.reminderTime,reminderTime);scheduleReminder();}
+function saveGoal(){goal=parseInt(document.getElementById('goal-select').value);S.set(KEYS.goal,goal);renderDashboard();}
+function resetData(){if(!confirm('Supprimer toutes les données ?'))return;workouts=[];S.set(KEYS.workouts,[]);renderDashboard();showToast('Données effacées');}
+async function requestNotifPermission(){if(!('Notification'in window)){showToast('Non supporté');return;}const p=await Notification.requestPermission();updateNotifBtn(p);if(p==='granted'){showToast('Notifications activées');scheduleReminder();}}
+function updateNotifBtn(p){const b=document.getElementById('notif-perm-btn');b.textContent=p==='granted'?'✓ Notifications activées':'Activer les notifications';b.classList.toggle('granted',p==='granted');}
+function scheduleReminder(){clearTimeout(reminderTO);if(!reminderOn||!('Notification'in window)||Notification.permission!=='granted')return;const now=new Date(),[h,m]=reminderTime.split(':').map(Number);const target=new Date(now);target.setHours(h,m,0,0);if(target<=now)target.setDate(target.getDate()+1);reminderTO=setTimeout(()=>{if(!hasTrainedToday())new Notification('HIIT Tracker',{body:"Tu n'as pas encore fait ta séance ! 💪"});scheduleReminder();},target-now);}
+let toastTO;function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastTO);toastTO=setTimeout(()=>t.classList.remove('show'),2200);}
+const CIRCUIT=[{name:"Bike Sprint",spoken:"Sprint vélo !",duration:36,type:"work"},{name:"Tirage horizontal",spoken:"Tirage horizontal !",duration:36,type:"work"},{name:"Squats",spoken:"Squats !",duration:36,type:"work"},{name:"Pull ups",spoken:"Tractions !",duration:30,type:"work"},{name:"Mountain Climbers",spoken:"Mountain climbers !",duration:35,type:"work"},{name:"Repos",spoken:"Repos, récupérez.",duration:30,type:"rest"}];
+const ROUNDS=4,TOTAL_DUR=120+CIRCUIT.reduce((a,e)=>a+e.duration,0)*ROUNDS,CIRCUM=2*Math.PI*105;
+function buildSeq(){const s=[{name:"Vélo warm up",spoken:"Échauffement vélo, partez !",duration:120,type:"work",phase:"WARMUP",round:null}];for(let r=1;r<=ROUNDS;r++)CIRCUIT.forEach(ex=>s.push({...ex,phase:"CIRCUIT",round:r}));return s;}
+const SEQ=buildSeq();let tIdx=0,tLeft=SEQ[0].duration,tElapsed=0,tState="idle",ticker=null,audioCtx=null,frVoice=null,wakeLock=null,tickStart=0,tickLastSec=-1;
+function getACtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function beep(freq=1100,dur=0.18,vol=1.0){try{const ctx=getACtx(),o=ctx.createOscillator(),g=ctx.createGain(),c=ctx.createDynamicsCompressor();c.threshold.value=-6;c.knee.value=0;c.ratio.value=20;c.attack.value=0;c.release.value=0.1;o.connect(g);g.connect(c);c.connect(ctx.destination);o.frequency.value=freq;g.gain.setValueAtTime(vol,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);o.start();o.stop(ctx.currentTime+dur);}catch{}}
+speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('fr'))||null;};
+function speak(txt){try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=0.95;u.pitch=1.05;u.volume=1;if(frVoice)u.voice=frVoice;speechSynthesis.speak(u);}catch{}}
+const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
+const tCol=()=>SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)';
+function tRender(){const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=1+(cur.round?(cur.round-1):0)*CIRCUIT.length;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${i<CIRCUIT.length-1?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
+function tRenderControls(){const ctrl=document.getElementById('t-controls'),col=tCol();const fs=`<button onclick="toggleFS()" style="padding:15px 13px;font-size:17px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer">⛶</button>`;const bs=`font-family:'Courier New',monospace;font-weight:700;letter-spacing:2px;text-transform:uppercase;border-radius:50px;cursor:pointer;border:none;transition:opacity .2s`;if(tState==='idle'){ctrl.innerHTML=`<button onclick="tStartCountdown()" style="${bs};flex:1;background:${col};color:#111111;padding:16px;font-size:16px">DÉMARRER</button>${fs}`;}else if(tState==='running'||tState==='countdown'){ctrl.innerHTML<`<button onclick="tPause()" style="${bs};flex:1;background:rgba(255,255,255,.10);color:var(--text);border:1px solid rgba(255,255,255,.20)!important;padding:16px;font-size:15px">PAUSE</button><button onclick="tReset()" style="padding:15px 17px;font-size:18px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer">↺</button>${fs}`;}else if(tState==='paused'){ctrl.innerHTML=`<button onclick="tResume()" style="${bs};flex:1;background:${col};color:#111111;padding:16px;font-size:16px">REPRENDRE</button><button onclick="tReset()" style="padding:15px 17px;font-size:18px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer">↺</button>${fs}`;}}
+const SILENT_WAV='data:audio/wav;base64,UklGRmQfAABXQVZFZm10IBAAAAABAAEAoA8AAEAfAAACABAAZGF0YUAfAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
+function startSilentAudio(){
+  try{
+    var a=document.getElementById('wa');
+    if(!a.src||a.paused){a.src=SILENT_WAV;a.volume=0.01;a.play().catch(()=>{});}
+  }catch(e){}
+}
+function stopSilentAudio(){
+  try{var a=document.getElementById('wa');a.pause();a.src='';}catch(e){}
+}
+async function tStartCountdown(){getACtx();try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}startSilentAudio();tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';beep(990,.25,1.0);speak(SEQ[0].spoken);tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
+function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
+function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===4)beep(750,.12,1.0);if(tLeft===6){beep(750,.12,1.0);const n=SEQ[tIdx+1];if(n)setTimeout(()=>speak('Prochainement : '+n.name),100);}if(tLeft===2)beep(750,.12,1.0);if(tLeft===1)beep(990,.18,1.0);if(tLeft<=0){tGoNext();return;}tRender();}
+function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout(true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(SEQ[tIdx].spoken),150);tRender();tStartTicker();}
+function tPause(){tState='paused';clearInterval(ticker);tRenderControls();}
+function tResume(){tState='running';tStartTicker();tRenderControls();}
+function tReset(){clearInterval(ticker);speechSynthesis.cancel();stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ[0].duration;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
+function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
+document.addEventListener('visibilitychange',async()=>{if(wakeLock!==null&&document.visibilityState==='visible'&&tState==='running'){try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}});
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();}
+init();
+</script>
+</body>
+</html>
