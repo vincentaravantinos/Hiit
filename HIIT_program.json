@@ -6,7 +6,7 @@
     "duration": 120
   },
   "rounds": 4,
-  "skip_last_rest": false,
+  "skip_last_rest": true,
   "exercises": [
     {
       "name": "Bike Sprint",
