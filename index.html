@@ -242,10 +242,60 @@ async function requestNotifPermission(){if(!('Notification'in window)){showToast
 function updateNotifBtn(p){const b=document.getElementById('notif-perm-btn');b.textContent=p==='granted'?'✓ Notifications activées':'Activer les notifications';b.classList.toggle('granted',p==='granted');}
 function scheduleReminder(){clearTimeout(reminderTO);if(!reminderOn||!('Notification'in window)||Notification.permission!=='granted')return;const now=new Date(),[h,m]=reminderTime.split(':').map(Number);const target=new Date(now);target.setHours(h,m,0,0);if(target<=now)target.setDate(target.getDate()+1);reminderTO=setTimeout(()=>{if(!hasTrainedToday())new Notification('HIIT Tracker',{body:"Tu n'as pas encore fait ta séance ! 💪"});scheduleReminder();},target-now);}
 let toastTO;function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastTO);toastTO=setTimeout(()=>t.classList.remove('show'),2200);}
-const CIRCUIT=[{name:"Bike Sprint",spoken:"Sprint vélo !",duration:36,type:"work"},{name:"Tirage horizontal",spoken:"Tirage horizontal !",duration:36,type:"work"},{name:"Squats",spoken:"Squats !",duration:36,type:"work"},{name:"Pull ups",spoken:"Tractions !",duration:30,type:"work"},{name:"Mountain Climbers",spoken:"Mountain climbers !",duration:35,type:"work"},{name:"Repos",spoken:"Repos, récupérez.",duration:30,type:"rest"}];
-const ROUNDS=4,TOTAL_DUR=120+CIRCUIT.reduce((a,e)=>a+e.duration,0)*ROUNDS-CIRCUIT[CIRCUIT.length-1].duration,CIRCUM=2*Math.PI*105;
-function buildSeq(){const s=[{name:"Vélo warm up",spoken:"Échauffement vélo, partez !",duration:120,type:"work",phase:"WARMUP",round:null}];for(let r=1;r<=ROUNDS;r++){const exos=r<ROUNDS?CIRCUIT:CIRCUIT.slice(0,-1);exos.forEach(ex=>s.push({...ex,phase:"CIRCUIT",round:r}));}return s;}
-const SEQ=buildSeq();let tIdx=0,tLeft=SEQ[0].duration,tElapsed=0,tState="idle",ticker=null,audioCtx=null,frVoice=null,wakeLock=null,tickStart=0,tickLastSec=-1;
+// ── Programme chargé depuis HIIT_program.json (même repo GitHub) ──
+const PROGRAM_URL='HIIT_program.json';
+const FALLBACK_PROGRAM={
+  warmup:{enabled:true,name:"Vélo warm up",spoken:"Échauffement vélo, partez !",duration:120},
+  rounds:4,
+  skip_last_rest:false,
+  exercises:[
+    {name:"Bike Sprint",spoken:"Sprint vélo !",duration:36,type:"work"},
+    {name:"Tirage horizontal",spoken:"Tirage horizontal !",duration:36,type:"work"},
+    {name:"Squats",spoken:"Squats !",duration:36,type:"work"},
+    {name:"Pull ups",spoken:"Tractions !",duration:30,type:"work"},
+    {name:"Mountain Climbers",spoken:"Mountain climbers !",duration:35,type:"work"},
+    {name:"Repos",spoken:"Repos, récupérez.",duration:30,type:"rest"}
+  ]
+};
+let CIRCUIT=[],ROUNDS=4,TOTAL_DUR=0,SKIP_LAST_REST=false;
+const CIRCUM=2*Math.PI*105;
+let SEQ=[];
+function applyProgram(prog){
+  CIRCUIT=prog.exercises;
+  ROUNDS=prog.rounds||4;
+  SKIP_LAST_REST=prog.skip_last_rest||false;
+  const wuDur=(prog.warmup&&prog.warmup.enabled)?prog.warmup.duration:0;
+  let circDur=CIRCUIT.reduce((a,e)=>a+e.duration,0)*ROUNDS;
+  if(SKIP_LAST_REST){const last=CIRCUIT[CIRCUIT.length-1];if(last&&last.type==='rest')circDur-=last.duration;}
+  TOTAL_DUR=wuDur+circDur;
+  SEQ=buildSeq(prog);
+}
+function buildSeq(prog){
+  const s=[];
+  if(prog.warmup&&prog.warmup.enabled){
+    s.push({name:prog.warmup.name,spoken:prog.warmup.spoken,duration:prog.warmup.duration,type:"work",phase:"WARMUP",round:null});
+  }
+  for(let r=1;r<=ROUNDS;r++){
+    const isLast=r===ROUNDS;
+    CIRCUIT.forEach((ex,i)=>{
+      const isLastEx=i===CIRCUIT.length-1;
+      if(SKIP_LAST_REST&&isLast&&isLastEx&&ex.type==='rest')return;
+      s.push({...ex,phase:"CIRCUIT",round:r});
+    });
+  }
+  return s;
+}
+async function loadProgram(){
+  try{
+    const r=await fetch(PROGRAM_URL+'?v='+Date.now());
+    if(!r.ok)throw new Error('HTTP '+r.status);
+    const prog=await r.json();
+    applyProgram(prog);
+  }catch(e){
+    console.warn('HIIT_program.json non chargé, fallback:',e);
+    applyProgram(FALLBACK_PROGRAM);
+  }
+}let tIdx=0,tLeft=SEQ[0].duration,tElapsed=0,tState="idle",ticker=null,audioCtx=null,frVoice=null,wakeLock=null,tickStart=0,tickLastSec=-1;
 function getACtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
 function beep(freq=1100,dur=0.18,vol=1.0){try{const ctx=getACtx(),o=ctx.createOscillator(),g=ctx.createGain(),c=ctx.createDynamicsCompressor();c.threshold.value=-6;c.knee.value=0;c.ratio.value=20;c.attack.value=0;c.release.value=0.1;o.connect(g);g.connect(c);c.connect(ctx.destination);o.frequency.value=freq;g.gain.setValueAtTime(vol,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);o.start();o.stop(ctx.currentTime+dur);}catch{}}
 speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('fr'))||null;};
@@ -274,7 +324,7 @@ function tReset(){clearInterval(ticker);speechSynthesis.cancel();stopSilentAudio
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',async()=>{if(wakeLock!==null&&document.visibilityState==='visible'&&tState==='running'){try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}});
 function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();}
-init();
+loadProgram().then(init);
 </script>
 </body>
 </html>
