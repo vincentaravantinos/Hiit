@@ -352,7 +352,20 @@ function tReset(){clearInterval(ticker);speechSynthesis.cancel();stopSilentAudio
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',async()=>{if(wakeLock!==null&&document.visibilityState==='visible'&&tState==='running'){try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}});
 function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();}
-loadProgram().then(init);
+
+var _dbg=document.createElement('div');
+_dbg.style='position:fixed;bottom:0;left:0;right:0;background:#111;color:#0f0;font-size:11px;padding:6px;z-index:99999;max-height:40vh;overflow:auto;font-family:monospace';
+document.body.appendChild(_dbg);
+function _log(msg){_dbg.textContent+=msg+'\n';_dbg.scrollTop=_dbg.scrollHeight;}
+window.onerror=function(msg,src,line){_log('ERR:'+msg+' L'+line);return false;};
+window.addEventListener('unhandledrejection',function(e){_log('PROMISE ERR:'+(e.reason&&e.reason.stack||e.reason));});
+_log('v7 boot start');
+_log('SEQ:'+SEQ.length+' tIdx:'+tIdx+' tState:'+tState);
+loadProgram().then(function(){
+  _log('program loaded, SEQ:'+SEQ.length);
+  try{init();_log('init OK');}catch(e){_log('init ERR:'+e.message);}
+}).catch(function(e){_log('loadProgram ERR:'+e.message);try{init();}catch(e2){_log('init ERR2:'+e2.message);}});
+
 </script>
 </body>
 </html>
