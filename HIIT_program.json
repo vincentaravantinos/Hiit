@@ -15,20 +15,20 @@
       "type": "work"
     },
     {
-      "name": "Ring Rows",
-      "spoken": "Ring rows !",
+      "name": "Rameur",
+      "spoken": "Rameur, rythme rapide !",
       "duration": 36,
       "type": "work"
     },
     {
-      "name": "Squats",
-      "spoken": "Squats !",
+      "name": "Leg Extension",
+      "spoken": "Leg extension !",
       "duration": 36,
       "type": "work"
     },
     {
-      "name": "Pull ups",
-      "spoken": "Tractions !",
+      "name": "Tirage vertical",
+      "spoken": "Tirage vertical !",
       "duration": 30,
       "type": "work"
     },
