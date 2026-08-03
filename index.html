@@ -17,6 +17,8 @@
   --accent-dim: #8fbb9f20;
   --green: #7aab83;
   --green-dim: #7aab8328;
+  --recup: #7a9bc4;
+  --recup-dim: #7a9bc428;
   --gold: #d4b87a;
   --red: #c47878;
   --bg: #111111;
@@ -74,6 +76,7 @@ body {
 .day-dot.clickable:active { transform: scale(.88); }
 .day-dot.today-ring { border-color: var(--accent); }
 .day-dot.done { background: var(--green-dim); border-color: var(--green); color: var(--green); }
+.day-dot.done-recup { background: var(--recup-dim); border-color: var(--recup); color: var(--recup); }
 .day-dot.missed { opacity: .22; }
 .day-dot.future { opacity: .15; border-style: dashed; }
 .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
@@ -85,11 +88,15 @@ body {
   width: 100%; padding: 17px; border: none; border-radius: 12px;
   font-family: var(--font); font-size: 15px; font-weight: 900;
   letter-spacing: 3px; cursor: pointer; transition: all .2s;
-  text-transform: uppercase; margin-bottom: 22px;
+  text-transform: uppercase;
 }
 .log-btn.active { background: var(--green); color: var(--bg); }
 .log-btn.active:active { transform: scale(.98); }
+.log-btn.recup-active { background: var(--recup); color: var(--bg); }
+.log-btn.recup-active:active { transform: scale(.98); }
 .log-btn.done-today { background: transparent; color: var(--green); border: 1.5px solid rgba(122,171,131,.45); cursor: default; opacity: .8; }
+.log-btn.done-today.recup-done { color: var(--recup); border-color: rgba(122,155,196,.45); }
+.log-btn-row { display: flex; flex-direction: column; gap: 8px; margin-bottom: 22px; }
 .streaks-title { font-size: 14px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 12px; font-weight: 700; }
 .streak-row { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 13px 16px; margin-bottom: 8px; }
 .streak-rank { font-size: 16px; color: var(--text); width: 22px; flex-shrink: 0; }
@@ -140,7 +147,10 @@ body {
       <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak actuel</div></div>
       <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total séances</div></div>
     </div>
-    <button class="log-btn active" id="log-btn" onclick="logWorkout()">✓ Séance effectuée !</button>
+    <div class="log-btn-row">
+      <button class="log-btn active" id="log-btn-intense" onclick="logWorkout('I')">✓ HIIT / Rugby</button>
+      <button class="log-btn recup-active" id="log-btn-recup" onclick="logWorkout('R')">✓ Récup (vélo / natation)</button>
+    </div>
     <div class="streaks-title">Top 3 streaks</div>
     <div id="top-streaks"></div>
   </div>
@@ -201,35 +211,75 @@ body {
 const KEYS={workouts:'hiit_workouts_v1',goal:'hiit_goal_v1',reminderOn:'hiit_reminderOn_v1',reminderTime:'hiit_reminderTime_v1'};
 const S={get:(k,d)=>{try{const v=localStorage.getItem(k);return v!==null?JSON.parse(v):d;}catch{return d;}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}}};
 let workouts=S.get(KEYS.workouts,[]),goal=S.get(KEYS.goal,5),reminderOn=S.get(KEYS.reminderOn,false),reminderTime=S.get(KEYS.reminderTime,'19:00'),reminderTO=null;
+// Migration: old format was a plain array of date strings (all sessions treated as "Intense").
+if(workouts.length&&typeof workouts[0]==='string'){workouts=workouts.map(d=>({date:d,type:'I'}));S.set(KEYS.workouts,workouts);}
+const MAX_RECUP_RUN=3; // le streak casse si on enchaîne 3 jours sans la moindre séance Intense
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
-const hasTrainedToday=()=>workouts.includes(todayStr());
 const ds=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-function logWorkout(silent=false){const t=todayStr();if(workouts.includes(t))return;workouts.unshift(t);S.set(KEYS.workouts,workouts);if(!silent)showToast('Séance enregistrée ✓');renderDashboard();}
-function toggleDay(dstr){if(workouts.includes(dstr)){workouts=workouts.filter(d=>d!==dstr);showToast('Séance retirée');}else{workouts.push(dstr);workouts.sort((a,b)=>b.localeCompare(a));showToast('Séance ajoutée ✓');}S.set(KEYS.workouts,workouts);renderDashboard();}
-function getCurrentStreak(){let n=0,d=new Date();if(!workouts.includes(ds(d)))d.setDate(d.getDate()-1);while(workouts.includes(ds(d))){n++;d.setDate(d.getDate()-1);}return n;}
-function getAllStreaks(){if(workouts.length===0)return[];const sorted=[...workouts].sort();const streaks=[];let len=1;for(let i=1;i<sorted.length;i++){const diff=Math.round((new Date(sorted[i])-new Date(sorted[i-1]))/86400000);if(diff===1){len++;}else{streaks.push(len);len=1;}}streaks.push(len);return streaks.sort((a,b)=>b-a);}
+const getEntry=dstr=>workouts.find(w=>w.date===dstr);
+const hasEntry=dstr=>!!getEntry(dstr);
+const hasTrainedToday=()=>hasEntry(todayStr());
+function logWorkout(type,silent=false){const t=todayStr();if(hasEntry(t))return;workouts.unshift({date:t,type});S.set(KEYS.workouts,workouts);if(!silent)showToast(type==='I'?'Séance Intense enregistrée ✓':'Séance Récup enregistrée ✓');renderDashboard();}
+function toggleDay(dstr){const cur=getEntry(dstr);if(!cur){workouts.push({date:dstr,type:'I'});showToast('Intense ajouté ✓');}else if(cur.type==='I'){cur.type='R';showToast('Passé en Récup');}else{workouts=workouts.filter(w=>w.date!==dstr);showToast('Séance retirée');}workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);renderDashboard();}
+// Parcourt une séquence de jours triée (ancien -> récent) et calcule les longueurs de streak,
+// en respectant la règle : le streak casse sur un jour non-entraîné OU sur 3 jours consécutifs sans Intense.
+function computeStreakRuns(sortedDates){
+  const runs=[];let len=0,recupRun=0,prevDate=null;
+  for(const dstr of sortedDates){
+    const isConsecutive=prevDate&&Math.round((new Date(dstr)-new Date(prevDate))/86400000)===1;
+    if(!isConsecutive&&prevDate!==null){if(len>0)runs.push(len);len=0;recupRun=0;}
+    const type=getEntry(dstr).type;
+    if(type==='I'){recupRun=0;len++;}
+    else{recupRun++;if(recupRun>=MAX_RECUP_RUN){if(len>0)runs.push(len);len=0;recupRun=0;}else{len++;}}
+    prevDate=dstr;
+  }
+  if(len>0)runs.push(len);
+  return runs;
+}
+function getCurrentStreak(){
+  if(workouts.length===0)return 0;
+  const sorted=[...workouts].map(w=>w.date).sort();
+  const lastDate=sorted[sorted.length-1];
+  const today=todayStr(),yesterday=ds(new Date(Date.now()-86400000));
+  if(lastDate!==today&&lastDate!==yesterday)return 0; // streak déjà perdue (jour manqué)
+  let len=0,recupRun=0,prevDate=null;
+  for(const dstr of sorted){
+    const isConsecutive=prevDate&&Math.round((new Date(dstr)-new Date(prevDate))/86400000)===1;
+    if(prevDate!==null&&!isConsecutive){len=0;recupRun=0;}
+    const type=getEntry(dstr).type;
+    if(type==='I'){recupRun=0;len++;}
+    else{recupRun++;if(recupRun>=MAX_RECUP_RUN){len=0;recupRun=0;}else{len++;}}
+    prevDate=dstr;
+  }
+  return len;
+}
+function getAllStreaks(){if(workouts.length===0)return[];const sorted=[...workouts].map(w=>w.date).sort();return computeStreakRuns(sorted).sort((a,b)=>b-a);}
 function getWeekDates(){const now=new Date(),day=now.getDay();const mon=new Date(now);mon.setDate(now.getDate()-(day===0?6:day-1));mon.setHours(0,0,0,0);return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});}
 const DAYS=['L','M','M','J','V','S','D'],MEDALS=['🥇','🥈','🥉'];
 function renderDashboard(){
   const today=todayStr(),now=new Date(),weekDates=getWeekDates();
-  const weekDone=weekDates.filter(d=>workouts.includes(ds(d))).length;
+  const weekDone=weekDates.filter(d=>hasEntry(ds(d))).length;
   document.getElementById('week-score').textContent=`${weekDone} / ${goal}`;
   const grid=document.getElementById('week-grid');grid.innerHTML='';
   weekDates.forEach((d,i)=>{
     const dstr=ds(d),isToday=dstr===today,isFuture=d>now&&!isToday,isPast=!isToday&&!isFuture;
-    const isDone=workouts.includes(dstr),isMissed=isPast&&!isDone,isClickable=!isFuture;
+    const entry=getEntry(dstr),isDone=!!entry,isMissed=isPast&&!isDone,isClickable=!isFuture;
     const cell=document.createElement('div');cell.className='day-cell';
     const dot=document.createElement('div');
-    let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=' done';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
+    let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=entry.type==='I'?' done':' done-recup';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
     dot.className=cls;dot.textContent=isDone?'✓':'';
-    if(isClickable){dot.onclick=()=>toggleDay(dstr);dot.title=isDone?'Retirer la séance':'Ajouter une séance';}
+    if(isClickable){dot.onclick=()=>toggleDay(dstr);dot.title=!isDone?'Ajouter Intense':entry.type==='I'?'Passer en Récup':'Retirer la séance';}
     const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
     cell.append(dot,lbl);grid.appendChild(cell);
   });
   const streak=getCurrentStreak();
   document.getElementById('streak-count').textContent=streak;document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
-  const btn=document.getElementById('log-btn');
-  if(hasTrainedToday()){btn.className='log-btn done-today';btn.textContent="✓ Déjà entraîné aujourd'hui";}else{btn.className='log-btn active';btn.textContent='✓ Séance effectuée !';}
+  const todayEntry=getEntry(today);
+  const btnI=document.getElementById('log-btn-intense'),btnR=document.getElementById('log-btn-recup');
+  if(todayEntry){
+    if(todayEntry.type==='I'){btnI.className='log-btn done-today';btnI.textContent="✓ Intense enregistré";btnR.className='log-btn done-today';btnR.textContent='Récup (déjà loggé)';}
+    else{btnI.className='log-btn done-today';btnI.textContent='Intense (déjà loggé)';btnR.className='log-btn done-today recup-done';btnR.textContent='✓ Récup enregistrée';}
+  }else{btnI.className='log-btn active';btnI.textContent='✓ HIIT / Rugby';btnR.className='log-btn recup-active';btnR.textContent='✓ Récup (vélo / natation)';}
   const top3=getAllStreaks().slice(0,3),maxVal=top3[0]||1,container=document.getElementById('top-streaks');
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
   container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
@@ -350,7 +400,7 @@ function duckHold(ms){
 async function tStartCountdown(){getACtx();try{wakeLock=await navigator.wakeLock.request('screen');}catch(e){}tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';beep(990,.25,1.0);speak(SEQ[0].spoken);tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
 function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
 function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===4)beep(750,.12,1.0,2300);if(tLeft===6){beep(750,.12,1.0,2300);const n=SEQ[tIdx+1];if(n)setTimeout(()=>speak('Prochainement : '+n.name),100);}if(tLeft===2)beep(750,.12,1.0,1300);if(tLeft===1)beep(990,.18,1.0);if(tLeft<=0){tGoNext();return;}tRender();}
-function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout(true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(SEQ[tIdx].spoken),150);tRender();tStartTicker();}
+function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(SEQ[tIdx].spoken),150);tRender();tStartTicker();}
 function tPause(){tState='paused';clearInterval(ticker);tRenderControls();}
 function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
