@@ -60,7 +60,11 @@ body {
 .tab-content { flex: 1; overflow-y: auto; overflow-x: hidden; }
 .tab-panel { display: none; padding: 20px; padding-bottom: 40px; }
 .tab-panel.active { display: block; }
-.row-between { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+.row-between { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+.week-nav { display: flex; align-items: center; gap: 8px; }
+.week-nav-btn { background: none; border: none; color: var(--muted); font-size: 20px; font-weight: 900; cursor: pointer; padding: 0 4px; line-height: 1; font-family: var(--font); }
+.week-nav-btn:active { color: var(--accent); }
+.week-nav-btn:disabled { opacity: .25; cursor: default; }
 .section-title { font-size: 14px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; font-weight: 700; }
 .week-score { font-size: 22px; font-weight: 900; color: var(--accent); }
 .week-grid { display: grid; grid-template-columns: repeat(7,1fr); gap: 5px; margin-bottom: 22px; }
@@ -141,7 +145,14 @@ body {
 </div>
 <div class="tab-content">
   <div id="tab-dashboard" class="tab-panel active">
-    <div class="row-between"><span class="section-title">Cette semaine</span><span class="week-score" id="week-score">0 / 5</span></div>
+    <div class="row-between">
+      <div class="week-nav">
+        <button class="week-nav-btn" id="week-prev" onclick="changeWeek(-1)">‹</button>
+        <span class="section-title" id="week-label">Cette semaine</span>
+        <button class="week-nav-btn" id="week-next" onclick="changeWeek(1)">›</button>
+      </div>
+      <span class="week-score" id="week-score">0 / 5</span>
+    </div>
     <div class="week-grid" id="week-grid"></div>
     <div class="stats-row">
       <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak actuel</div></div>
@@ -254,10 +265,15 @@ function getCurrentStreak(){
   return len;
 }
 function getAllStreaks(){if(workouts.length===0)return[];const sorted=[...workouts].map(w=>w.date).sort();return computeStreakRuns(sorted).sort((a,b)=>b-a);}
-function getWeekDates(){const now=new Date(),day=now.getDay();const mon=new Date(now);mon.setDate(now.getDate()-(day===0?6:day-1));mon.setHours(0,0,0,0);return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});}
+function getWeekDates(offset=0){const now=new Date(),day=now.getDay();const mon=new Date(now);mon.setDate(now.getDate()-(day===0?6:day-1)+offset*7);mon.setHours(0,0,0,0);return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});}
+let weekOffset=0;
+function changeWeek(delta){const next=weekOffset+delta;if(next>0)return;weekOffset=next;renderDashboard();}
+function weekLabel(offset){if(offset===0)return'Cette semaine';if(offset===-1)return'Semaine dernière';return`Il y a ${-offset} semaines`;}
 const DAYS=['L','M','M','J','V','S','D'],MEDALS=['🥇','🥈','🥉'];
 function renderDashboard(){
-  const today=todayStr(),now=new Date(),weekDates=getWeekDates();
+  const today=todayStr(),now=new Date(),weekDates=getWeekDates(weekOffset);
+  document.getElementById('week-label').textContent=weekLabel(weekOffset);
+  document.getElementById('week-next').disabled=weekOffset>=0;
   const weekDone=weekDates.filter(d=>hasEntry(ds(d))).length;
   document.getElementById('week-score').textContent=`${weekDone} / ${goal}`;
   const grid=document.getElementById('week-grid');grid.innerHTML='';
@@ -277,8 +293,8 @@ function renderDashboard(){
   const todayEntry=getEntry(today);
   const btnI=document.getElementById('log-btn-intense'),btnR=document.getElementById('log-btn-recup');
   if(todayEntry){
-    if(todayEntry.type==='I'){btnI.className='log-btn done-today';btnI.textContent="✓ Intense enregistré";btnR.className='log-btn done-today';btnR.textContent='Récup (déjà loggé)';}
-    else{btnI.className='log-btn done-today';btnI.textContent='Intense (déjà loggé)';btnR.className='log-btn done-today recup-done';btnR.textContent='✓ Récup enregistrée';}
+    if(todayEntry.type==='I'){btnI.className='log-btn done-today';btnI.textContent="✓ Intense enregistré";btnR.className='log-btn done-today';btnR.textContent='Indisponible (Intense déjà loggé)';}
+    else{btnI.className='log-btn done-today';btnI.textContent='Indisponible (Récup déjà loggée)';btnR.className='log-btn done-today recup-done';btnR.textContent='✓ Récup enregistrée';}
   }else{btnI.className='log-btn active';btnI.textContent='✓ HIIT / Rugby';btnR.className='log-btn recup-active';btnR.textContent='✓ Récup (vélo / natation)';}
   const top3=getAllStreaks().slice(0,3),maxVal=top3[0]||1,container=document.getElementById('top-streaks');
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
