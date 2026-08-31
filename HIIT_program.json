@@ -1,16 +1,16 @@
 {
   "warmup": {
     "enabled": true,
-    "name": "Jogging warm up",
-    "spoken": "Échauffement jogging, partez !",
+    "name": "Vélo warm up",
+    "spoken": "Échauffement vélo, partez !",
     "duration": 120
   },
   "rounds": 4,
   "skip_last_rest": true,
   "exercises": [
     {
-      "name": "Burpees",
-      "spoken": "Burpees !",
+      "name": "Bike Sprint",
+      "spoken": "Sprint vélo !",
       "duration": 36,
       "type": "work"
     },
