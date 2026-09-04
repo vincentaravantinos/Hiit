@@ -364,7 +364,7 @@ async function loadProgram(){
     applyProgram(FALLBACK_PROGRAM);
   }
 }let tIdx=0,tLeft=0,tElapsed=0,tState="idle",ticker=null,audioCtx=null,frVoice=null,wakeLock=null,tickStart=0,tickLastSec=-1,duckTimeout=null,duckReleaseAt=0;
-function getACtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();return audioCtx;}
+function getACtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});return audioCtx;}
 function beep(freq=1100,dur=0.18,vol=1.0,holdMs=null){duckStart();try{const ctx=getACtx(),o=ctx.createOscillator(),g=ctx.createGain(),c=ctx.createDynamicsCompressor();c.threshold.value=-6;c.knee.value=0;c.ratio.value=20;c.attack.value=0;c.release.value=0.1;o.connect(g);g.connect(c);c.connect(ctx.destination);o.frequency.value=freq;g.gain.setValueAtTime(vol,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);o.start();o.stop(ctx.currentTime+dur);}catch{}duckHold(holdMs!==null?holdMs:dur*1000+250);}
 speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('fr'))||null;};
 function speak(txt){duckStart();try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=0.95;u.pitch=1.05;u.volume=1;if(frVoice)u.voice=frVoice;u.onend=()=>duckHold(300);u.onerror=()=>duckHold(300);speechSynthesis.speak(u);}catch{duckHold(300);}}
