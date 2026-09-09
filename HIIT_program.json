@@ -1,29 +1,35 @@
 {
   "warmup": {
     "enabled": true,
-    "name": "Vélo warm up",
-    "spoken": "Échauffement vélo, partez !",
+    "name": "Vélo elliptique warm up",
+    "spoken": "Échauffement vélo elliptique, partez !",
     "duration": 120
   },
   "rounds": 4,
   "skip_last_rest": true,
   "exercises": [
     {
-      "name": "Bike Sprint",
-      "spoken": "Sprint vélo !",
-      "duration": 36,
+      "name": "Vélo elliptique Sprint",
+      "spoken": "Sprint vélo elliptique !",
+      "duration": 30,
       "type": "work"
     },
     {
-      "name": "Ring Rows",
-      "spoken": "Ring rows !",
-      "duration": 36,
+      "name": "Rowing élastique",
+      "spoken": "Rowing élastique !",
+      "duration": 30,
       "type": "work"
     },
     {
-      "name": "Squats",
-      "spoken": "Squats !",
-      "duration": 36,
+      "name": "Pompes déclinées",
+      "spoken": "Pompes déclinées !",
+      "duration": 30,
+      "type": "work"
+    },
+    {
+      "name": "Squats élastique",
+      "spoken": "Squats élastique !",
+      "duration": 30,
       "type": "work"
     },
     {
@@ -33,15 +39,15 @@
       "type": "work"
     },
     {
-      "name": "Mountain Climbers",
-      "spoken": "Mountain climbers !",
-      "duration": 35,
+      "name": "Levée de jambes suspendu",
+      "spoken": "Levée de jambes !",
+      "duration": 30,
       "type": "work"
     },
     {
       "name": "Repos",
       "spoken": "Repos, récupérez.",
-      "duration": 30,
+      "duration": 20,
       "type": "rest"
     }
   ]
