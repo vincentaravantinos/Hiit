@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polar — Comptage en direct</title>
+<style>
+  body { background:#111; color:#eee; font-family: -apple-system, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:18px; margin-bottom:4px;}
+  button { display:block; width:100%; padding:14px; margin:6px 0; font-size:16px; border:none; border-radius:8px; background:#2d6cdf; color:white; font-weight:bold; }
+  button:disabled { background:#444; color:#888; }
+  button.secondary { background:#333; font-weight:normal; font-size:13px; padding:8px;}
+  button.active-toggle { background:#f39c12; color:#111; }
+  button.recording { background:#c0392b; }
+  #posToggle { display:flex; gap:8px; margin:8px 0; }
+  #posToggle button { margin:0; }
+  #exerciseGrid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin:8px 0; }
+  #exerciseGrid button { margin:0; font-size:14px; padding:16px 8px; }
+  #hr { font-size:18px; text-align:center; color:#e74c3c; margin-bottom:4px; }
+  #liveCount { font-size:72px; text-align:center; font-weight:bold; color:#2ecc71; margin:10px 0; }
+  #liveLabel { text-align:center; font-size:16px; color:#f39c12; min-height:20px;}
+  canvas { width:100%; height:90px; background:#000; border-radius:6px; margin:8px 0; }
+  #repPanel { display:none; background:#1a1a2e; padding:14px; border-radius:8px; margin:10px 0; }
+  #repPanel input { width:100%; font-size:24px; text-align:center; padding:10px; border-radius:6px; border:none; }
+  #log { background:#000; color:#0f0; font-family:monospace; font-size:10px; padding:6px; height:110px; overflow-y:auto; white-space:pre-wrap; border-radius:6px; margin-top:8px; }
+  #history { font-size:12px; margin-top:8px; }
+  #history div { padding:3px 0; border-bottom:1px solid #333; }
+  .match { color:#2ecc71; } .off { color:#e74c3c; }
+</style>
+</head>
+<body>
+<h1>Comptage en direct — Polar Verity Sense</h1>
+<button id="btnConnect">Connecter</button>
+<div id="hr">HR: –</div>
+
+<div id="posToggle">
+  <button id="posAvantBras" class="active-toggle">Avant-bras</button>
+  <button id="posBiceps">Biceps</button>
+</div>
+
+<div id="exerciseGrid"></div>
+
+<div id="liveLabel"></div>
+<div id="liveCount">–</div>
+<canvas id="chart" width="600" height="90"></canvas>
+
+<div id="repPanel">
+  <div style="text-align:center; margin-bottom:8px;">Combien de reps/cycles avez-vous vraiment faits ? (le modèle a compté <span id="liveGuess">–</span>)</div>
+  <input id="repInput" type="number" inputmode="numeric">
+  <button id="btnSubmitReps">Valider et sauvegarder</button>
+  <button id="btnCancelSession" class="secondary">Annuler cette session (ne pas garder)</button>
+</div>
+
+<button id="btnDownloadAll" class="secondary" disabled>Télécharger tout (JSON combiné)</button>
+<div id="history"></div>
+<div class="log-label">Log :</div>
+<div id="log"></div>
+
+<script>
+const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_CONTROL = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+const HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
+const HR_CHAR = '00002a37-0000-1000-8000-00805f9b34fb';
+const FS_NOMINAL = 52.0;
+
+const EXERCISES = ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)'];
+let currentPosition = 'Avant-bras';
+let currentExercise = null;
+let isRecording = false;
+
+let runningSampleCount = 0;
+let recordStartSampleCount = 0;
+let currentAcc = [];
+let currentHr = [];
+let latestHr = null;
+const recordings = [];
+
+let device, server, controlChar, dataChar, hrChar;
+const logEl = document.getElementById('log');
+const hrEl = document.getElementById('hr');
+const liveCountEl = document.getElementById('liveCount');
+const liveLabelEl = document.getElementById('liveLabel');
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+let historyChart = [];
+
+function log(msg) {
+  const t = new Date().toISOString().substr(11,8);
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function speakNumber(n) {
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(String(n));
+    u.lang = 'fr-FR';
+    u.rate = 1.3;
+    speechSynthesis.speak(u);
+  } catch (e) { log('TTS erreur: ' + e); }
+}
+
+function drawChart() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = '#2ecc71';
+  ctx.beginPath();
+  const max = Math.max(...historyChart, 100);
+  historyChart.forEach((v, i) => {
+    const x = (i / 300) * canvas.width;
+    const y = canvas.height - (v / max) * canvas.height;
+    if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+}
+
+// ---- Position toggle ----
+document.getElementById('posAvantBras').onclick = () => setPosition('Avant-bras');
+document.getElementById('posBiceps').onclick = () => setPosition('Biceps');
+function setPosition(p) {
+  currentPosition = p;
+  document.getElementById('posAvantBras').className = p === 'Avant-bras' ? 'active-toggle' : '';
+  document.getElementById('posBiceps').className = p === 'Biceps' ? 'active-toggle' : '';
+}
+
+// ---- Exercise grid ----
+const gridEl = document.getElementById('exerciseGrid');
+EXERCISES.forEach(ex => {
+  const btn = document.createElement('button');
+  btn.textContent = ex;
+  btn.disabled = true;
+  btn.onclick = () => toggleExercise(ex, btn);
+  gridEl.appendChild(btn);
+});
+
+function toggleExercise(ex, btn) {
+  if (isRecording && currentExercise === ex) {
+    stopSession();
+  } else if (!isRecording) {
+    startSession(ex, btn);
+  }
+}
+
+function setExerciseButtonsEnabled(enabled) {
+  Array.from(gridEl.children).forEach(b => { if (b.textContent !== currentExercise) b.disabled = !enabled; });
+}
+
+// ---- Live adaptive rep detector state ----
+let magBuf = [];       // recent raw magnitudes, for rolling baseline
+let envBuf = [];        // recent smoothed envelope values, for adaptive threshold
+let prevEnv1 = null, prevEnv2 = null;
+let lastPeakSampleIdx = null;
+let peakIntervals = [];
+let refractorySamples = Math.round(FS_NOMINAL * 1.5); // physiological floor, adapts once we see reps
+let liveRepCount = 0;
+
+function resetDetector() {
+  magBuf = []; envBuf = [];
+  prevEnv1 = null; prevEnv2 = null;
+  lastPeakSampleIdx = null; peakIntervals = [];
+  refractorySamples = Math.round(FS_NOMINAL * 1.5);
+  liveRepCount = 0;
+  liveCountEl.textContent = '0';
+}
+
+function startSession(ex, btn) {
+  currentExercise = ex;
+  currentAcc = []; currentHr = [];
+  recordStartSampleCount = runningSampleCount;
+  resetDetector();
+  isRecording = true;
+  btn.classList.add('recording');
+  btn.textContent = '⏹ ' + ex;
+  liveLabelEl.textContent = ex + ' — ' + currentPosition + ' (préparez-vous...)';
+  setExerciseButtonsEnabled(false);
+  document.getElementById('posAvantBras').disabled = true;
+  document.getElementById('posBiceps').disabled = true;
+  log('Session démarrée: ' + ex + ' / ' + currentPosition);
+  setTimeout(() => {
+    if (isRecording && currentExercise === ex) liveLabelEl.textContent = ex + ' — ' + currentPosition;
+  }, 2000);
+}
+
+function stopSession() {
+  isRecording = false;
+  Array.from(gridEl.children).forEach(b => {
+    b.disabled = false;
+    b.classList.remove('recording');
+    if (EXERCISES.includes(b.textContent.replace('⏹ ', ''))) b.textContent = b.textContent.replace('⏹ ', '');
+  });
+  document.getElementById('posAvantBras').disabled = false;
+  document.getElementById('posBiceps').disabled = false;
+  document.getElementById('liveGuess').textContent = liveRepCount;
+  document.getElementById('repInput').value = liveRepCount;
+  document.getElementById('repPanel').style.display = 'block';
+}
+
+document.getElementById('btnSubmitReps').onclick = () => {
+  const reps = parseInt(document.getElementById('repInput').value, 10);
+  if (isNaN(reps)) return;
+  const recording = {
+    exercise: currentExercise,
+    position: currentPosition,
+    startedAtIso: new Date().toISOString(),
+    liveDetectedReps: liveRepCount,
+    groundTruthReps: reps,
+    accSamples: currentAcc,
+    hrSamples: currentHr
+  };
+  recordings.push(recording);
+  const safeName = (currentExercise + '_' + currentPosition + '_' + Date.now()).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  downloadJSON(recording, safeName + '.json');
+  const cls = (liveRepCount === reps) ? 'match' : 'off';
+  const histEl = document.getElementById('history');
+  const line = document.createElement('div');
+  line.className = cls;
+  line.textContent = `${currentExercise} / ${currentPosition} — modèle: ${liveRepCount}, réel: ${reps}`;
+  histEl.insertBefore(line, histEl.firstChild);
+  document.getElementById('btnDownloadAll').disabled = false;
+  document.getElementById('repPanel').style.display = 'none';
+  currentExercise = null;
+  liveLabelEl.textContent = '';
+  liveCountEl.textContent = '–';
+};
+
+document.getElementById('btnCancelSession').onclick = () => {
+  document.getElementById('repPanel').style.display = 'none';
+  currentExercise = null;
+  liveLabelEl.textContent = '';
+  liveCountEl.textContent = '–';
+  log('Session annulée (non sauvegardée)');
+};
+
+document.getElementById('btnDownloadAll').onclick = () => {
+  downloadJSON(recordings, 'toutes_les_sessions_live.json');
+};
+
+// ---- Connect ----
+document.getElementById('btnConnect').onclick = async () => {
+  try {
+    log('Recherche de périphériques "Polar"...');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'Polar' }],
+      optionalServices: [PMD_SERVICE, HR_SERVICE]
+    });
+    log(`Sélectionné: ${device.name}`);
+    device.addEventListener('gattserverdisconnected', () => log('⚠️ Déconnecté'));
+    server = await device.gatt.connect();
+    log('GATT connecté.');
+
+    const pmdService = await server.getPrimaryService(PMD_SERVICE);
+    controlChar = await pmdService.getCharacteristic(PMD_CONTROL);
+    dataChar = await pmdService.getCharacteristic(PMD_DATA);
+    await controlChar.startNotifications();
+    controlChar.addEventListener('characteristicvaluechanged', (e) => {
+      log('CONTROL rx: ' + Array.from(new Uint8Array(e.target.value.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
+    });
+    await dataChar.startNotifications();
+    dataChar.addEventListener('characteristicvaluechanged', (e) => handleAccData(e.target.value));
+    log('PMD prêt.');
+
+    const cmd = new Uint8Array([0x02, 0x02, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 8, 0, 0x04, 0x01, 3]);
+    await controlChar.writeValue(cmd);
+    log('Flux ACC démarré.');
+
+    try {
+      const hrService = await server.getPrimaryService(HR_SERVICE);
+      hrChar = await hrService.getCharacteristic(HR_CHAR);
+      await hrChar.startNotifications();
+      hrChar.addEventListener('characteristicvaluechanged', (e) => handleHrData(e.target.value));
+      log('HR prêt.');
+    } catch (e) { log('HR indisponible: ' + e); }
+
+    document.getElementById('btnConnect').disabled = true;
+    Array.from(gridEl.children).forEach(b => b.disabled = false);
+  } catch (err) {
+    log('ERREUR connexion: ' + err);
+  }
+};
+
+function handleHrData(value) {
+  const flags = value.getUint8(0);
+  const is16bit = flags & 0x1;
+  const bpm = is16bit ? value.getUint16(1, true) : value.getUint8(1);
+  latestHr = bpm;
+  hrEl.textContent = 'HR: ' + bpm + ' bpm';
+  if (isRecording) currentHr.push({ t: (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000, bpm });
+}
+
+// ---- Verified PMD delta-frame decompression ----
+function bytesToBitArray(bytes) {
+  const bits = [];
+  for (const byte of bytes) { for (let i = 0; i < 8; i++) bits.push((byte >> i) & 1); }
+  return bits;
+}
+function parseDeltaFrame(data, channels, bitWidth) {
+  const bits = bytesToBitArray(data);
+  const samples = [];
+  let offset = 0;
+  while (offset + bitWidth * channels <= bits.length) {
+    const chSamples = [];
+    for (let c = 0; c < channels; c++) {
+      let value = 0;
+      for (let i = 0; i < bitWidth; i++) value |= bits[offset + i] << i;
+      offset += bitWidth;
+      if (bitWidth > 1 && (value & (1 << (bitWidth - 1)))) value |= (-1 << bitWidth);
+      chSamples.push(value);
+    }
+    samples.push(chSamples);
+  }
+  return samples;
+}
+function parseDeltaFramesAll(data, channels, resolution) {
+  if (data.length === 0) return [];
+  const resBytes = Math.ceil(resolution / 8);
+  let offset = 0;
+  const ref = [];
+  for (let c = 0; c < channels; c++) {
+    let v = 0;
+    for (let b = 0; b < resBytes; b++) v |= data[offset + b] << (8 * b);
+    const bits = resBytes * 8;
+    if (v & (1 << (bits - 1))) v |= (-1 << bits);
+    offset += resBytes;
+    ref.push(v);
+  }
+  const samples = [ref];
+  while (offset < data.length) {
+    if (offset + 2 > data.length) break;
+    const deltaSize = data[offset]; offset += 1;
+    const sampleCount = data[offset]; offset += 1;
+    const bitLength = sampleCount * deltaSize * channels;
+    const length = Math.ceil(bitLength / 8);
+    if (offset + length > data.length) break;
+    const chunk = data.slice(offset, offset + length);
+    const deltas = parseDeltaFrame(chunk, channels, deltaSize);
+    for (const delta of deltas) {
+      if (delta.length !== channels) continue;
+      const last = samples[samples.length - 1];
+      samples.push(last.map((v, i) => v + delta[i]));
+    }
+    offset += length;
+  }
+  return samples;
+}
+
+// ---- Live adaptive peak detection, sample by sample ----
+function processLiveSample(mag, counting) {
+  magBuf.push(mag);
+  if (magBuf.length > 30) magBuf.shift(); // ~0.5s rolling baseline window
+  const baseline = magBuf.reduce((a,b) => a+b, 0) / magBuf.length;
+  const dyn = mag - baseline;
+  const absDyn = Math.abs(dyn);
+
+  envBuf.push(absDyn);
+  if (envBuf.length > 35) envBuf.shift(); // smoothing window (~0.67s), tuned against captured dataset
+  const envSmoothed = envBuf.reduce((a,b) => a+b, 0) / envBuf.length;
+
+  // adaptive threshold from recent (~3s) envelope variability
+  thresholdBuf.push(envSmoothed);
+  if (thresholdBuf.length > Math.round(FS_NOMINAL*3)) thresholdBuf.shift();
+  const mean = thresholdBuf.reduce((a,b)=>a+b,0) / thresholdBuf.length;
+  const variance = thresholdBuf.reduce((a,b)=>a+(b-mean)*(b-mean),0) / thresholdBuf.length;
+  const std = Math.sqrt(variance);
+  const threshold = Math.max(15, std * 1.3);
+
+  const idx = runningSampleCount;
+  // local-max check with 1-sample lag
+  if (counting && prevEnv1 !== null && prevEnv2 !== null) {
+    const isLocalMax = prevEnv1 > prevEnv2 && prevEnv1 >= envSmoothed;
+    const enoughGap = lastPeakSampleIdx === null || (idx - 1 - lastPeakSampleIdx) >= refractorySamples;
+    if (isLocalMax && prevEnv1 > threshold && enoughGap) {
+      const peakIdx = idx - 1;
+      if (lastPeakSampleIdx !== null) {
+        peakIntervals.push(peakIdx - lastPeakSampleIdx);
+        if (peakIntervals.length > 5) peakIntervals.shift();
+        if (peakIntervals.length >= 2) {
+          const sorted = [...peakIntervals].sort((a,b)=>a-b);
+          const median = sorted[Math.floor(sorted.length/2)];
+          refractorySamples = Math.max(Math.round(FS_NOMINAL*0.55), Math.min(Math.round(FS_NOMINAL*3.0), Math.round(median*0.6)));
+        }
+      }
+      lastPeakSampleIdx = peakIdx;
+      liveRepCount += 1;
+      liveCountEl.textContent = liveRepCount;
+      speakNumber(liveRepCount);
+    }
+  }
+  prevEnv2 = prevEnv1;
+  prevEnv1 = envSmoothed;
+}
+let thresholdBuf = [];
+
+function handleAccData(value) {
+  if (value.byteLength <= 10 || value.getUint8(0) !== 0x02) return;
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  if (!(isCompressed && frameType === 1)) return;
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList;
+  try {
+    sampleList = parseDeltaFramesAll(content, 3, 16);
+  } catch (e) {
+    log('Erreur décodage: ' + e);
+    return;
+  }
+  if (sampleList.length === 0) return;
+
+  for (const [x, y, z] of sampleList) {
+    const mag = Math.sqrt(x*x + y*y + z*z);
+    historyChart.push(mag);
+    if (isRecording) {
+      const t = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000;
+      currentAcc.push({ t, x, y, z, mag: Math.round(mag) });
+      const elapsedS = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL;
+      processLiveSample(mag, elapsedS >= 2.0);
+    }
+    runningSampleCount += 1;
+  }
+  if (historyChart.length > 300) historyChart = historyChart.slice(-300);
+  drawChart();
+}
+</script>
+</body>
+</html>
