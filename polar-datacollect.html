@@ -272,6 +272,10 @@ function parseDeltaFramesAll(data, channels, resolution) {
   return samples;
 }
 
+const FS_NOMINAL = 52.0;
+let runningSampleCount = 0;
+let recordStartSampleCount = 0;
+
 function handleAccData(value) {
   if (value.byteLength <= 10 || value.getUint8(0) !== 0x02) return;
   const frameTypeByte = value.getUint8(9);
@@ -289,11 +293,14 @@ function handleAccData(value) {
   }
   if (sampleList.length === 0) return;
 
-  const now = performance.now();
   for (const [x, y, z] of sampleList) {
     const mag = Math.sqrt(x*x + y*y + z*z);
     history.push(mag);
-    if (isRecording) currentAcc.push({ t: now - recordStartTime, x, y, z, mag: Math.round(mag) });
+    if (isRecording) {
+      const t = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000;
+      currentAcc.push({ t, x, y, z, mag: Math.round(mag) });
+    }
+    runningSampleCount += 1;
   }
   if (history.length > 300) history = history.slice(-300);
   const [lx, ly, lz] = sampleList[sampleList.length - 1];
@@ -321,12 +328,32 @@ function beep(freq, durationMs, delayMs) {
 document.getElementById('btnStart').onclick = () => {
   if (configIndex >= PROTOCOL.length) return;
   const c = PROTOCOL[configIndex];
-  currentAcc = [];
-  currentHr = [];
-  recordStartTime = performance.now();
-  isRecording = true;
   document.getElementById('btnStart').disabled = true;
   document.getElementById('btnSkip').disabled = true;
+
+  // 3s "get ready" phase: BLE keeps streaming but nothing is buffered yet,
+  // so setup/positioning motion never enters the recorded window.
+  let prep = 3;
+  countdownEl.textContent = 'Préparez-vous: ' + prep;
+  beep(400, 120, 0);
+  const prepInterval = setInterval(() => {
+    prep -= 1;
+    if (prep > 0) {
+      countdownEl.textContent = 'Préparez-vous: ' + prep;
+      beep(400, 120, 0);
+    } else {
+      clearInterval(prepInterval);
+      startActualRecording(c);
+    }
+  }, 1000);
+};
+
+function startActualRecording(c) {
+  currentAcc = [];
+  currentHr = [];
+  recordStartSampleCount = runningSampleCount;
+  isRecording = true;
+  beep(800, 150, 0); // "go" tone
 
   let remaining = 15;
   countdownEl.textContent = remaining;
