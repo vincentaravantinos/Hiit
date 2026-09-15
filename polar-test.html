@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polar Verity Sense — Test connectivité</title>
+<style>
+  body { background:#111; color:#eee; font-family: -apple-system, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:18px; }
+  button { display:block; width:100%; padding:14px; margin:8px 0; font-size:16px; border:none; border-radius:8px; background:#2d6cdf; color:white; }
+  button:disabled { background:#444; }
+  button.stop { background:#c0392b; }
+  #log { background:#000; color:#0f0; font-family:monospace; font-size:11px; padding:8px; height:160px; overflow-y:auto; white-space:pre-wrap; border-radius:6px; margin-top:8px; }
+  #big { font-size:48px; text-align:center; margin:16px 0; font-weight:bold; }
+  #xyz { text-align:center; font-family:monospace; font-size:14px; color:#aaa; }
+  canvas { width:100%; height:120px; background:#000; border-radius:6px; margin-top:8px; }
+  .note { font-size:12px; color:#888; margin-top:4px;}
+</style>
+</head>
+<body>
+<h1>Polar Verity Sense — Test brut</h1>
+<button id="btnConnect">1. Connecter (Bluetooth)</button>
+<button id="btnSettings" disabled>2. Demander réglages ACC (GET_SETTINGS)</button>
+<button id="btnStart" disabled>3. Démarrer flux ACC (best-guess)</button>
+<button id="btnStop" class="stop" disabled>Stop</button>
+
+<div id="big">–</div>
+<div id="xyz">x=– y=– z=–</div>
+<canvas id="chart" width="600" height="120"></canvas>
+<div class="log-label">Log brut (octets hex) :</div>
+<div id="log"></div>
+<p class="note">Ouvrir cette page dans Chrome (pas dans une webview embarquée) pour que le Bluetooth fonctionne. Le décodage des trames ACC est une meilleure estimation — si ça échoue, on lit les octets bruts ensemble.</p>
+
+<script>
+const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_CONTROL = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+
+let device, server, controlChar, dataChar;
+const logEl = document.getElementById('log');
+const bigEl = document.getElementById('big');
+const xyzEl = document.getElementById('xyz');
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+let history = [];
+
+function log(msg) {
+  const t = new Date().toISOString().substr(11,8);
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function toHex(dataview) {
+  let out = [];
+  for (let i = 0; i < dataview.byteLength; i++) {
+    out.push(dataview.getUint8(i).toString(16).padStart(2,'0'));
+  }
+  return out.join(' ');
+}
+
+function drawChart() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = '#2ecc71';
+  ctx.beginPath();
+  const max = Math.max(...history, 100);
+  history.forEach((v, i) => {
+    const x = (i / 150) * canvas.width;
+    const y = canvas.height - (v / max) * canvas.height;
+    if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+}
+
+document.getElementById('btnConnect').onclick = async () => {
+  try {
+    log('Recherche de périphériques "Polar"...');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'Polar' }],
+      optionalServices: [PMD_SERVICE, '0000180d-0000-1000-8000-00805f9b34fb']
+    });
+    log(`Sélectionné: ${device.name}`);
+    device.addEventListener('gattserverdisconnected', () => log('⚠️ Déconnecté'));
+    server = await device.gatt.connect();
+    log('GATT connecté.');
+    const service = await server.getPrimaryService(PMD_SERVICE);
+    log('Service PMD trouvé.');
+    controlChar = await service.getCharacteristic(PMD_CONTROL);
+    dataChar = await service.getCharacteristic(PMD_DATA);
+    log('Caractéristiques control + data trouvées.');
+
+    await controlChar.startNotifications();
+    controlChar.addEventListener('characteristicvaluechanged', (e) => {
+      log('CONTROL rx: ' + toHex(e.target.value));
+    });
+
+    await dataChar.startNotifications();
+    dataChar.addEventListener('characteristicvaluechanged', (e) => {
+      handleData(e.target.value);
+    });
+    log('Notifications activées. Prêt.');
+
+    document.getElementById('btnSettings').disabled = false;
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnConnect').disabled = true;
+  } catch (err) {
+    log('ERREUR connexion: ' + err);
+  }
+};
+
+document.getElementById('btnSettings').onclick = async () => {
+  try {
+    // GET_MEASUREMENT_SETTINGS: [0x01, type=0x02 (ACC)]
+    await controlChar.writeValue(new Uint8Array([0x01, 0x02]));
+    log('GET_SETTINGS envoyé pour ACC (0x01 0x02).');
+  } catch (err) {
+    log('ERREUR GET_SETTINGS: ' + err);
+  }
+};
+
+document.getElementById('btnStart').onclick = async () => {
+  try {
+    // REQUEST_MEASUREMENT_START: [0x02, type=0x02 ACC, then TLV settings]
+    // best-guess TLV: SAMPLE_RATE(0x00) count=1 val=52 | RESOLUTION(0x01) count=1 val=16 | RANGE(0x02) count=1 val=8
+    const cmd = new Uint8Array([
+      0x02, 0x02,
+      0x00, 0x01, 52, 0,
+      0x01, 0x01, 16, 0,
+      0x02, 0x01, 8, 0
+    ]);
+    await controlChar.writeValue(cmd);
+    log('START ACC envoyé (best-guess settings): ' + toHex(new DataView(cmd.buffer)));
+    document.getElementById('btnStop').disabled = false;
+  } catch (err) {
+    log('ERREUR START: ' + err);
+  }
+};
+
+document.getElementById('btnStop').onclick = async () => {
+  try {
+    await controlChar.writeValue(new Uint8Array([0x03, 0x02]));
+    log('STOP envoyé.');
+  } catch (err) {
+    log('ERREUR STOP: ' + err);
+  }
+};
+
+function handleData(value) {
+  const hex = toHex(value);
+  log('DATA rx (' + value.byteLength + ' octets): ' + hex);
+
+  // best-guess frame parse: byte0 = measurement type, bytes1-8 = timestamp, byte9 = frame type, then int16 LE triplets
+  if (value.byteLength > 10 && value.getUint8(0) === 0x02) {
+    try {
+      let offset = 10;
+      let lastX, lastY, lastZ;
+      while (offset + 6 <= value.byteLength) {
+        lastX = value.getInt16(offset, true);
+        lastY = value.getInt16(offset + 2, true);
+        lastZ = value.getInt16(offset + 4, true);
+        offset += 6;
+      }
+      if (lastX !== undefined) {
+        const mag = Math.sqrt(lastX*lastX + lastY*lastY + lastZ*lastZ);
+        bigEl.textContent = Math.round(mag);
+        xyzEl.textContent = `x=${lastX} y=${lastY} z=${lastZ}`;
+        history.push(mag);
+        if (history.length > 150) history.shift();
+        drawChart();
+      }
+    } catch (e) {
+      log('Parse échoué (normal si l\'encodage diffère): ' + e);
+    }
+  }
+}
+</script>
+</body>
+</html>
