@@ -299,6 +299,23 @@ function handleAccData(value) {
   drawChart();
 }
 
+function beep(freq, durationMs, delayMs) {
+  setTimeout(() => {
+    try {
+      const ctx2 = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx2.createOscillator();
+      const gain = ctx2.createGain();
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.value = 0.3;
+      osc.connect(gain);
+      gain.connect(ctx2.destination);
+      osc.start();
+      setTimeout(() => { osc.stop(); ctx2.close(); }, durationMs);
+    } catch (e) { log('Beep erreur: ' + e); }
+  }, delayMs);
+}
+
 document.getElementById('btnStart').onclick = () => {
   if (configIndex >= PROTOCOL.length) return;
   const c = PROTOCOL[configIndex];
@@ -314,8 +331,12 @@ document.getElementById('btnStart').onclick = () => {
   const interval = setInterval(() => {
     remaining -= 1;
     countdownEl.textContent = remaining > 0 ? remaining : '';
+    if (remaining > 0 && remaining <= 3) {
+      beep(600, 120, 0); // short warning beep at 3, 2, 1
+    }
     if (remaining <= 0) {
       clearInterval(interval);
+      beep(1000, 400, 0); // longer, higher end-of-recording beep
       finishRecording(c);
     }
   }, 1000);
