@@ -37,6 +37,7 @@
 <canvas id="chart" width="600" height="100"></canvas>
 
 <button id="btnStart" disabled>Démarrer l'enregistrement (15s)</button>
+<button id="btnRedo" class="secondary" disabled>↩️ Refaire la précédente</button>
 <button id="btnSkip" class="secondary" disabled>Passer cette configuration</button>
 <button id="btnDownloadAll" class="secondary" disabled>Télécharger tout (JSON combiné)</button>
 <button id="btnReset" class="secondary">Réinitialiser la progression</button>
@@ -113,6 +114,7 @@ function renderQueue() {
 }
 
 function updateConfigDisplay() {
+  document.getElementById('btnRedo').disabled = configIndex <= 0 || !controlChar;
   if (configIndex >= PROTOCOL.length) {
     configNameEl.textContent = 'Terminé !';
     progressEl.textContent = `${PROTOCOL.length}/${PROTOCOL.length} configurations enregistrées`;
@@ -380,6 +382,23 @@ function finishRecording(c) {
     document.getElementById('btnSkip').disabled = configIndex >= PROTOCOL.length;
   };
 }
+
+document.getElementById('btnRedo').onclick = () => {
+  if (configIndex <= 0) return;
+  configIndex -= 1;
+  const c = PROTOCOL[configIndex];
+  const last = recordings[recordings.length - 1];
+  if (last && last.exercise === c.exercise && last.position === c.position) {
+    recordings.pop();
+    log(`Annulé (à refaire): ${c.exercise} / ${c.position} — l'ancien fichier téléchargé reste sur votre téléphone, ignorez-le`);
+  } else {
+    log(`Retour à: ${c.exercise} / ${c.position} (était passée, pas de fichier à annuler)`);
+  }
+  saveProgress(configIndex);
+  updateConfigDisplay();
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnSkip').disabled = false;
+};
 
 document.getElementById('btnSkip').onclick = () => {
   if (configIndex >= PROTOCOL.length) return;
