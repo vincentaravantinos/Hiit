@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polar — Collecte de données</title>
+<style>
+  body { background:#111; color:#eee; font-family: -apple-system, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:18px; margin-bottom:4px;}
+  h2 { font-size:16px; color:#9cf; margin:4px 0; }
+  button { display:block; width:100%; padding:16px; margin:8px 0; font-size:17px; border:none; border-radius:8px; background:#2d6cdf; color:white; font-weight:bold; }
+  button:disabled { background:#444; color:#888; }
+  button.stop { background:#c0392b; }
+  button.secondary { background:#333; font-weight:normal; font-size:14px; padding:10px;}
+  #progress { font-size:13px; color:#888; margin-bottom:8px; }
+  #configName { font-size:24px; text-align:center; margin:12px 0; padding:12px; background:#1a1a2e; border-radius:8px; }
+  #big { font-size:44px; text-align:center; margin:12px 0; font-weight:bold; }
+  #hr { font-size:20px; text-align:center; color:#e74c3c; margin-bottom:8px; }
+  #countdown { font-size:56px; text-align:center; font-weight:bold; color:#2ecc71; }
+  canvas { width:100%; height:100px; background:#000; border-radius:6px; margin:8px 0; }
+  #log { background:#000; color:#0f0; font-family:monospace; font-size:10px; padding:6px; height:90px; overflow-y:auto; white-space:pre-wrap; border-radius:6px; margin-top:8px; }
+  .done { color:#2ecc71; }
+  .pending { color:#666; }
+  .current { color:#f39c12; font-weight:bold; }
+  #queueList { font-size:12px; line-height:1.6; margin:8px 0; }
+</style>
+</head>
+<body>
+<h1>Collecte de données — Polar Verity Sense</h1>
+<button id="btnConnect">1. Connecter</button>
+<div id="hr">HR: –</div>
+
+<div id="progress"></div>
+<div id="configName">–</div>
+<div id="countdown"></div>
+<div id="big">–</div>
+<canvas id="chart" width="600" height="100"></canvas>
+
+<button id="btnStart" disabled>Démarrer l'enregistrement (30s)</button>
+<button id="btnSkip" class="secondary" disabled>Passer cette configuration</button>
+<button id="btnDownloadAll" class="secondary" disabled>Télécharger tout (JSON combiné)</button>
+
+<div id="queueList"></div>
+<div class="log-label">Log :</div>
+<div id="log"></div>
+
+<script>
+const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_CONTROL = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+const HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
+const HR_CHAR = '00002a37-0000-1000-8000-00805f9b34fb';
+
+const PROTOCOL = [];
+for (const exercise of ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)']) {
+  for (const position of ['Avant-bras', 'Biceps']) {
+    PROTOCOL.push({ exercise, position });
+  }
+}
+
+let configIndex = 0;
+let isRecording = false;
+let recordStartTime = 0;
+let currentAcc = [];
+let currentHr = [];
+let latestHr = null;
+const recordings = [];
+
+let device, server, controlChar, dataChar, hrChar;
+const logEl = document.getElementById('log');
+const bigEl = document.getElementById('big');
+const hrEl = document.getElementById('hr');
+const configNameEl = document.getElementById('configName');
+const progressEl = document.getElementById('progress');
+const countdownEl = document.getElementById('countdown');
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+let history = [];
+
+function log(msg) {
+  const t = new Date().toISOString().substr(11,8);
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function renderQueue() {
+  const el = document.getElementById('queueList');
+  el.innerHTML = PROTOCOL.map((c, i) => {
+    const cls = i < configIndex ? 'done' : (i === configIndex ? 'current' : 'pending');
+    const mark = i < configIndex ? '✓ ' : (i === configIndex ? '▶ ' : '· ');
+    return `<div class="${cls}">${mark}${c.exercise} — ${c.position}</div>`;
+  }).join('');
+}
+
+function updateConfigDisplay() {
+  if (configIndex >= PROTOCOL.length) {
+    configNameEl.textContent = 'Terminé !';
+    progressEl.textContent = `${PROTOCOL.length}/${PROTOCOL.length} configurations enregistrées`;
+    document.getElementById('btnStart').disabled = true;
+    document.getElementById('btnSkip').disabled = true;
+    document.getElementById('btnDownloadAll').disabled = false;
+  } else {
+    const c = PROTOCOL[configIndex];
+    configNameEl.textContent = `${c.exercise} — ${c.position}`;
+    progressEl.textContent = `Configuration ${configIndex + 1}/${PROTOCOL.length}`;
+  }
+  renderQueue();
+}
+
+function drawChart() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.strokeStyle = '#2ecc71';
+  ctx.beginPath();
+  const max = Math.max(...history, 100);
+  history.forEach((v, i) => {
+    const x = (i / 300) * canvas.width;
+    const y = canvas.height - (v / max) * canvas.height;
+    if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+}
+
+function downloadJSON(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('btnConnect').onclick = async () => {
+  try {
+    log('Recherche de périphériques "Polar"...');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'Polar' }],
+      optionalServices: [PMD_SERVICE, HR_SERVICE]
+    });
+    log(`Sélectionné: ${device.name}`);
+    device.addEventListener('gattserverdisconnected', () => log('⚠️ Déconnecté'));
+    server = await device.gatt.connect();
+    log('GATT connecté.');
+
+    const pmdService = await server.getPrimaryService(PMD_SERVICE);
+    controlChar = await pmdService.getCharacteristic(PMD_CONTROL);
+    dataChar = await pmdService.getCharacteristic(PMD_DATA);
+    await controlChar.startNotifications();
+    controlChar.addEventListener('characteristicvaluechanged', (e) => {
+      log('CONTROL rx: ' + Array.from(new Uint8Array(e.target.value.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
+    });
+    await dataChar.startNotifications();
+    dataChar.addEventListener('characteristicvaluechanged', (e) => handleAccData(e.target.value));
+    log('PMD prêt.');
+
+    // Start ACC stream: 52Hz, 16-bit, ±8G, 3 channels (verified settings)
+    const cmd = new Uint8Array([0x02, 0x02, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 8, 0, 0x04, 0x01, 3]);
+    await controlChar.writeValue(cmd);
+    log('Flux ACC démarré.');
+
+    // HR service
+    try {
+      const hrService = await server.getPrimaryService(HR_SERVICE);
+      hrChar = await hrService.getCharacteristic(HR_CHAR);
+      await hrChar.startNotifications();
+      hrChar.addEventListener('characteristicvaluechanged', (e) => handleHrData(e.target.value));
+      log('HR prêt.');
+    } catch (e) {
+      log('HR indisponible: ' + e);
+    }
+
+    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnSkip').disabled = false;
+    updateConfigDisplay();
+  } catch (err) {
+    log('ERREUR connexion: ' + err);
+  }
+};
+
+function handleHrData(value) {
+  const flags = value.getUint8(0);
+  const is16bit = flags & 0x1;
+  const bpm = is16bit ? value.getUint16(1, true) : value.getUint8(1);
+  latestHr = bpm;
+  hrEl.textContent = 'HR: ' + bpm + ' bpm';
+  if (isRecording) {
+    currentHr.push({ t: performance.now() - recordStartTime, bpm });
+  }
+}
+
+// ---- Verified PMD delta-frame decompression ----
+function bytesToBitArray(bytes) {
+  const bits = [];
+  for (const byte of bytes) { for (let i = 0; i < 8; i++) bits.push((byte >> i) & 1); }
+  return bits;
+}
+function parseDeltaFrame(data, channels, bitWidth) {
+  const bits = bytesToBitArray(data);
+  const samples = [];
+  let offset = 0;
+  while (offset + bitWidth * channels <= bits.length) {
+    const chSamples = [];
+    for (let c = 0; c < channels; c++) {
+      let value = 0;
+      for (let i = 0; i < bitWidth; i++) value |= bits[offset + i] << i;
+      offset += bitWidth;
+      if (bitWidth > 1 && (value & (1 << (bitWidth - 1)))) value |= (-1 << bitWidth);
+      chSamples.push(value);
+    }
+    samples.push(chSamples);
+  }
+  return samples;
+}
+function parseDeltaFramesAll(data, channels, resolution) {
+  if (data.length === 0) return [];
+  const resBytes = Math.ceil(resolution / 8);
+  let offset = 0;
+  const ref = [];
+  for (let c = 0; c < channels; c++) {
+    let v = 0;
+    for (let b = 0; b < resBytes; b++) v |= data[offset + b] << (8 * b);
+    const bits = resBytes * 8;
+    if (v & (1 << (bits - 1))) v |= (-1 << bits);
+    offset += resBytes;
+    ref.push(v);
+  }
+  const samples = [ref];
+  while (offset < data.length) {
+    if (offset + 2 > data.length) break;
+    const deltaSize = data[offset]; offset += 1;
+    const sampleCount = data[offset]; offset += 1;
+    const bitLength = sampleCount * deltaSize * channels;
+    const length = Math.ceil(bitLength / 8);
+    if (offset + length > data.length) break;
+    const chunk = data.slice(offset, offset + length);
+    const deltas = parseDeltaFrame(chunk, channels, deltaSize);
+    for (const delta of deltas) {
+      if (delta.length !== channels) continue;
+      const last = samples[samples.length - 1];
+      samples.push(last.map((v, i) => v + delta[i]));
+    }
+    offset += length;
+  }
+  return samples;
+}
+
+function handleAccData(value) {
+  if (value.byteLength <= 10 || value.getUint8(0) !== 0x02) return;
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  if (!(isCompressed && frameType === 1)) return;
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList;
+  try {
+    sampleList = parseDeltaFramesAll(content, 3, 16);
+  } catch (e) {
+    log('Erreur décodage: ' + e);
+    return;
+  }
+  if (sampleList.length === 0) return;
+
+  const now = performance.now();
+  for (const [x, y, z] of sampleList) {
+    const mag = Math.sqrt(x*x + y*y + z*z);
+    history.push(mag);
+    if (isRecording) currentAcc.push({ t: now - recordStartTime, x, y, z, mag: Math.round(mag) });
+  }
+  if (history.length > 300) history = history.slice(-300);
+  const [lx, ly, lz] = sampleList[sampleList.length - 1];
+  bigEl.textContent = Math.round(Math.sqrt(lx*lx+ly*ly+lz*lz)) + ' mG';
+  drawChart();
+}
+
+document.getElementById('btnStart').onclick = () => {
+  if (configIndex >= PROTOCOL.length) return;
+  const c = PROTOCOL[configIndex];
+  currentAcc = [];
+  currentHr = [];
+  recordStartTime = performance.now();
+  isRecording = true;
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnSkip').disabled = true;
+
+  let remaining = 30;
+  countdownEl.textContent = remaining;
+  const interval = setInterval(() => {
+    remaining -= 1;
+    countdownEl.textContent = remaining > 0 ? remaining : '';
+    if (remaining <= 0) {
+      clearInterval(interval);
+      finishRecording(c);
+    }
+  }, 1000);
+};
+
+function finishRecording(c) {
+  isRecording = false;
+  const recording = {
+    exercise: c.exercise,
+    position: c.position,
+    startedAtIso: new Date().toISOString(),
+    accSamples: currentAcc,
+    hrSamples: currentHr
+  };
+  recordings.push(recording);
+  const safeName = (c.exercise + '_' + c.position).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  downloadJSON(recording, safeName + '.json');
+  log(`Enregistré: ${c.exercise} / ${c.position} — ${currentAcc.length} échantillons ACC, ${currentHr.length} échantillons HR`);
+
+  configIndex += 1;
+  updateConfigDisplay();
+  document.getElementById('btnStart').disabled = configIndex >= PROTOCOL.length;
+  document.getElementById('btnSkip').disabled = configIndex >= PROTOCOL.length;
+}
+
+document.getElementById('btnSkip').onclick = () => {
+  if (configIndex >= PROTOCOL.length) return;
+  log(`Passé: ${PROTOCOL[configIndex].exercise} / ${PROTOCOL[configIndex].position}`);
+  configIndex += 1;
+  updateConfigDisplay();
+};
+
+document.getElementById('btnDownloadAll').onclick = () => {
+  downloadJSON(recordings, 'toutes_les_configurations.json');
+};
+
+updateConfigDisplay();
+</script>
+</body>
+</html>
