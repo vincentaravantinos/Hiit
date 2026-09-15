@@ -36,13 +36,13 @@
 <div id="big">–</div>
 <canvas id="chart" width="600" height="100"></canvas>
 
-<button id="btnStart" disabled>Démarrer l'enregistrement (30s)</button>
+<button id="btnStart" disabled>Démarrer l'enregistrement (15s)</button>
 <button id="btnSkip" class="secondary" disabled>Passer cette configuration</button>
 <button id="btnDownloadAll" class="secondary" disabled>Télécharger tout (JSON combiné)</button>
 <button id="btnReset" class="secondary">Réinitialiser la progression</button>
 
 <div id="repPanel" style="display:none; background:#1a1a2e; padding:14px; border-radius:8px; margin:10px 0;">
-  <div style="text-align:center; margin-bottom:8px;">Combien de répétitions (ou cycles) avez-vous faites pendant ces 30s ?</div>
+  <div style="text-align:center; margin-bottom:8px;">Combien de répétitions (ou cycles) avez-vous faites pendant ces 15s ?</div>
   <input id="repInput" type="number" inputmode="numeric" style="width:100%; font-size:24px; text-align:center; padding:10px; border-radius:6px; border:none;" placeholder="ex: 12">
   <button id="btnSubmitReps">Valider et passer à la suite</button>
 </div>
@@ -309,7 +309,7 @@ document.getElementById('btnStart').onclick = () => {
   document.getElementById('btnStart').disabled = true;
   document.getElementById('btnSkip').disabled = true;
 
-  let remaining = 30;
+  let remaining = 15;
   countdownEl.textContent = remaining;
   const interval = setInterval(() => {
     remaining -= 1;
