@@ -39,6 +39,13 @@
 <button id="btnStart" disabled>Démarrer l'enregistrement (30s)</button>
 <button id="btnSkip" class="secondary" disabled>Passer cette configuration</button>
 <button id="btnDownloadAll" class="secondary" disabled>Télécharger tout (JSON combiné)</button>
+<button id="btnReset" class="secondary">Réinitialiser la progression</button>
+
+<div id="repPanel" style="display:none; background:#1a1a2e; padding:14px; border-radius:8px; margin:10px 0;">
+  <div style="text-align:center; margin-bottom:8px;">Combien de répétitions (ou cycles) avez-vous faites pendant ces 30s ?</div>
+  <input id="repInput" type="number" inputmode="numeric" style="width:100%; font-size:24px; text-align:center; padding:10px; border-radius:6px; border:none;" placeholder="ex: 12">
+  <button id="btnSubmitReps">Valider et passer à la suite</button>
+</div>
 
 <div id="queueList"></div>
 <div class="log-label">Log :</div>
@@ -52,13 +59,26 @@ const HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
 const HR_CHAR = '00002a37-0000-1000-8000-00805f9b34fb';
 
 const PROTOCOL = [];
-for (const exercise of ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)']) {
-  for (const position of ['Avant-bras', 'Biceps']) {
+const EXERCISES = ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)'];
+for (const position of ['Avant-bras', 'Biceps']) {
+  for (const exercise of EXERCISES) {
     PROTOCOL.push({ exercise, position });
   }
 }
 
-let configIndex = 0;
+const STORAGE_KEY = 'polarDataCollectProgress';
+function loadProgress() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw).configIndex || 0;
+  } catch (e) {}
+  return 0;
+}
+function saveProgress(idx) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ configIndex: idx })); } catch (e) {}
+}
+
+let configIndex = loadProgress();
 let isRecording = false;
 let recordStartTime = 0;
 let currentAcc = [];
@@ -101,8 +121,11 @@ function updateConfigDisplay() {
     document.getElementById('btnDownloadAll').disabled = false;
   } else {
     const c = PROTOCOL[configIndex];
-    configNameEl.textContent = `${c.exercise} — ${c.position}`;
-    progressEl.textContent = `Configuration ${configIndex + 1}/${PROTOCOL.length}`;
+    const prev = configIndex > 0 ? PROTOCOL[configIndex - 1] : null;
+    const positionChanged = prev && prev.position !== c.position;
+    configNameEl.innerHTML = (positionChanged ? `<div style="color:#f39c12; font-size:14px; margin-bottom:6px;">⚠️ Changez le capteur de position : ${c.position}</div>` : '')
+      + `${c.exercise} — ${c.position}`;
+    progressEl.textContent = `Configuration ${configIndex + 1}/${PROTOCOL.length} — en pause, prêt(e) quand vous voulez`;
   }
   renderQueue();
 }
@@ -172,8 +195,8 @@ document.getElementById('btnConnect').onclick = async () => {
     }
 
     document.getElementById('btnConnect').disabled = true;
-    document.getElementById('btnStart').disabled = false;
-    document.getElementById('btnSkip').disabled = false;
+    document.getElementById('btnStart').disabled = configIndex >= PROTOCOL.length;
+    document.getElementById('btnSkip').disabled = configIndex >= PROTOCOL.length;
     updateConfigDisplay();
   } catch (err) {
     log('ERREUR connexion: ' + err);
@@ -300,33 +323,62 @@ document.getElementById('btnStart').onclick = () => {
 
 function finishRecording(c) {
   isRecording = false;
-  const recording = {
-    exercise: c.exercise,
-    position: c.position,
-    startedAtIso: new Date().toISOString(),
-    accSamples: currentAcc,
-    hrSamples: currentHr
-  };
-  recordings.push(recording);
-  const safeName = (c.exercise + '_' + c.position).toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  downloadJSON(recording, safeName + '.json');
-  log(`Enregistré: ${c.exercise} / ${c.position} — ${currentAcc.length} échantillons ACC, ${currentHr.length} échantillons HR`);
+  countdownEl.textContent = '';
+  // Gate on ground-truth rep count before saving/advancing — this stays visible
+  // until the user submits, so nothing auto-advances into the next exercise.
+  const panel = document.getElementById('repPanel');
+  const input = document.getElementById('repInput');
+  panel.style.display = 'block';
+  input.value = '';
+  input.focus();
 
-  configIndex += 1;
-  updateConfigDisplay();
-  document.getElementById('btnStart').disabled = configIndex >= PROTOCOL.length;
-  document.getElementById('btnSkip').disabled = configIndex >= PROTOCOL.length;
+  document.getElementById('btnSubmitReps').onclick = () => {
+    const reps = parseInt(input.value, 10);
+    if (isNaN(reps)) {
+      input.style.outline = '2px solid #c0392b';
+      return;
+    }
+    const recording = {
+      exercise: c.exercise,
+      position: c.position,
+      startedAtIso: new Date().toISOString(),
+      groundTruthReps: reps,
+      accSamples: currentAcc,
+      hrSamples: currentHr
+    };
+    recordings.push(recording);
+    const safeName = (c.exercise + '_' + c.position).toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    downloadJSON(recording, safeName + '.json');
+    log(`Enregistré: ${c.exercise} / ${c.position} — ${currentAcc.length} éch. ACC, ${currentHr.length} éch. HR, ${reps} reps déclarées`);
+
+    panel.style.display = 'none';
+    configIndex += 1;
+    saveProgress(configIndex);
+    updateConfigDisplay();
+    document.getElementById('btnStart').disabled = configIndex >= PROTOCOL.length;
+    document.getElementById('btnSkip').disabled = configIndex >= PROTOCOL.length;
+  };
 }
 
 document.getElementById('btnSkip').onclick = () => {
   if (configIndex >= PROTOCOL.length) return;
   log(`Passé: ${PROTOCOL[configIndex].exercise} / ${PROTOCOL[configIndex].position}`);
   configIndex += 1;
+  saveProgress(configIndex);
   updateConfigDisplay();
 };
 
 document.getElementById('btnDownloadAll').onclick = () => {
   downloadJSON(recordings, 'toutes_les_configurations.json');
+};
+
+document.getElementById('btnReset').onclick = () => {
+  if (!confirm('Réinitialiser la progression ? (les fichiers déjà téléchargés restent sur votre téléphone)')) return;
+  configIndex = 0;
+  saveProgress(0);
+  updateConfigDisplay();
+  document.getElementById('btnStart').disabled = !controlChar;
+  document.getElementById('btnSkip').disabled = !controlChar;
 };
 
 updateConfigDisplay();
