@@ -145,33 +145,101 @@ document.getElementById('btnStop').onclick = async () => {
   }
 };
 
+// ---- Polar PMD delta-frame decompression (ported + verified against real captured bytes) ----
+function bytesToBitArray(bytes) {
+  const bits = [];
+  for (const byte of bytes) {
+    for (let i = 0; i < 8; i++) bits.push((byte >> i) & 1);
+  }
+  return bits;
+}
+
+function parseDeltaFrame(data, channels, bitWidth) {
+  const bits = bytesToBitArray(data);
+  const samples = [];
+  let offset = 0;
+  while (offset + bitWidth * channels <= bits.length) {
+    const chSamples = [];
+    for (let c = 0; c < channels; c++) {
+      let value = 0;
+      for (let i = 0; i < bitWidth; i++) value |= bits[offset + i] << i;
+      offset += bitWidth;
+      if (bitWidth > 1 && (value & (1 << (bitWidth - 1)))) value |= (-1 << bitWidth);
+      chSamples.push(value);
+    }
+    samples.push(chSamples);
+  }
+  return samples;
+}
+
+function parseDeltaFramesAll(data, channels, resolution) {
+  if (data.length === 0) return [];
+  const resBytes = Math.ceil(resolution / 8);
+  let offset = 0;
+  const ref = [];
+  for (let c = 0; c < channels; c++) {
+    let v = 0;
+    for (let b = 0; b < resBytes; b++) v |= data[offset + b] << (8 * b);
+    // sign-extend
+    const bits = resBytes * 8;
+    if (v & (1 << (bits - 1))) v |= (-1 << bits);
+    offset += resBytes;
+    ref.push(v);
+  }
+  const samples = [ref];
+  while (offset < data.length) {
+    if (offset + 2 > data.length) break;
+    const deltaSize = data[offset]; offset += 1;
+    const sampleCount = data[offset]; offset += 1;
+    const bitLength = sampleCount * deltaSize * channels;
+    const length = Math.ceil(bitLength / 8);
+    if (offset + length > data.length) break;
+    const chunk = data.slice(offset, offset + length);
+    const deltas = parseDeltaFrame(chunk, channels, deltaSize);
+    for (const delta of deltas) {
+      if (delta.length !== channels) continue;
+      const last = samples[samples.length - 1];
+      samples.push(last.map((v, i) => v + delta[i]));
+    }
+    offset += length;
+  }
+  return samples;
+}
+
 function handleData(value) {
   const hex = toHex(value);
   log('DATA rx (' + value.byteLength + ' octets): ' + hex);
 
-  // best-guess frame parse: byte0 = measurement type, bytes1-8 = timestamp, byte9 = frame type, then int16 LE triplets
-  if (value.byteLength > 10 && value.getUint8(0) === 0x02) {
-    try {
-      let offset = 10;
-      let lastX, lastY, lastZ;
-      while (offset + 6 <= value.byteLength) {
-        lastX = value.getInt16(offset, true);
-        lastY = value.getInt16(offset + 2, true);
-        lastZ = value.getInt16(offset + 4, true);
-        offset += 6;
-      }
-      if (lastX !== undefined) {
-        const mag = Math.sqrt(lastX*lastX + lastY*lastY + lastZ*lastZ);
-        bigEl.textContent = Math.round(mag);
-        xyzEl.textContent = `x=${lastX} y=${lastY} z=${lastZ}`;
-        history.push(mag);
-        if (history.length > 150) history.shift();
-        drawChart();
-      }
-    } catch (e) {
-      log('Parse échoué (normal si l\'encodage diffère): ' + e);
+  if (value.byteLength <= 10 || value.getUint8(0) !== 0x02) return;
+
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList = [];
+  try {
+    if (isCompressed && frameType === 1) {
+      sampleList = parseDeltaFramesAll(content, 3, 16); // 16-bit resolution, 3 channels (x,y,z)
+    } else {
+      log('Type de frame non géré ici (type=' + frameType + ', compressé=' + isCompressed + ')');
+      return;
     }
+  } catch (e) {
+    log('Erreur décodage: ' + e);
+    return;
   }
+
+  if (sampleList.length === 0) return;
+  for (const [x, y, z] of sampleList) {
+    const mag = Math.sqrt(x*x + y*y + z*z);
+    history.push(mag);
+  }
+  if (history.length > 300) history = history.slice(-300);
+  const [lx, ly, lz] = sampleList[sampleList.length - 1];
+  bigEl.textContent = Math.round(Math.sqrt(lx*lx+ly*ly+lz*lz)) + ' mG';
+  xyzEl.textContent = `x=${lx} y=${ly} z=${lz} mG  (${sampleList.length} échantillons)`;
+  drawChart();
 }
 </script>
 </body>
