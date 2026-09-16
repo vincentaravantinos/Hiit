@@ -45,8 +45,8 @@
 <canvas id="chart" width="600" height="90"></canvas>
 
 <div id="repPanel">
-  <div style="text-align:center; margin-bottom:8px;">Combien de reps/cycles avez-vous vraiment faits ? (le modèle a compté <span id="liveGuess">–</span>)</div>
-  <input id="repInput" type="number" inputmode="numeric">
+  <div style="text-align:center; margin-bottom:8px;">Combien de reps/cycles avez-vous vraiment faits ? (le modèle a compté <span id="liveGuess">–</span>, décimales ok ex: 6.5)</div>
+  <input id="repInput" type="number" inputmode="decimal" step="0.5">
   <button id="btnSubmitReps">Valider et sauvegarder</button>
   <button id="btnCancelSession" class="secondary">Annuler cette session (ne pas garder)</button>
 </div>
@@ -208,7 +208,7 @@ function stopSession() {
 }
 
 document.getElementById('btnSubmitReps').onclick = () => {
-  const reps = parseInt(document.getElementById('repInput').value, 10);
+  const reps = parseFloat(document.getElementById('repInput').value);
   if (isNaN(reps)) return;
   const recording = {
     exercise: currentExercise,
