@@ -18,7 +18,7 @@
 </style>
 </head>
 <body>
-<h1>Polar Verity Sense — Test brut <span style="color:#666;font-size:12px;">(v5)</span></h1>
+<h1>Polar Verity Sense — Test brut <span style="color:#666;font-size:12px;">(v6)</span></h1>
 <button id="btnConnect">1. Connecter (Bluetooth)</button>
 <button id="btnSettings" disabled>2. Demander réglages ACC (GET_SETTINGS)</button>
 <button id="btnStart" disabled>3. Démarrer flux ACC (best-guess)</button>
@@ -27,6 +27,10 @@
 <button id="btnGyroSettings" disabled>4. Demander réglages GYRO (GET_SETTINGS)</button>
 <button id="btnGyroStart" disabled>5. Démarrer flux GYRO (auto depuis réglages reçus)</button>
 <button id="btnGyroStop" class="stop" disabled>Stop GYRO</button>
+<hr style="border-color:#333; margin:16px 0;">
+<button id="btnMagSettings" disabled>6. Demander réglages MAG (GET_SETTINGS)</button>
+<button id="btnMagStart" disabled>7. Démarrer flux MAG (auto depuis réglages reçus)</button>
+<button id="btnMagStop" class="stop" disabled>Stop MAG</button>
 
 <div id="big">–</div>
 <div id="xyz">x=– y=– z=–</div>
@@ -96,11 +100,16 @@ document.getElementById('btnConnect').onclick = async () => {
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       log('CONTROL rx: ' + toHex(dv));
-      // opcode 1 = GET_SETTINGS response; type 5 = GYRO
+      // opcode 1 = GET_SETTINGS response; type 5 = GYRO, type 6 = MAG
       if (dv.byteLength >= 5 && dv.getUint8(1) === 0x01 && dv.getUint8(2) === 0x05) {
         const parsed = parseSettingsResponse(dv);
         lastGyroSettings = parsed;
         logSettings(parsed, 'Réglages GYRO reçus');
+      }
+      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x01 && dv.getUint8(2) === 0x06) {
+        const parsed = parseSettingsResponse(dv);
+        lastMagSettings = parsed;
+        logSettings(parsed, 'Réglages MAG reçus');
       }
     });
 
@@ -114,6 +123,8 @@ document.getElementById('btnConnect').onclick = async () => {
     document.getElementById('btnStart').disabled = false;
     document.getElementById('btnGyroSettings').disabled = false;
     document.getElementById('btnGyroStart').disabled = false;
+    document.getElementById('btnMagSettings').disabled = false;
+    document.getElementById('btnMagStart').disabled = false;
     document.getElementById('btnConnect').disabled = true;
   } catch (err) {
     log('ERREUR connexion: ' + err);
@@ -204,6 +215,7 @@ function logSettings(parsed, label) {
 }
 
 let lastGyroSettings = null;
+let lastMagSettings = null;
 
 document.getElementById('btnGyroSettings').onclick = async () => {
   try {
@@ -253,6 +265,54 @@ document.getElementById('btnGyroStop').onclick = async () => {
     log('STOP GYRO envoyé.');
   } catch (err) {
     log('ERREUR STOP GYRO: ' + err);
+  }
+};
+
+document.getElementById('btnMagSettings').onclick = async () => {
+  try {
+    await controlChar.writeValue(new Uint8Array([0x01, 0x06])); // GET_SETTINGS, type=6 MAG
+    log('GET_SETTINGS envoyé pour MAG (0x01 0x06).');
+  } catch (err) {
+    log('ERREUR GET_SETTINGS MAG: ' + err);
+  }
+};
+
+document.getElementById('btnMagStart').onclick = async () => {
+  try {
+    if (!lastMagSettings) {
+      log('⚠️ Pas encore reçu les réglages MAG — appuyez sur 6 d\'abord et attendez la réponse CONTROL rx.');
+      return;
+    }
+    const parts = [0x02, 0x06]; // REQUEST_MEASUREMENT_START, type=6 MAG
+    for (const type of [0, 1, 2, 4]) { // SAMPLE_RATE, RESOLUTION, RANGE, CHANNELS
+      const values = lastMagSettings.settings[type];
+      if (!values || values.length === 0) continue;
+      const chosen = values[0];
+      const fieldSize = SETTING_FIELD_SIZE[type];
+      parts.push(type, 1);
+      if (fieldSize === 1) {
+        parts.push(chosen);
+      } else if (fieldSize === 2) {
+        parts.push(chosen & 0xFF, (chosen >> 8) & 0xFF);
+      } else if (fieldSize === 4) {
+        parts.push(chosen & 0xFF, (chosen >> 8) & 0xFF, (chosen >> 16) & 0xFF, (chosen >> 24) & 0xFF);
+      }
+    }
+    const cmd = new Uint8Array(parts);
+    await controlChar.writeValue(cmd);
+    log('START MAG envoyé (depuis réglages reçus): ' + toHex(new DataView(cmd.buffer)));
+    document.getElementById('btnMagStop').disabled = false;
+  } catch (err) {
+    log('ERREUR START MAG: ' + err);
+  }
+};
+
+document.getElementById('btnMagStop').onclick = async () => {
+  try {
+    await controlChar.writeValue(new Uint8Array([0x03, 0x06]));
+    log('STOP MAG envoyé.');
+  } catch (err) {
+    log('ERREUR STOP MAG: ' + err);
   }
 };
 
@@ -329,6 +389,15 @@ function handleData(value) {
     // FACTOR/settings format against a real response, same discipline as ACC.
     const frameTypeByte = value.getUint8(9);
     log(`  (trame GYRO, frame_type_byte=${frameTypeByte.toString(16)}, contenu=${value.byteLength-10} octets)`);
+    return;
+  }
+
+  if (measType === 0x06) {
+    // MAG — same: raw only until we've seen and verified a real frame_type
+    // (Polar's spec allows two different mag frame layouts, one with an extra
+    // calibration-status channel — need real bytes to know which this device sends).
+    const frameTypeByte = value.getUint8(9);
+    log(`  (trame MAG, frame_type_byte=${frameTypeByte.toString(16)}, contenu=${value.byteLength-10} octets)`);
     return;
   }
 
