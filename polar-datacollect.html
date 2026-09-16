@@ -26,7 +26,7 @@
 </style>
 </head>
 <body>
-<h1>Collecte de données — Polar Verity Sense <span style="color:#666;font-size:12px;">(v2 — ACC+GYRO)</span></h1>
+<h1>Collecte de données — Polar Verity Sense <span style="color:#666;font-size:12px;">(v3 — ACC+GYRO+MAG)</span></h1>
 <button id="btnConnect">1. Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -59,6 +59,7 @@ const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
 const HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
 const HR_CHAR = '00002a37-0000-1000-8000-00805f9b34fb';
 let gyroFactor = 0.07000000029802322; // verified default from a real device response; overwritten below if a fresh value arrives
+let magFactor = 0.001500000013038516; // verified default from a real device response; overwritten below if a fresh value arrives
 
 const PROTOCOL = [];
 const EXERCISES = ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)'];
@@ -177,17 +178,19 @@ document.getElementById('btnConnect').onclick = async () => {
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       log('CONTROL rx: ' + Array.from(new Uint8Array(dv.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
-      // START-GYRO ack carries the FACTOR (deg/s per raw unit) as a TLV — read it live
+      // START acks for GYRO and MAG carry their FACTOR as a TLV — read it live
       // rather than trusting a hardcoded value, in case it ever differs.
-      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && dv.getUint8(2) === 0x05) {
+      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && (dv.getUint8(2) === 0x05 || dv.getUint8(2) === 0x06)) {
+        const isGyro = dv.getUint8(2) === 0x05;
         let offset = 5;
         while (offset + 2 <= dv.byteLength) {
           const type = dv.getUint8(offset);
           const count = dv.getUint8(offset + 1);
           offset += 2;
           if (type === 5 && count >= 1 && offset + 4 <= dv.byteLength) { // FACTOR
-            gyroFactor = dv.getFloat32(offset, true);
-            log('Facteur GYRO reçu: ' + gyroFactor);
+            const factor = dv.getFloat32(offset, true);
+            if (isGyro) { gyroFactor = factor; log('Facteur GYRO reçu: ' + factor); }
+            else { magFactor = factor; log('Facteur MAG reçu: ' + factor); }
           }
           offset += count * (type === 5 ? 4 : (type === 4 ? 1 : 2));
         }
@@ -206,6 +209,11 @@ document.getElementById('btnConnect').onclick = async () => {
     const gyroCmd = new Uint8Array([0x02, 0x05, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 0xd0, 0x07, 0x04, 0x01, 3]);
     await controlChar.writeValue(gyroCmd);
     log('Flux GYRO démarré.');
+
+    // Start MAG stream: 50Hz (closest supported rate to 52Hz), 16-bit, ±50 Gauss, 3 channels (verified settings)
+    const magCmd = new Uint8Array([0x02, 0x06, 0x00, 0x01, 50, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 50, 0, 0x04, 0x01, 3]);
+    await controlChar.writeValue(magCmd);
+    log('Flux MAG démarré.');
 
     // HR service
     try {
@@ -295,11 +303,15 @@ function parseDeltaFramesAll(data, channels, resolution) {
 }
 
 const FS_NOMINAL = 52.0;
+const FS_MAG = 50.0; // magnetometer runs at a different rate (52Hz isn't one of its supported options)
 let runningSampleCount = 0;
 let recordStartSampleCount = 0;
 let runningGyroSampleCount = 0;
 let recordStartGyroSampleCount = 0;
 let currentGyro = [];
+let runningMagSampleCount = 0;
+let recordStartMagSampleCount = 0;
+let currentMag = [];
 
 function handleAccData(value) {
   if (value.byteLength <= 10) return;
@@ -307,6 +319,10 @@ function handleAccData(value) {
 
   if (measType === 0x05) {
     handleGyroData(value);
+    return;
+  }
+  if (measType === 0x06) {
+    handleMagData(value);
     return;
   }
   if (measType !== 0x02) return;
@@ -371,6 +387,36 @@ function handleGyroData(value) {
   }
 }
 
+function handleMagData(value) {
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  if (!(isCompressed && frameType === 0)) return; // mag TYPE_0, verified against real device (3ch, direct-to-Gauss)
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList;
+  try {
+    sampleList = parseDeltaFramesAll(content, 3, 16);
+  } catch (e) {
+    log('Erreur décodage MAG: ' + e);
+    return;
+  }
+  if (sampleList.length === 0) return;
+
+  for (const [x, y, z] of sampleList) {
+    if (isRecording) {
+      const t = (runningMagSampleCount - recordStartMagSampleCount) / FS_MAG * 1000;
+      currentMag.push({
+        t,
+        x: Math.round(x * magFactor * 1000) / 1000,
+        y: Math.round(y * magFactor * 1000) / 1000,
+        z: Math.round(z * magFactor * 1000) / 1000
+      });
+    }
+    runningMagSampleCount += 1;
+  }
+}
+
 function beep(freq, durationMs, delayMs) {
   setTimeout(() => {
     try {
@@ -415,8 +461,10 @@ function startActualRecording(c) {
   currentAcc = [];
   currentHr = [];
   currentGyro = [];
+  currentMag = [];
   recordStartSampleCount = runningSampleCount;
   recordStartGyroSampleCount = runningGyroSampleCount;
+  recordStartMagSampleCount = runningMagSampleCount;
   isRecording = true;
   beep(800, 150, 0); // "go" tone
 
@@ -460,12 +508,13 @@ function finishRecording(c) {
       groundTruthReps: reps,
       accSamples: currentAcc,
       gyroSamples: currentGyro,
+      magSamples: currentMag,
       hrSamples: currentHr
     };
     recordings.push(recording);
     const safeName = (c.exercise + '_' + c.position).toLowerCase().replace(/[^a-z0-9]+/g, '-');
     downloadJSON(recording, safeName + '.json');
-    log(`Enregistré: ${c.exercise} / ${c.position} — ${currentAcc.length} éch. ACC, ${currentGyro.length} éch. GYRO, ${currentHr.length} éch. HR, ${reps} reps déclarées`);
+    log(`Enregistré: ${c.exercise} / ${c.position} — ${currentAcc.length} éch. ACC, ${currentGyro.length} éch. GYRO, ${currentMag.length} éch. MAG, ${currentHr.length} éch. HR, ${reps} reps déclarées`);
 
     panel.style.display = 'none';
     configIndex += 1;
