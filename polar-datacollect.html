@@ -43,8 +43,8 @@
 <button id="btnReset" class="secondary">Réinitialiser la progression</button>
 
 <div id="repPanel" style="display:none; background:#1a1a2e; padding:14px; border-radius:8px; margin:10px 0;">
-  <div style="text-align:center; margin-bottom:8px;">Combien de répétitions (ou cycles) avez-vous faites pendant ces 15s ?</div>
-  <input id="repInput" type="number" inputmode="numeric" style="width:100%; font-size:24px; text-align:center; padding:10px; border-radius:6px; border:none;" placeholder="ex: 12">
+  <div style="text-align:center; margin-bottom:8px;">Combien de répétitions (ou cycles) avez-vous faites pendant ces 15s ? (ex: 6.5 si arrêté à mi-mouvement)</div>
+  <input id="repInput" type="number" inputmode="decimal" step="0.5" style="width:100%; font-size:24px; text-align:center; padding:10px; border-radius:6px; border:none;" placeholder="ex: 12">
   <button id="btnSubmitReps">Valider et passer à la suite</button>
 </div>
 
@@ -496,7 +496,7 @@ function finishRecording(c) {
   input.focus();
 
   document.getElementById('btnSubmitReps').onclick = () => {
-    const reps = parseInt(input.value, 10);
+    const reps = parseFloat(input.value);
     if (isNaN(reps)) {
       input.style.outline = '2px solid #c0392b';
       return;
