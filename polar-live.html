@@ -29,7 +29,7 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v3)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v4)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -378,7 +378,7 @@ function processLiveSample(mag, counting) {
   const mean = thresholdBuf.reduce((a,b)=>a+b,0) / thresholdBuf.length;
   const variance = thresholdBuf.reduce((a,b)=>a+(b-mean)*(b-mean),0) / thresholdBuf.length;
   const std = Math.sqrt(variance);
-  const threshold = Math.max(15, std * 1.3);
+  const threshold = Math.max(25, std * 1.3); // floor raised from 15: rest noise measured up to ~20mG, 25 gives real margin
 
   const idx = runningSampleCount;
   // local-max check with 1-sample lag
