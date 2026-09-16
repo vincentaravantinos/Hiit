@@ -137,6 +137,7 @@ const gridEl = document.getElementById('exerciseGrid');
 EXERCISES.forEach(ex => {
   const btn = document.createElement('button');
   btn.textContent = ex;
+  btn.dataset.exercise = ex;
   btn.disabled = true;
   btn.onclick = () => toggleExercise(ex, btn);
   gridEl.appendChild(btn);
@@ -151,7 +152,7 @@ function toggleExercise(ex, btn) {
 }
 
 function setExerciseButtonsEnabled(enabled) {
-  Array.from(gridEl.children).forEach(b => { if (b.textContent !== currentExercise) b.disabled = !enabled; });
+  Array.from(gridEl.children).forEach(b => { if (b.dataset.exercise !== currentExercise) b.disabled = !enabled; });
 }
 
 // ---- Live adaptive rep detector state ----
@@ -195,7 +196,7 @@ function stopSession() {
   Array.from(gridEl.children).forEach(b => {
     b.disabled = false;
     b.classList.remove('recording');
-    if (EXERCISES.includes(b.textContent.replace('⏹ ', ''))) b.textContent = b.textContent.replace('⏹ ', '');
+    b.textContent = b.dataset.exercise;
   });
   document.getElementById('posAvantBras').disabled = false;
   document.getElementById('posBiceps').disabled = false;
