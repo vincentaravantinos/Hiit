@@ -29,7 +29,7 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v2)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v3)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -163,6 +163,7 @@ let lastPeakSampleIdx = null;
 let peakIntervals = [];
 let refractorySamples = Math.round(FS_NOMINAL * 1.5); // physiological floor, adapts once we see reps
 let liveRepCount = 0;
+let repEventLog = [];
 
 function resetDetector() {
   magBuf = []; envBuf = [];
@@ -170,6 +171,7 @@ function resetDetector() {
   lastPeakSampleIdx = null; peakIntervals = [];
   refractorySamples = Math.round(FS_NOMINAL * 1.5);
   liveRepCount = 0;
+  repEventLog = [];
   liveCountEl.textContent = '0';
 }
 
@@ -214,6 +216,7 @@ document.getElementById('btnSubmitReps').onclick = () => {
     startedAtIso: new Date().toISOString(),
     liveDetectedReps: liveRepCount,
     groundTruthReps: reps,
+    repEventLog: repEventLog,
     accSamples: currentAcc,
     hrSamples: currentHr
   };
@@ -247,6 +250,8 @@ document.getElementById('btnDownloadAll').onclick = () => {
 
 // ---- Connect ----
 document.getElementById('btnConnect').onclick = async () => {
+  document.getElementById('btnConnect').disabled = true; // disable immediately, not just on success,
+  document.getElementById('btnConnect').textContent = 'Connexion en cours...';    // so a slow/partial failure can't leave it tappable for a second attempt
   try {
     log('Recherche de périphériques "Polar"...');
     device = await navigator.bluetooth.requestDevice({
@@ -281,10 +286,12 @@ document.getElementById('btnConnect').onclick = async () => {
       log('HR prêt.');
     } catch (e) { log('HR indisponible: ' + e); }
 
-    document.getElementById('btnConnect').disabled = true;
+    document.getElementById('btnConnect').textContent = 'Connecté ✓';
     Array.from(gridEl.children).forEach(b => b.disabled = false);
   } catch (err) {
     log('ERREUR connexion: ' + err);
+    document.getElementById('btnConnect').disabled = false; // only re-enable on genuine failure
+    document.getElementById('btnConnect').textContent = 'Connecter (réessayer)';
   }
 };
 
@@ -386,13 +393,15 @@ function processLiveSample(mag, counting) {
         if (peakIntervals.length >= 2) {
           const sorted = [...peakIntervals].sort((a,b)=>a-b);
           const median = sorted[Math.floor(sorted.length/2)];
-          refractorySamples = Math.max(Math.round(FS_NOMINAL*0.55), Math.min(Math.round(FS_NOMINAL*3.0), Math.round(median*0.6)));
+          refractorySamples = Math.max(Math.round(FS_NOMINAL*1.5), Math.min(Math.round(FS_NOMINAL*3.0), Math.round(median*0.6)));
         }
       }
       lastPeakSampleIdx = peakIdx;
       liveRepCount += 1;
       liveCountEl.textContent = liveRepCount;
       speakNumber(liveRepCount);
+      log(`Rep #${liveRepCount} détecté à t=${(idx/FS_NOMINAL).toFixed(2)}s (seuil actif=${(refractorySamples/FS_NOMINAL).toFixed(2)}s)`);
+      repEventLog.push({ t: idx/FS_NOMINAL, refractoryS: refractorySamples/FS_NOMINAL });
     }
   }
   prevEnv2 = prevEnv1;
