@@ -18,11 +18,15 @@
 </style>
 </head>
 <body>
-<h1>Polar Verity Sense — Test brut <span style="color:#666;font-size:12px;">(v4)</span></h1>
+<h1>Polar Verity Sense — Test brut <span style="color:#666;font-size:12px;">(v5)</span></h1>
 <button id="btnConnect">1. Connecter (Bluetooth)</button>
 <button id="btnSettings" disabled>2. Demander réglages ACC (GET_SETTINGS)</button>
 <button id="btnStart" disabled>3. Démarrer flux ACC (best-guess)</button>
-<button id="btnStop" class="stop" disabled>Stop</button>
+<button id="btnStop" class="stop" disabled>Stop ACC</button>
+<hr style="border-color:#333; margin:16px 0;">
+<button id="btnGyroSettings" disabled>4. Demander réglages GYRO (GET_SETTINGS)</button>
+<button id="btnGyroStart" disabled>5. Démarrer flux GYRO (auto depuis réglages reçus)</button>
+<button id="btnGyroStop" class="stop" disabled>Stop GYRO</button>
 
 <div id="big">–</div>
 <div id="xyz">x=– y=– z=–</div>
@@ -90,7 +94,14 @@ document.getElementById('btnConnect').onclick = async () => {
 
     await controlChar.startNotifications();
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
-      log('CONTROL rx: ' + toHex(e.target.value));
+      const dv = e.target.value;
+      log('CONTROL rx: ' + toHex(dv));
+      // opcode 1 = GET_SETTINGS response; type 5 = GYRO
+      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x01 && dv.getUint8(2) === 0x05) {
+        const parsed = parseSettingsResponse(dv);
+        lastGyroSettings = parsed;
+        logSettings(parsed, 'Réglages GYRO reçus');
+      }
     });
 
     await dataChar.startNotifications();
@@ -101,6 +112,8 @@ document.getElementById('btnConnect').onclick = async () => {
 
     document.getElementById('btnSettings').disabled = false;
     document.getElementById('btnStart').disabled = false;
+    document.getElementById('btnGyroSettings').disabled = false;
+    document.getElementById('btnGyroStart').disabled = false;
     document.getElementById('btnConnect').disabled = true;
   } catch (err) {
     log('ERREUR connexion: ' + err);
@@ -139,9 +152,107 @@ document.getElementById('btnStart').onclick = async () => {
 document.getElementById('btnStop').onclick = async () => {
   try {
     await controlChar.writeValue(new Uint8Array([0x03, 0x02]));
-    log('STOP envoyé.');
+    log('STOP ACC envoyé.');
   } catch (err) {
     log('ERREUR STOP: ' + err);
+  }
+};
+
+// ---- Generic GET_SETTINGS response parser (works for any measurement type) ----
+const SETTING_FIELD_SIZE = { 0: 2, 1: 2, 2: 2, 3: 4, 4: 1, 5: 4, 6: 16 }; // SAMPLE_RATE,RESOLUTION,RANGE,RANGE_MILLIUNIT,CHANNELS,FACTOR,SECURITY
+const SETTING_NAMES = { 0: 'SAMPLE_RATE', 1: 'RESOLUTION', 2: 'RANGE', 3: 'RANGE_MILLIUNIT', 4: 'CHANNELS', 5: 'FACTOR', 6: 'SECURITY' };
+
+function parseSettingsResponse(dv) {
+  // header: [0]=0xF0 resp code, [1]=opcode, [2]=measurement type, [3]=error, [4]=more-frames flag
+  const opcode = dv.getUint8(1);
+  const measType = dv.getUint8(2);
+  const errorCode = dv.getUint8(3);
+  const settings = {};
+  let offset = 5;
+  while (offset + 2 <= dv.byteLength) {
+    const type = dv.getUint8(offset);
+    const count = dv.getUint8(offset + 1);
+    offset += 2;
+    const fieldSize = SETTING_FIELD_SIZE[type] ?? 2;
+    const values = [];
+    for (let i = 0; i < count; i++) {
+      if (offset + fieldSize > dv.byteLength) break;
+      if (type === 5) { // FACTOR: IEEE-754 float32 LE
+        values.push(dv.getFloat32(offset, true));
+      } else if (fieldSize === 1) {
+        values.push(dv.getUint8(offset));
+      } else if (fieldSize === 2) {
+        values.push(dv.getUint16(offset, true));
+      } else if (fieldSize === 4) {
+        values.push(dv.getUint32(offset, true));
+      } else {
+        values.push(Array.from({length: fieldSize}, (_, k) => dv.getUint8(offset + k))); // e.g. SECURITY, just show raw bytes
+      }
+      offset += fieldSize;
+    }
+    settings[type] = values;
+  }
+  return { opcode, measType, errorCode, settings };
+}
+
+function logSettings(parsed, label) {
+  log(`${label}: opcode=${parsed.opcode} type=${parsed.measType} erreur=${parsed.errorCode}`);
+  for (const [type, values] of Object.entries(parsed.settings)) {
+    const name = SETTING_NAMES[type] ?? ('type' + type);
+    log(`  ${name}: [${values.join(', ')}]`);
+  }
+}
+
+let lastGyroSettings = null;
+
+document.getElementById('btnGyroSettings').onclick = async () => {
+  try {
+    await controlChar.writeValue(new Uint8Array([0x01, 0x05])); // GET_SETTINGS, type=5 GYRO
+    log('GET_SETTINGS envoyé pour GYRO (0x01 0x05).');
+  } catch (err) {
+    log('ERREUR GET_SETTINGS GYRO: ' + err);
+  }
+};
+
+document.getElementById('btnGyroStart').onclick = async () => {
+  try {
+    if (!lastGyroSettings) {
+      log('⚠️ Pas encore reçu les réglages GYRO — appuyez sur 4 d\'abord et attendez la réponse CONTROL rx.');
+      return;
+    }
+    // Build START command from whatever the device actually reported as supported
+    // (not a hardcoded guess): SAMPLE_RATE, RESOLUTION, RANGE, CHANNELS if present;
+    // FACTOR and SECURITY are informational, never sent back.
+    const parts = [0x02, 0x05]; // REQUEST_MEASUREMENT_START, type=5 GYRO
+    for (const type of [0, 1, 2, 4]) { // SAMPLE_RATE, RESOLUTION, RANGE, CHANNELS
+      const values = lastGyroSettings.settings[type];
+      if (!values || values.length === 0) continue;
+      const chosen = values[0]; // first offered option; log makes it easy to pick a different one if needed
+      const fieldSize = SETTING_FIELD_SIZE[type];
+      parts.push(type, 1);
+      if (fieldSize === 1) {
+        parts.push(chosen);
+      } else if (fieldSize === 2) {
+        parts.push(chosen & 0xFF, (chosen >> 8) & 0xFF);
+      } else if (fieldSize === 4) {
+        parts.push(chosen & 0xFF, (chosen >> 8) & 0xFF, (chosen >> 16) & 0xFF, (chosen >> 24) & 0xFF);
+      }
+    }
+    const cmd = new Uint8Array(parts);
+    await controlChar.writeValue(cmd);
+    log('START GYRO envoyé (depuis réglages reçus): ' + toHex(new DataView(cmd.buffer)));
+    document.getElementById('btnGyroStop').disabled = false;
+  } catch (err) {
+    log('ERREUR START GYRO: ' + err);
+  }
+};
+
+document.getElementById('btnGyroStop').onclick = async () => {
+  try {
+    await controlChar.writeValue(new Uint8Array([0x03, 0x05]));
+    log('STOP GYRO envoyé.');
+  } catch (err) {
+    log('ERREUR STOP GYRO: ' + err);
   }
 };
 
@@ -210,7 +321,18 @@ function handleData(value) {
   const hex = toHex(value);
   log('DATA rx (' + value.byteLength + ' octets): ' + hex);
 
-  if (value.byteLength <= 10 || value.getUint8(0) !== 0x02) return;
+  if (value.byteLength <= 10) return;
+  const measType = value.getUint8(0);
+
+  if (measType === 0x05) {
+    // GYRO — logging raw only for now; decode comes once we've verified the
+    // FACTOR/settings format against a real response, same discipline as ACC.
+    const frameTypeByte = value.getUint8(9);
+    log(`  (trame GYRO, frame_type_byte=${frameTypeByte.toString(16)}, contenu=${value.byteLength-10} octets)`);
+    return;
+  }
+
+  if (measType !== 0x02) return;
 
   const frameTypeByte = value.getUint8(9);
   const frameType = frameTypeByte & 0x7F;
