@@ -29,7 +29,7 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v4)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v5 — fusion 3D)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -63,6 +63,8 @@ const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
 const HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
 const HR_CHAR = '00002a37-0000-1000-8000-00805f9b34fb';
 const FS_NOMINAL = 52.0;
+let gyroFactor = 0.07000000029802322; // verified default; overwritten live from the START ack if it differs
+let latestGyroRate = { x: 0, y: 0, z: 0 }; // deg/s, most recent gyro sample (bias not yet subtracted)
 
 const EXERCISES = ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)'];
 let currentPosition = 'Avant-bras';
@@ -71,7 +73,10 @@ let isRecording = false;
 
 let runningSampleCount = 0;
 let recordStartSampleCount = 0;
+let runningGyroSampleCount = 0;
+let recordStartGyroSampleCount = 0;
 let currentAcc = [];
+let currentGyro = [];
 let currentHr = [];
 let latestHr = null;
 const recordings = [];
@@ -155,30 +160,144 @@ function setExerciseButtonsEnabled(enabled) {
   Array.from(gridEl.children).forEach(b => { if (b.dataset.exercise !== currentExercise) b.disabled = !enabled; });
 }
 
-// ---- Live adaptive rep detector state ----
-let magBuf = [];       // recent raw magnitudes, for rolling baseline
-let envBuf = [];        // recent smoothed envelope values, for adaptive threshold
-let prevEnv1 = null, prevEnv2 = null;
-let lastPeakSampleIdx = null;
-let peakIntervals = [];
-let refractorySamples = Math.round(FS_NOMINAL * 1.5); // physiological floor, adapts once we see reps
+// ---- Mahony 3D orientation fusion (accel+gyro), verified offline against real data ----
+function eulerToQuat(roll, pitch, yaw) {
+  const cr = Math.cos(roll/2), sr = Math.sin(roll/2);
+  const cp = Math.cos(pitch/2), sp = Math.sin(pitch/2);
+  const cy = Math.cos(yaw/2), sy = Math.sin(yaw/2);
+  return [
+    cr*cp*cy + sr*sp*sy,
+    sr*cp*cy - cr*sp*sy,
+    cr*sp*cy + sr*cp*sy,
+    cr*cp*sy - sr*sp*cy
+  ];
+}
+function estGravity(q) {
+  return [
+    2*(q[1]*q[3] - q[0]*q[2]),
+    2*(q[0]*q[1] + q[2]*q[3]),
+    q[0]*q[0] - q[1]*q[1] - q[2]*q[2] + q[3]*q[3]
+  ];
+}
+const MAHONY_KP = 1.0;
+
+// ---- Live rep-detection state (position/tilt-based, online-adapted version of the
+// offline-validated Mahony + hysteresis-state-machine approach) ----
+let mahonyQ = null;
+let mahonyV0 = null;
+let gyroBiasAccum = { x: 0, y: 0, z: 0, n: 0 };
+let gyroBias = { x: 0, y: 0, z: 0 };
+const TILT_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 4.0); // rolling window for adaptive top/bottom thresholds
+let tiltBuf = [];
+let posState = null;
+let lastCountedState = null;
 let liveRepCount = 0;
 let repEventLog = [];
 
+function percentile(sortedArr, p) {
+  const idx = (p/100) * (sortedArr.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedArr[lo];
+  return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo);
+}
+
 function resetDetector() {
-  magBuf = []; envBuf = [];
-  prevEnv1 = null; prevEnv2 = null;
-  lastPeakSampleIdx = null; peakIntervals = [];
-  refractorySamples = Math.round(FS_NOMINAL * 1.5);
+  mahonyQ = null; mahonyV0 = null;
+  gyroBiasAccum = { x: 0, y: 0, z: 0, n: 0 };
+  gyroBias = { x: 0, y: 0, z: 0 };
+  tiltBuf = [];
+  posState = null; lastCountedState = null;
   liveRepCount = 0;
   repEventLog = [];
   liveCountEl.textContent = '0';
 }
 
+function mahonyStep(ax, ay, az, gxRaw, gyRaw, gzRaw, dt) {
+  const gx = (gxRaw - gyroBias.x) * Math.PI / 180;
+  const gy = (gyRaw - gyroBias.y) * Math.PI / 180;
+  const gz = (gzRaw - gyroBias.z) * Math.PI / 180;
+
+  const na = Math.sqrt(ax*ax + ay*ay + az*az);
+  let ex = 0, ey = 0, ez = 0;
+  const v = estGravity(mahonyQ);
+  if (na > 1e-6) {
+    const a = [ax/na, ay/na, az/na];
+    ex = a[1]*v[2] - a[2]*v[1];
+    ey = a[2]*v[0] - a[0]*v[2];
+    ez = a[0]*v[1] - a[1]*v[0];
+  }
+
+  const gCx = gx + MAHONY_KP*ex, gCy = gy + MAHONY_KP*ey, gCz = gz + MAHONY_KP*ez;
+  const [q0,q1,q2,q3] = mahonyQ;
+  const qdot = [
+    0.5*(-q1*gCx - q2*gCy - q3*gCz),
+    0.5*(q0*gCx + q2*gCz - q3*gCy),
+    0.5*(q0*gCy - q1*gCz + q3*gCx),
+    0.5*(q0*gCz + q1*gCy - q2*gCx)
+  ];
+  let q = [q0+qdot[0]*dt, q1+qdot[1]*dt, q2+qdot[2]*dt, q3+qdot[3]*dt];
+  const nq = Math.sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
+  q = q.map(c => c/nq);
+  mahonyQ = q;
+
+  const vNow = estGravity(q);
+  const cosAngle = Math.max(-1, Math.min(1, vNow[0]*mahonyV0[0] + vNow[1]*mahonyV0[1] + vNow[2]*mahonyV0[2]));
+  return Math.acos(cosAngle) * 180 / Math.PI;
+}
+
+function processLivePositionSample(ax, ay, az, elapsedS) {
+  if (elapsedS < 2.0) {
+    // still in the "get ready" window: accumulate gyro bias, do nothing else yet
+    gyroBiasAccum.x += latestGyroRate.x; gyroBiasAccum.y += latestGyroRate.y; gyroBiasAccum.z += latestGyroRate.z;
+    gyroBiasAccum.n += 1;
+    return;
+  }
+  if (mahonyQ === null) {
+    // first sample past the calibration window: finalize bias, initialize orientation from accel
+    gyroBias.x = gyroBiasAccum.n > 0 ? gyroBiasAccum.x / gyroBiasAccum.n : 0;
+    gyroBias.y = gyroBiasAccum.n > 0 ? gyroBiasAccum.y / gyroBiasAccum.n : 0;
+    gyroBias.z = gyroBiasAccum.n > 0 ? gyroBiasAccum.z / gyroBiasAccum.n : 0;
+    const na = Math.sqrt(ax*ax + ay*ay + az*az) || 1;
+    const a0 = [ax/na, ay/na, az/na];
+    const roll0 = Math.atan2(a0[1], a0[2]);
+    const pitch0 = Math.atan2(-a0[0], Math.sqrt(a0[1]*a0[1] + a0[2]*a0[2]));
+    mahonyQ = eulerToQuat(roll0, pitch0, 0);
+    mahonyV0 = estGravity(mahonyQ);
+    log('Calibration terminée. Biais gyro (deg/s): ' + gyroBias.x.toFixed(1) + ', ' + gyroBias.y.toFixed(1) + ', ' + gyroBias.z.toFixed(1));
+    return;
+  }
+
+  const dt = 1.0 / FS_NOMINAL;
+  const tilt = mahonyStep(ax, ay, az, latestGyroRate.x, latestGyroRate.y, latestGyroRate.z, dt);
+
+  tiltBuf.push(tilt);
+  if (tiltBuf.length > TILT_WINDOW_SAMPLES) tiltBuf.shift();
+  if (tiltBuf.length < 10) return; // not enough history yet to threshold sensibly
+
+  const sorted = [...tiltBuf].sort((a,b) => a-b);
+  const lo = percentile(sorted, 20), hi = percentile(sorted, 80);
+  const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
+  const upperTh = mid + 0.15*band, lowerTh = mid - 0.15*band;
+
+  const newState = tilt > upperTh ? 'top' : (tilt < lowerTh ? 'bottom' : posState);
+  if (newState !== posState && newState !== null) {
+    if (lastCountedState !== null && newState === lastCountedState) {
+      liveRepCount += 1;
+      liveCountEl.textContent = liveRepCount;
+      speakNumber(liveRepCount);
+      log(`Rep #${liveRepCount} détecté (tilt=${tilt.toFixed(1)}°)`);
+      repEventLog.push({ tilt: Math.round(tilt*10)/10 });
+    }
+    if (lastCountedState === null) lastCountedState = newState;
+    posState = newState;
+  }
+}
+
 function startSession(ex, btn) {
   currentExercise = ex;
-  currentAcc = []; currentHr = [];
+  currentAcc = []; currentHr = []; currentGyro = [];
   recordStartSampleCount = runningSampleCount;
+  recordStartGyroSampleCount = runningGyroSampleCount;
   resetDetector();
   isRecording = true;
   btn.classList.add('recording');
@@ -218,6 +337,7 @@ document.getElementById('btnSubmitReps').onclick = () => {
     groundTruthReps: reps,
     repEventLog: repEventLog,
     accSamples: currentAcc,
+    gyroSamples: currentGyro,
     hrSamples: currentHr
   };
   recordings.push(recording);
@@ -268,7 +388,23 @@ document.getElementById('btnConnect').onclick = async () => {
     dataChar = await pmdService.getCharacteristic(PMD_DATA);
     await controlChar.startNotifications();
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
-      log('CONTROL rx: ' + Array.from(new Uint8Array(e.target.value.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
+      const dv = e.target.value;
+      log('CONTROL rx: ' + Array.from(new Uint8Array(dv.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
+      // START-GYRO ack carries the FACTOR (deg/s per raw unit) as a TLV — read it live
+      // rather than trusting a hardcoded value, in case it ever differs.
+      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && dv.getUint8(2) === 0x05) {
+        let offset = 5;
+        while (offset + 2 <= dv.byteLength) {
+          const type = dv.getUint8(offset);
+          const count = dv.getUint8(offset + 1);
+          offset += 2;
+          if (type === 5 && count >= 1 && offset + 4 <= dv.byteLength) { // FACTOR
+            gyroFactor = dv.getFloat32(offset, true);
+            log('Facteur GYRO reçu: ' + gyroFactor);
+          }
+          offset += count * (type === 5 ? 4 : (type === 4 ? 1 : 2));
+        }
+      }
     });
     await dataChar.startNotifications();
     dataChar.addEventListener('characteristicvaluechanged', (e) => handleAccData(e.target.value));
@@ -277,6 +413,10 @@ document.getElementById('btnConnect').onclick = async () => {
     const cmd = new Uint8Array([0x02, 0x02, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 8, 0, 0x04, 0x01, 3]);
     await controlChar.writeValue(cmd);
     log('Flux ACC démarré.');
+
+    const gyroCmd = new Uint8Array([0x02, 0x05, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 0xd0, 0x07, 0x04, 0x01, 3]);
+    await controlChar.writeValue(gyroCmd);
+    log('Flux GYRO démarré.');
 
     try {
       const hrService = await server.getPrimaryService(HR_SERVICE);
@@ -360,57 +500,14 @@ function parseDeltaFramesAll(data, channels, resolution) {
   return samples;
 }
 
-// ---- Live adaptive peak detection, sample by sample ----
-function processLiveSample(mag, counting) {
-  magBuf.push(mag);
-  if (magBuf.length > 30) magBuf.shift(); // ~0.5s rolling baseline window
-  const baseline = magBuf.reduce((a,b) => a+b, 0) / magBuf.length;
-  const dyn = mag - baseline;
-  const absDyn = Math.abs(dyn);
-
-  envBuf.push(absDyn);
-  if (envBuf.length > 35) envBuf.shift(); // smoothing window (~0.67s), tuned against captured dataset
-  const envSmoothed = envBuf.reduce((a,b) => a+b, 0) / envBuf.length;
-
-  // adaptive threshold from recent (~3s) envelope variability
-  thresholdBuf.push(envSmoothed);
-  if (thresholdBuf.length > Math.round(FS_NOMINAL*3)) thresholdBuf.shift();
-  const mean = thresholdBuf.reduce((a,b)=>a+b,0) / thresholdBuf.length;
-  const variance = thresholdBuf.reduce((a,b)=>a+(b-mean)*(b-mean),0) / thresholdBuf.length;
-  const std = Math.sqrt(variance);
-  const threshold = Math.max(25, std * 1.3); // floor raised from 15: rest noise measured up to ~20mG, 25 gives real margin
-
-  const idx = runningSampleCount;
-  // local-max check with 1-sample lag
-  if (counting && prevEnv1 !== null && prevEnv2 !== null) {
-    const isLocalMax = prevEnv1 > prevEnv2 && prevEnv1 >= envSmoothed;
-    const enoughGap = lastPeakSampleIdx === null || (idx - 1 - lastPeakSampleIdx) >= refractorySamples;
-    if (isLocalMax && prevEnv1 > threshold && enoughGap) {
-      const peakIdx = idx - 1;
-      if (lastPeakSampleIdx !== null) {
-        peakIntervals.push(peakIdx - lastPeakSampleIdx);
-        if (peakIntervals.length > 5) peakIntervals.shift();
-        if (peakIntervals.length >= 2) {
-          const sorted = [...peakIntervals].sort((a,b)=>a-b);
-          const median = sorted[Math.floor(sorted.length/2)];
-          refractorySamples = Math.max(Math.round(FS_NOMINAL*1.5), Math.min(Math.round(FS_NOMINAL*3.0), Math.round(median*0.6)));
-        }
-      }
-      lastPeakSampleIdx = peakIdx;
-      liveRepCount += 1;
-      liveCountEl.textContent = liveRepCount;
-      speakNumber(liveRepCount);
-      log(`Rep #${liveRepCount} détecté à t=${(idx/FS_NOMINAL).toFixed(2)}s (seuil actif=${(refractorySamples/FS_NOMINAL).toFixed(2)}s)`);
-      repEventLog.push({ t: idx/FS_NOMINAL, refractoryS: refractorySamples/FS_NOMINAL });
-    }
-  }
-  prevEnv2 = prevEnv1;
-  prevEnv1 = envSmoothed;
-}
-let thresholdBuf = [];
+// ---- Verified PMD delta-frame decompression continues above; live detection now driven by Mahony fusion ----
 
 function handleAccData(value) {
-  if (value.byteLength <= 10 || value.getUint8(0) !== 0x02) return;
+  if (value.byteLength <= 10) return;
+  const measType = value.getUint8(0);
+  if (measType === 0x05) { handleGyroData(value); return; }
+  if (measType !== 0x02) return;
+
   const frameTypeByte = value.getUint8(9);
   const frameType = frameTypeByte & 0x7F;
   const isCompressed = (frameTypeByte & 0x80) > 0;
@@ -433,12 +530,38 @@ function handleAccData(value) {
       const t = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000;
       currentAcc.push({ t, x, y, z, mag: Math.round(mag) });
       const elapsedS = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL;
-      processLiveSample(mag, elapsedS >= 2.0);
+      processLivePositionSample(x, y, z, elapsedS);
     }
     runningSampleCount += 1;
   }
   if (historyChart.length > 300) historyChart = historyChart.slice(-300);
   drawChart();
+}
+
+function handleGyroData(value) {
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  if (!(isCompressed && frameType === 0)) return; // gyro uses TYPE_0, verified against real device
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList;
+  try {
+    sampleList = parseDeltaFramesAll(content, 3, 16);
+  } catch (e) {
+    log('Erreur décodage GYRO: ' + e);
+    return;
+  }
+  if (sampleList.length === 0) return;
+
+  for (const [x, y, z] of sampleList) {
+    latestGyroRate = { x: x*gyroFactor, y: y*gyroFactor, z: z*gyroFactor };
+    if (isRecording) {
+      const t = (runningGyroSampleCount - recordStartGyroSampleCount) / FS_NOMINAL * 1000;
+      currentGyro.push({ t, x: Math.round(x*gyroFactor*100)/100, y: Math.round(y*gyroFactor*100)/100, z: Math.round(z*gyroFactor*100)/100 });
+    }
+    runningGyroSampleCount += 1;
+  }
 }
 </script>
 </body>
