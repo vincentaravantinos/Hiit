@@ -29,7 +29,7 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v5 — fusion 3D)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v6 — calibration validée)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -185,7 +185,7 @@ const MAHONY_KP = 1.0;
 // offline-validated Mahony + hysteresis-state-machine approach) ----
 let mahonyQ = null;
 let mahonyV0 = null;
-let gyroBiasAccum = { x: 0, y: 0, z: 0, n: 0 };
+let calibWindow = [];
 let gyroBias = { x: 0, y: 0, z: 0 };
 const TILT_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 4.0); // rolling window for adaptive top/bottom thresholds
 let tiltBuf = [];
@@ -203,7 +203,7 @@ function percentile(sortedArr, p) {
 
 function resetDetector() {
   mahonyQ = null; mahonyV0 = null;
-  gyroBiasAccum = { x: 0, y: 0, z: 0, n: 0 };
+  calibWindow = [];
   gyroBias = { x: 0, y: 0, z: 0 };
   tiltBuf = [];
   posState = null; lastCountedState = null;
@@ -245,25 +245,43 @@ function mahonyStep(ax, ay, az, gxRaw, gyRaw, gzRaw, dt) {
   return Math.acos(cosAngle) * 180 / Math.PI;
 }
 
+const CALIB_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 0.75); // ~0.75s rolling window to judge stillness
+const STILL_THRESHOLD_DPS = 15.0; // real background noise measured well under this; real motion is well over
+const CALIB_MIN_SAMPLES = Math.round(FS_NOMINAL * 0.5);
+const CALIB_MAX_ELAPSED_S = 6.0; // safety cap so calibration can't wait forever
+
 function processLivePositionSample(ax, ay, az, elapsedS) {
-  if (elapsedS < 2.0) {
-    // still in the "get ready" window: accumulate gyro bias, do nothing else yet
-    gyroBiasAccum.x += latestGyroRate.x; gyroBiasAccum.y += latestGyroRate.y; gyroBiasAccum.z += latestGyroRate.z;
-    gyroBiasAccum.n += 1;
-    return;
-  }
   if (mahonyQ === null) {
-    // first sample past the calibration window: finalize bias, initialize orientation from accel
-    gyroBias.x = gyroBiasAccum.n > 0 ? gyroBiasAccum.x / gyroBiasAccum.n : 0;
-    gyroBias.y = gyroBiasAccum.n > 0 ? gyroBiasAccum.y / gyroBiasAccum.n : 0;
-    gyroBias.z = gyroBiasAccum.n > 0 ? gyroBiasAccum.z / gyroBiasAccum.n : 0;
+    // Calibration phase: wait for genuine stillness (validated, not just a fixed timer) before
+    // locking in gyro bias — a blind timer trusts whatever motion happens to be in that window,
+    // which silently corrupts the whole session if the user is still getting into position.
+    calibWindow.push({ x: latestGyroRate.x, y: latestGyroRate.y, z: latestGyroRate.z });
+    if (calibWindow.length > CALIB_WINDOW_SAMPLES) calibWindow.shift();
+
+    if (calibWindow.length < CALIB_MIN_SAMPLES) return;
+
+    const meanX = calibWindow.reduce((a,s)=>a+s.x,0)/calibWindow.length;
+    const meanY = calibWindow.reduce((a,s)=>a+s.y,0)/calibWindow.length;
+    const meanZ = calibWindow.reduce((a,s)=>a+s.z,0)/calibWindow.length;
+    const magnitude = Math.sqrt(meanX*meanX + meanY*meanY + meanZ*meanZ);
+    const isStill = magnitude < STILL_THRESHOLD_DPS;
+    const timedOut = elapsedS >= CALIB_MAX_ELAPSED_S;
+    if (!isStill && !timedOut) return; // keep waiting, rolling window updates each tick
+
+    gyroBias.x = meanX; gyroBias.y = meanY; gyroBias.z = meanZ;
     const na = Math.sqrt(ax*ax + ay*ay + az*az) || 1;
     const a0 = [ax/na, ay/na, az/na];
     const roll0 = Math.atan2(a0[1], a0[2]);
     const pitch0 = Math.atan2(-a0[0], Math.sqrt(a0[1]*a0[1] + a0[2]*a0[2]));
     mahonyQ = eulerToQuat(roll0, pitch0, 0);
     mahonyV0 = estGravity(mahonyQ);
-    log('Calibration terminée. Biais gyro (deg/s): ' + gyroBias.x.toFixed(1) + ', ' + gyroBias.y.toFixed(1) + ', ' + gyroBias.z.toFixed(1));
+    if (timedOut && !isStill) {
+      log(`⚠️ Calibration forcée après ${elapsedS.toFixed(1)}s (mouvement résiduel: ${magnitude.toFixed(1)}°/s) — restez plus immobile au début la prochaine fois.`);
+    } else {
+      log(`Calibration terminée (${elapsedS.toFixed(1)}s). Biais gyro (deg/s): ${gyroBias.x.toFixed(1)}, ${gyroBias.y.toFixed(1)}, ${gyroBias.z.toFixed(1)}`);
+    }
+    liveLabelEl.textContent = currentExercise + ' — ' + currentPosition;
+    beep(800, 150, 0); // audible cue: counting starts now
     return;
   }
 
@@ -302,14 +320,11 @@ function startSession(ex, btn) {
   isRecording = true;
   btn.classList.add('recording');
   btn.textContent = '⏹ ' + ex;
-  liveLabelEl.textContent = ex + ' — ' + currentPosition + ' (préparez-vous...)';
+  liveLabelEl.textContent = ex + ' — ' + currentPosition + ' (restez immobile...)';
   setExerciseButtonsEnabled(false);
   document.getElementById('posAvantBras').disabled = true;
   document.getElementById('posBiceps').disabled = true;
   log('Session démarrée: ' + ex + ' / ' + currentPosition);
-  setTimeout(() => {
-    if (isRecording && currentExercise === ex) liveLabelEl.textContent = ex + ' — ' + currentPosition;
-  }, 2000);
 }
 
 function stopSession() {
