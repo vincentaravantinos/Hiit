@@ -31,7 +31,7 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v11 — timeout de connexion)</span></h1>
+<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v12 — gyro réactivé pour recherche transitions)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -71,10 +71,14 @@ let isRecording = false;
 
 let runningSampleCount = 0;
 let recordStartSampleCount = 0;
+let runningGyroSampleCount = 0;
+let recordStartGyroSampleCount = 0;
 let recordStartWallMs = 0;
 let currentAcc = [];
+let currentGyro = [];
 let currentHr = [];
 let latestHr = null;
+let gyroFactor = 0.07000000029802322; // verified default; overwritten live from the START ack if it differs
 const recordings = [];
 let recTimerInterval = null;
 
@@ -216,8 +220,9 @@ function offlineReanalyze(accSamples) {
 
 function startSession(ex, btn) {
   currentExercise = ex;
-  currentAcc = []; currentHr = [];
+  currentAcc = []; currentHr = []; currentGyro = [];
   recordStartSampleCount = runningSampleCount;
+  recordStartGyroSampleCount = runningGyroSampleCount;
   recordStartWallMs = performance.now();
   isRecording = true;
   btn.classList.add('recording');
@@ -268,6 +273,7 @@ document.getElementById('btnSubmitReps').onclick = () => {
     offlineRecount: offlineCount,
     groundTruthReps: reps,
     accSamples: currentAcc,
+    gyroSamples: currentGyro,
     hrSamples: currentHr
   };
   recordings.push(recording);
@@ -323,6 +329,21 @@ document.getElementById('btnConnect').onclick = async () => {
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       log('CONTROL rx: ' + Array.from(new Uint8Array(dv.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
+      // START-GYRO ack carries the FACTOR (deg/s per raw unit) as a TLV — read it live
+      // rather than trusting a hardcoded value, in case it ever differs.
+      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && dv.getUint8(2) === 0x05) {
+        let offset = 5;
+        while (offset + 2 <= dv.byteLength) {
+          const type = dv.getUint8(offset);
+          const count = dv.getUint8(offset + 1);
+          offset += 2;
+          if (type === 5 && count >= 1 && offset + 4 <= dv.byteLength) {
+            gyroFactor = dv.getFloat32(offset, true);
+            log('Facteur GYRO reçu: ' + gyroFactor);
+          }
+          offset += count * (type === 5 ? 4 : (type === 4 ? 1 : 2));
+        }
+      }
     });
     await withTimeout(dataChar.startNotifications(), 15000, 'startNotifications(DATA)');
     dataChar.addEventListener('characteristicvaluechanged', (e) => handleAccData(e.target.value));
@@ -331,6 +352,12 @@ document.getElementById('btnConnect').onclick = async () => {
     const cmd = new Uint8Array([0x02, 0x02, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 8, 0, 0x04, 0x01, 3]);
     await withTimeout(controlChar.writeValue(cmd), 15000, 'writeValue(START ACC)');
     log('Flux ACC démarré.');
+
+    // GYRO: recorded alongside ACC for offline transition-detection research only —
+    // no live counting uses this, so no calibration/stillness requirement applies here.
+    const gyroCmd = new Uint8Array([0x02, 0x05, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 0xd0, 0x07, 0x04, 0x01, 3]);
+    await withTimeout(controlChar.writeValue(gyroCmd), 15000, 'writeValue(START GYRO)');
+    log('Flux GYRO démarré.');
 
     try {
       const hrService = await withTimeout(server.getPrimaryService(HR_SERVICE), 8000, 'getPrimaryService(HR)');
@@ -417,6 +444,7 @@ function parseDeltaFramesAll(data, channels, resolution) {
 function handleAccData(value) {
   if (value.byteLength <= 10) return;
   const measType = value.getUint8(0);
+  if (measType === 0x05) { handleGyroData(value); return; }
   if (measType !== 0x02) return;
 
   const frameTypeByte = value.getUint8(9);
@@ -441,6 +469,31 @@ function handleAccData(value) {
       currentAcc.push({ t, x, y, z, mag: Math.round(mag) });
     }
     runningSampleCount += 1;
+  }
+}
+
+function handleGyroData(value) {
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  if (!(isCompressed && frameType === 0)) return; // gyro uses TYPE_0, verified against real device
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList;
+  try {
+    sampleList = parseDeltaFramesAll(content, 3, 16);
+  } catch (e) {
+    log('Erreur décodage GYRO: ' + e);
+    return;
+  }
+  if (sampleList.length === 0) return;
+
+  for (const [x, y, z] of sampleList) {
+    if (isRecording) {
+      const t = (runningGyroSampleCount - recordStartGyroSampleCount) / FS_NOMINAL * 1000;
+      currentGyro.push({ t, x: Math.round(x*gyroFactor*100)/100, y: Math.round(y*gyroFactor*100)/100, z: Math.round(z*gyroFactor*100)/100 });
+    }
+    runningGyroSampleCount += 1;
   }
 }
 </script>
