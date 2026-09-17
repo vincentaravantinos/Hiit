@@ -32,9 +32,11 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v7 — recompte hors ligne)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v8 — repère micro)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
+<button id="btnMic" class="secondary">🎤 Activer le micro (repère vocal "maintenant")</button>
+<div id="micStatus" style="text-align:center; font-size:13px; color:#666; min-height:18px;"></div>
 
 <div id="posToggle">
   <button id="posAvantBras" class="active-toggle">Avant-bras</button>
@@ -85,6 +87,76 @@ let latestHr = null;
 const recordings = [];
 
 let device, server, controlChar, dataChar, hrChar;
+
+// ---- Microphone cue detection: volume-spike based, not speech recognition ----
+// Deliberately does NOT record or store any audio — only detects "a loud sound just
+// happened" and logs the timestamp. No word recognition, no audio kept anywhere.
+let micStream = null, micAudioCtx = null, micAnalyser = null, micActive = false;
+let micBaseline = 0; // rolling ambient noise floor estimate
+let micLastCueSampleTime = -Infinity;
+const MIC_REFRACTORY_MS = 400; // don't count the same utterance's internal peaks twice
+let currentMicCues = []; // {t} relative to recordStart, saved into the session JSON
+
+document.getElementById('btnMic').onclick = async () => {
+  if (micActive) {
+    if (micStream) micStream.getTracks().forEach(t => t.stop());
+    if (micAudioCtx) micAudioCtx.close();
+    micActive = false;
+    document.getElementById('btnMic').textContent = '🎤 Activer le micro (repère vocal "maintenant")';
+    document.getElementById('micStatus').textContent = '';
+    return;
+  }
+  try {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = micAudioCtx.createMediaStreamSource(micStream);
+    micAnalyser = micAudioCtx.createAnalyser();
+    micAnalyser.fftSize = 1024;
+    source.connect(micAnalyser);
+    micActive = true;
+    document.getElementById('btnMic').textContent = '🎤 Micro actif (dire "maintenant" pour marquer un repère)';
+    document.getElementById('micStatus').textContent = 'Micro en écoute...';
+    log('Micro activé (détection de repère vocal par pic de volume, aucun audio enregistré).');
+    monitorMic();
+  } catch (err) {
+    log('ERREUR micro: ' + err);
+    document.getElementById('micStatus').textContent = 'Micro refusé ou indisponible.';
+  }
+};
+
+function monitorMic() {
+  if (!micActive) return;
+  const data = new Uint8Array(micAnalyser.fftSize);
+  micAnalyser.getByteTimeDomainData(data);
+  // RMS amplitude of this frame, centered around 128 (silence)
+  let sumSq = 0;
+  for (let i = 0; i < data.length; i++) {
+    const v = (data[i] - 128) / 128;
+    sumSq += v * v;
+  }
+  const rms = Math.sqrt(sumSq / data.length);
+
+  // slow-adapting ambient noise floor, fast-reacting spike detection above it
+  micBaseline = micBaseline * 0.98 + rms * 0.02;
+  const threshold = Math.max(0.06, micBaseline * 4);
+
+  const now = performance.now();
+  if (rms > threshold && (now - micLastCueSampleTime) > MIC_REFRACTORY_MS) {
+    micLastCueSampleTime = now;
+    onMicCueDetected();
+  }
+  requestAnimationFrame(monitorMic);
+}
+
+function onMicCueDetected() {
+  document.getElementById('micStatus').textContent = '🔊 Repère détecté !';
+  setTimeout(() => { if (micActive) document.getElementById('micStatus').textContent = 'Micro en écoute...'; }, 400);
+  if (isRecording) {
+    const t = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000;
+    currentMicCues.push({ t: Math.round(t) });
+    log(`Repère vocal détecté à t=${(t/1000).toFixed(2)}s`);
+  }
+}
 const logEl = document.getElementById('log');
 const hrEl = document.getElementById('hr');
 const liveCountEl = document.getElementById('liveCount');
@@ -396,7 +468,7 @@ function processLivePositionSample(ax, ay, az, elapsedS) {
 
 function startSession(ex, btn) {
   currentExercise = ex;
-  currentAcc = []; currentHr = []; currentGyro = [];
+  currentAcc = []; currentHr = []; currentGyro = []; currentMicCues = [];
   recordStartSampleCount = runningSampleCount;
   recordStartGyroSampleCount = runningGyroSampleCount;
   resetDetector();
@@ -443,6 +515,7 @@ document.getElementById('btnSubmitReps').onclick = () => {
     repEventLog: repEventLog,
     accSamples: currentAcc,
     gyroSamples: currentGyro,
+    micCues: currentMicCues,
     hrSamples: currentHr
   };
   recordings.push(recording);
