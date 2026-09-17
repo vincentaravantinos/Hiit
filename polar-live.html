@@ -31,7 +31,7 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v12 — gyro réactivé pour recherche transitions)</span></h1>
+<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v13 — tous les capteurs: ACC+GYRO+MAG+HR)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -79,6 +79,11 @@ let currentGyro = [];
 let currentHr = [];
 let latestHr = null;
 let gyroFactor = 0.07000000029802322; // verified default; overwritten live from the START ack if it differs
+let magFactor = 0.001500000013038516; // verified default; overwritten live from the START ack if it differs
+const FS_MAG = 50.0; // magnetometer runs at its own rate (52Hz isn't one of its supported options)
+let runningMagSampleCount = 0;
+let recordStartMagSampleCount = 0;
+let currentMag = [];
 const recordings = [];
 let recTimerInterval = null;
 
@@ -220,9 +225,10 @@ function offlineReanalyze(accSamples) {
 
 function startSession(ex, btn) {
   currentExercise = ex;
-  currentAcc = []; currentHr = []; currentGyro = [];
+  currentAcc = []; currentHr = []; currentGyro = []; currentMag = [];
   recordStartSampleCount = runningSampleCount;
   recordStartGyroSampleCount = runningGyroSampleCount;
+  recordStartMagSampleCount = runningMagSampleCount;
   recordStartWallMs = performance.now();
   isRecording = true;
   btn.classList.add('recording');
@@ -274,6 +280,7 @@ document.getElementById('btnSubmitReps').onclick = () => {
     groundTruthReps: reps,
     accSamples: currentAcc,
     gyroSamples: currentGyro,
+    magSamples: currentMag,
     hrSamples: currentHr
   };
   recordings.push(recording);
@@ -329,17 +336,19 @@ document.getElementById('btnConnect').onclick = async () => {
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       log('CONTROL rx: ' + Array.from(new Uint8Array(dv.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
-      // START-GYRO ack carries the FACTOR (deg/s per raw unit) as a TLV — read it live
-      // rather than trusting a hardcoded value, in case it ever differs.
-      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && dv.getUint8(2) === 0x05) {
+      // START-GYRO/MAG acks carry their FACTOR as a TLV — read it live rather than
+      // trusting a hardcoded value, in case it ever differs.
+      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && (dv.getUint8(2) === 0x05 || dv.getUint8(2) === 0x06)) {
+        const isGyro = dv.getUint8(2) === 0x05;
         let offset = 5;
         while (offset + 2 <= dv.byteLength) {
           const type = dv.getUint8(offset);
           const count = dv.getUint8(offset + 1);
           offset += 2;
           if (type === 5 && count >= 1 && offset + 4 <= dv.byteLength) {
-            gyroFactor = dv.getFloat32(offset, true);
-            log('Facteur GYRO reçu: ' + gyroFactor);
+            const factor = dv.getFloat32(offset, true);
+            if (isGyro) { gyroFactor = factor; log('Facteur GYRO reçu: ' + factor); }
+            else { magFactor = factor; log('Facteur MAG reçu: ' + factor); }
           }
           offset += count * (type === 5 ? 4 : (type === 4 ? 1 : 2));
         }
@@ -353,11 +362,15 @@ document.getElementById('btnConnect').onclick = async () => {
     await withTimeout(controlChar.writeValue(cmd), 15000, 'writeValue(START ACC)');
     log('Flux ACC démarré.');
 
-    // GYRO: recorded alongside ACC for offline transition-detection research only —
-    // no live counting uses this, so no calibration/stillness requirement applies here.
+    // GYRO + MAG: recorded alongside ACC purely so we never have to redo a session just
+    // because a sensor wasn't captured. No live counting uses either of these.
     const gyroCmd = new Uint8Array([0x02, 0x05, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 0xd0, 0x07, 0x04, 0x01, 3]);
     await withTimeout(controlChar.writeValue(gyroCmd), 15000, 'writeValue(START GYRO)');
     log('Flux GYRO démarré.');
+
+    const magCmd = new Uint8Array([0x02, 0x06, 0x00, 0x01, 50, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 50, 0, 0x04, 0x01, 3]);
+    await withTimeout(controlChar.writeValue(magCmd), 15000, 'writeValue(START MAG)');
+    log('Flux MAG démarré.');
 
     try {
       const hrService = await withTimeout(server.getPrimaryService(HR_SERVICE), 8000, 'getPrimaryService(HR)');
@@ -445,6 +458,7 @@ function handleAccData(value) {
   if (value.byteLength <= 10) return;
   const measType = value.getUint8(0);
   if (measType === 0x05) { handleGyroData(value); return; }
+  if (measType === 0x06) { handleMagData(value); return; }
   if (measType !== 0x02) return;
 
   const frameTypeByte = value.getUint8(9);
@@ -494,6 +508,31 @@ function handleGyroData(value) {
       currentGyro.push({ t, x: Math.round(x*gyroFactor*100)/100, y: Math.round(y*gyroFactor*100)/100, z: Math.round(z*gyroFactor*100)/100 });
     }
     runningGyroSampleCount += 1;
+  }
+}
+
+function handleMagData(value) {
+  const frameTypeByte = value.getUint8(9);
+  const frameType = frameTypeByte & 0x7F;
+  const isCompressed = (frameTypeByte & 0x80) > 0;
+  if (!(isCompressed && frameType === 0)) return; // mag TYPE_0, verified against real device (3ch, direct-to-Gauss)
+  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
+
+  let sampleList;
+  try {
+    sampleList = parseDeltaFramesAll(content, 3, 16);
+  } catch (e) {
+    log('Erreur décodage MAG: ' + e);
+    return;
+  }
+  if (sampleList.length === 0) return;
+
+  for (const [x, y, z] of sampleList) {
+    if (isRecording) {
+      const t = (runningMagSampleCount - recordStartMagSampleCount) / FS_MAG * 1000;
+      currentMag.push({ t, x: Math.round(x*magFactor*1000)/1000, y: Math.round(y*magFactor*1000)/1000, z: Math.round(z*magFactor*1000)/1000 });
+    }
+    runningMagSampleCount += 1;
   }
 }
 </script>
