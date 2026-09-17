@@ -32,7 +32,7 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v8 — repère micro)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v9 — accel seul, sans gyro)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 <button id="btnMic" class="secondary">🎤 Activer le micro (repère vocal "maintenant")</button>
@@ -68,8 +68,6 @@ const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
 const HR_SERVICE = '0000180d-0000-1000-8000-00805f9b34fb';
 const HR_CHAR = '00002a37-0000-1000-8000-00805f9b34fb';
 const FS_NOMINAL = 52.0;
-let gyroFactor = 0.07000000029802322; // verified default; overwritten live from the START ack if it differs
-let latestGyroRate = { x: 0, y: 0, z: 0 }; // deg/s, most recent gyro sample (bias not yet subtracted)
 
 const EXERCISES = ['Pompes', 'Tractions', 'Squats', 'Tirage élastique', 'Brasse (air)', 'Crawl (air)', 'Dos crawlé (air)'];
 let currentPosition = 'Avant-bras';
@@ -78,10 +76,7 @@ let isRecording = false;
 
 let runningSampleCount = 0;
 let recordStartSampleCount = 0;
-let runningGyroSampleCount = 0;
-let recordStartGyroSampleCount = 0;
 let currentAcc = [];
-let currentGyro = [];
 let currentHr = [];
 let latestHr = null;
 const recordings = [];
@@ -235,34 +230,11 @@ function setExerciseButtonsEnabled(enabled) {
   Array.from(gridEl.children).forEach(b => { if (b.dataset.exercise !== currentExercise) b.disabled = !enabled; });
 }
 
-// ---- Mahony 3D orientation fusion (accel+gyro), verified offline against real data ----
-function eulerToQuat(roll, pitch, yaw) {
-  const cr = Math.cos(roll/2), sr = Math.sin(roll/2);
-  const cp = Math.cos(pitch/2), sp = Math.sin(pitch/2);
-  const cy = Math.cos(yaw/2), sy = Math.sin(yaw/2);
-  return [
-    cr*cp*cy + sr*sp*sy,
-    sr*cp*cy - cr*sp*sy,
-    cr*sp*cy + sr*cp*sy,
-    cr*cp*sy - sr*sp*cy
-  ];
-}
-function estGravity(q) {
-  return [
-    2*(q[1]*q[3] - q[0]*q[2]),
-    2*(q[0]*q[1] + q[2]*q[3]),
-    q[0]*q[0] - q[1]*q[1] - q[2]*q[2] + q[3]*q[3]
-  ];
-}
-const MAHONY_KP = 1.0;
-
-// ---- Live rep-detection state (position/tilt-based, online-adapted version of the
-// offline-validated Mahony + hysteresis-state-machine approach) ----
-let mahonyQ = null;
-let mahonyV0 = null;
-let calibWindow = [];
-let gyroBias = { x: 0, y: 0, z: 0 };
-const TILT_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 4.0); // rolling window for adaptive top/bottom thresholds
+// ---- Live rep-detection state (causal accel-only, no gyro/integration/drift).
+// Validated offline (replayed sample-by-sample as if live) at 9/14 within ±1 rep across
+// the whole exercise set — matching or beating the old gyro-fusion live detector, with
+// none of its drift, calibration-stillness, or live-timing fragility.
+const TILT_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 2.2); // rolling window for adaptive top/bottom thresholds
 let tiltBuf = [];
 let posState = null;
 let lastCountedState = null;
@@ -277,11 +249,9 @@ function percentile(sortedArr, p) {
 }
 
 // ---- Offline "precise" re-analysis: run once after a session ends, on the full recording.
-// Deliberately does NOT use gyro integration — no drift, no calibration fragility, no
-// live-timing sensitivity, fully deterministic. Validated offline at 11/14 within ±1 rep
-// across the whole exercise set (best result of every approach tried), vs ~8-9/14 for the
-// live gyro-fusion detector. Uses gravity direction directly each sample (no integration)
-// plus zero-phase Gaussian smoothing, which only works non-causally — impossible live.
+// Same accel-only approach as the live detector, but with zero-phase (non-causal) smoothing
+// and a whole-session threshold — both only possible after the fact, never live. Validated
+// at 11/14 within ±1 rep, the best result of every approach tried in this project.
 function gaussianSmooth(arr, sigmaSamples) {
   const radius = Math.ceil(sigmaSamples * 3);
   const kernel = [];
@@ -314,8 +284,6 @@ function offlineReanalyze(accSamples) {
   }
   const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
 
-  // find the quietest short window in the first few seconds as the orientation reference
-  // (offline-only: can scan ahead, unlike the live version which must decide in real time)
   const searchN = Math.min(n, Math.round(FS_NOMINAL*3));
   const winN = Math.max(5, Math.round(FS_NOMINAL*0.6));
   let bestStart = 0, bestVar = Infinity;
@@ -344,22 +312,32 @@ function offlineReanalyze(accSamples) {
   const lo = percentile(sorted, 20), hi = percentile(sorted, 80);
   const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
   const upperTh = mid + 0.15*band, lowerTh = mid - 0.15*band;
-  let state = null, lastCountedState = null, reps = 0;
+  let state = null, lastCountedState2 = null, reps = 0;
   for (const v of posArr) {
     const newState = v > upperTh ? 'top' : (v < lowerTh ? 'bottom' : state);
     if (newState !== state && newState !== null) {
-      if (lastCountedState !== null && newState === lastCountedState) reps += 1;
-      if (lastCountedState === null) lastCountedState = newState;
+      if (lastCountedState2 !== null && newState === lastCountedState2) reps += 1;
+      if (lastCountedState2 === null) lastCountedState2 = newState;
       state = newState;
     }
   }
   return reps;
 }
 
+// ---- Live causal detector state ----
+let calibDone = false;
+let calibBuf = []; // unit accel vectors accumulated during calibration
+let liveRef = null; // fixed reference unit vector, set once at calibration
+let liveEma = null; // causal exponential smoothing state
+const CALIB_MIN_SAMPLES = Math.round(FS_NOMINAL * 1.5);
+const CALIB_WIN_SAMPLES = Math.max(5, Math.round(FS_NOMINAL * 0.6));
+const EMA_ALPHA = 1 - Math.exp(-(1.0/FS_NOMINAL) / 0.40); // causal low-pass, tau=0.40s
+
 function resetDetector() {
-  mahonyQ = null; mahonyV0 = null;
-  calibWindow = [];
-  gyroBias = { x: 0, y: 0, z: 0 };
+  calibDone = false;
+  calibBuf = [];
+  liveRef = null;
+  liveEma = null;
   tiltBuf = [];
   posState = null; lastCountedState = null;
   liveRepCount = 0;
@@ -367,99 +345,62 @@ function resetDetector() {
   liveCountEl.textContent = '0';
 }
 
-function mahonyStep(ax, ay, az, gxRaw, gyRaw, gzRaw, dt) {
-  const gx = (gxRaw - gyroBias.x) * Math.PI / 180;
-  const gy = (gyRaw - gyroBias.y) * Math.PI / 180;
-  const gz = (gzRaw - gyroBias.z) * Math.PI / 180;
-
-  const na = Math.sqrt(ax*ax + ay*ay + az*az);
-  let ex = 0, ey = 0, ez = 0;
-  const v = estGravity(mahonyQ);
-  if (na > 1e-6) {
-    const a = [ax/na, ay/na, az/na];
-    ex = a[1]*v[2] - a[2]*v[1];
-    ey = a[2]*v[0] - a[0]*v[2];
-    ez = a[0]*v[1] - a[1]*v[0];
-  }
-
-  const gCx = gx + MAHONY_KP*ex, gCy = gy + MAHONY_KP*ey, gCz = gz + MAHONY_KP*ez;
-  const [q0,q1,q2,q3] = mahonyQ;
-  const qdot = [
-    0.5*(-q1*gCx - q2*gCy - q3*gCz),
-    0.5*(q0*gCx + q2*gCz - q3*gCy),
-    0.5*(q0*gCy - q1*gCz + q3*gCx),
-    0.5*(q0*gCz + q1*gCy - q2*gCx)
-  ];
-  let q = [q0+qdot[0]*dt, q1+qdot[1]*dt, q2+qdot[2]*dt, q3+qdot[3]*dt];
-  const nq = Math.sqrt(q[0]*q[0]+q[1]*q[1]+q[2]*q[2]+q[3]*q[3]);
-  q = q.map(c => c/nq);
-  mahonyQ = q;
-
-  const vNow = estGravity(q);
-  const cosAngle = Math.max(-1, Math.min(1, vNow[0]*mahonyV0[0] + vNow[1]*mahonyV0[1] + vNow[2]*mahonyV0[2]));
-  return Math.acos(cosAngle) * 180 / Math.PI;
-}
-
-const CALIB_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 0.75); // ~0.75s rolling window to judge stillness
-const STILL_THRESHOLD_DPS = 15.0; // real background noise measured well under this; real motion is well over
-const CALIB_MIN_SAMPLES = Math.round(FS_NOMINAL * 0.5);
-const CALIB_MAX_ELAPSED_S = 6.0; // safety cap so calibration can't wait forever
-
 function processLivePositionSample(ax, ay, az, elapsedS) {
-  if (mahonyQ === null) {
-    // Calibration phase: wait for genuine stillness (validated, not just a fixed timer) before
-    // locking in gyro bias — a blind timer trusts whatever motion happens to be in that window,
-    // which silently corrupts the whole session if the user is still getting into position.
-    calibWindow.push({ x: latestGyroRate.x, y: latestGyroRate.y, z: latestGyroRate.z });
-    if (calibWindow.length > CALIB_WINDOW_SAMPLES) calibWindow.shift();
+  const norm = Math.sqrt(ax*ax + ay*ay + az*az) || 1e-6;
+  const ux = ax/norm, uy = ay/norm, uz = az/norm;
 
-    if (calibWindow.length < CALIB_MIN_SAMPLES) return;
+  if (!calibDone) {
+    // Accel calibration doesn't need genuine stillness the way gyro bias did — an
+    // imperfect reference here is just a fixed offset, not an accumulating error — so
+    // this can be simple: once we've seen enough samples, pick the quietest short
+    // window among them (causal: only looks at what's already arrived).
+    calibBuf.push([ux, uy, uz]);
+    if (calibBuf.length < CALIB_MIN_SAMPLES) return;
 
-    const meanX = calibWindow.reduce((a,s)=>a+s.x,0)/calibWindow.length;
-    const meanY = calibWindow.reduce((a,s)=>a+s.y,0)/calibWindow.length;
-    const meanZ = calibWindow.reduce((a,s)=>a+s.z,0)/calibWindow.length;
-    const magnitude = Math.sqrt(meanX*meanX + meanY*meanY + meanZ*meanZ);
-    const isStill = magnitude < STILL_THRESHOLD_DPS;
-    const timedOut = elapsedS >= CALIB_MAX_ELAPSED_S;
-    if (!isStill && !timedOut) return; // keep waiting, rolling window updates each tick
-
-    gyroBias.x = meanX; gyroBias.y = meanY; gyroBias.z = meanZ;
-    const na = Math.sqrt(ax*ax + ay*ay + az*az) || 1;
-    const a0 = [ax/na, ay/na, az/na];
-    const roll0 = Math.atan2(a0[1], a0[2]);
-    const pitch0 = Math.atan2(-a0[0], Math.sqrt(a0[1]*a0[1] + a0[2]*a0[2]));
-    mahonyQ = eulerToQuat(roll0, pitch0, 0);
-    mahonyV0 = estGravity(mahonyQ);
-    if (timedOut && !isStill) {
-      log(`⚠️ Calibration forcée après ${elapsedS.toFixed(1)}s (mouvement résiduel: ${magnitude.toFixed(1)}°/s) — restez plus immobile au début la prochaine fois.`);
-    } else {
-      log(`Calibration terminée (${elapsedS.toFixed(1)}s). Biais gyro (deg/s): ${gyroBias.x.toFixed(1)}, ${gyroBias.y.toFixed(1)}, ${gyroBias.z.toFixed(1)}`);
+    let bestStart = 0, bestVar = Infinity;
+    for (let start = 0; start <= calibBuf.length - CALIB_WIN_SAMPLES; start++) {
+      const seg = calibBuf.slice(start, start + CALIB_WIN_SAMPLES);
+      const mX = seg.reduce((a,s)=>a+s[0],0)/seg.length;
+      const mY = seg.reduce((a,s)=>a+s[1],0)/seg.length;
+      const mZ = seg.reduce((a,s)=>a+s[2],0)/seg.length;
+      const v = seg.reduce((a,s)=>a+(s[0]-mX)**2+(s[1]-mY)**2+(s[2]-mZ)**2,0)/seg.length;
+      if (v < bestVar) { bestVar = v; bestStart = start; }
     }
+    const seg = calibBuf.slice(bestStart, bestStart + CALIB_WIN_SAMPLES);
+    let refX = seg.reduce((a,s)=>a+s[0],0)/seg.length;
+    let refY = seg.reduce((a,s)=>a+s[1],0)/seg.length;
+    let refZ = seg.reduce((a,s)=>a+s[2],0)/seg.length;
+    const rn = Math.sqrt(refX*refX+refY*refY+refZ*refZ) || 1e-6;
+    liveRef = [refX/rn, refY/rn, refZ/rn];
+    calibDone = true;
+    calibBuf = [];
+    log(`Calibration terminée (${elapsedS.toFixed(1)}s).`);
     liveLabelEl.textContent = currentExercise + ' — ' + currentPosition;
-    beep(800, 150, 0); // audible cue: counting starts now
+    beep(800, 150, 0);
     return;
   }
 
-  const dt = 1.0 / FS_NOMINAL;
-  const tilt = mahonyStep(ax, ay, az, latestGyroRate.x, latestGyroRate.y, latestGyroRate.z, dt);
+  const cosAngle = Math.max(-1, Math.min(1, ux*liveRef[0] + uy*liveRef[1] + uz*liveRef[2]));
+  const tilt = Math.acos(cosAngle) * 180 / Math.PI;
+  liveEma = liveEma === null ? tilt : (EMA_ALPHA*tilt + (1-EMA_ALPHA)*liveEma);
 
-  tiltBuf.push(tilt);
+  tiltBuf.push(liveEma);
   if (tiltBuf.length > TILT_WINDOW_SAMPLES) tiltBuf.shift();
-  if (tiltBuf.length < 10) return; // not enough history yet to threshold sensibly
+  if (tiltBuf.length < 10) return;
 
   const sorted = [...tiltBuf].sort((a,b) => a-b);
   const lo = percentile(sorted, 20), hi = percentile(sorted, 80);
   const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
   const upperTh = mid + 0.15*band, lowerTh = mid - 0.15*band;
 
-  const newState = tilt > upperTh ? 'top' : (tilt < lowerTh ? 'bottom' : posState);
+  const newState = liveEma > upperTh ? 'top' : (liveEma < lowerTh ? 'bottom' : posState);
   if (newState !== posState && newState !== null) {
     if (lastCountedState !== null && newState === lastCountedState) {
       liveRepCount += 1;
       liveCountEl.textContent = liveRepCount;
       speakNumber(liveRepCount);
-      log(`Rep #${liveRepCount} détecté (tilt=${tilt.toFixed(1)}°)`);
-      repEventLog.push({ tilt: Math.round(tilt*10)/10 });
+      log(`Rep #${liveRepCount} détecté (tilt=${liveEma.toFixed(1)}°)`);
+      repEventLog.push({ tilt: Math.round(liveEma*10)/10 });
     }
     if (lastCountedState === null) lastCountedState = newState;
     posState = newState;
@@ -468,9 +409,8 @@ function processLivePositionSample(ax, ay, az, elapsedS) {
 
 function startSession(ex, btn) {
   currentExercise = ex;
-  currentAcc = []; currentHr = []; currentGyro = []; currentMicCues = [];
+  currentAcc = []; currentHr = []; currentMicCues = [];
   recordStartSampleCount = runningSampleCount;
-  recordStartGyroSampleCount = runningGyroSampleCount;
   resetDetector();
   isRecording = true;
   btn.classList.add('recording');
@@ -514,7 +454,6 @@ document.getElementById('btnSubmitReps').onclick = () => {
     groundTruthReps: reps,
     repEventLog: repEventLog,
     accSamples: currentAcc,
-    gyroSamples: currentGyro,
     micCues: currentMicCues,
     hrSamples: currentHr
   };
@@ -570,21 +509,6 @@ document.getElementById('btnConnect').onclick = async () => {
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       log('CONTROL rx: ' + Array.from(new Uint8Array(dv.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
-      // START-GYRO ack carries the FACTOR (deg/s per raw unit) as a TLV — read it live
-      // rather than trusting a hardcoded value, in case it ever differs.
-      if (dv.byteLength >= 5 && dv.getUint8(1) === 0x02 && dv.getUint8(2) === 0x05) {
-        let offset = 5;
-        while (offset + 2 <= dv.byteLength) {
-          const type = dv.getUint8(offset);
-          const count = dv.getUint8(offset + 1);
-          offset += 2;
-          if (type === 5 && count >= 1 && offset + 4 <= dv.byteLength) { // FACTOR
-            gyroFactor = dv.getFloat32(offset, true);
-            log('Facteur GYRO reçu: ' + gyroFactor);
-          }
-          offset += count * (type === 5 ? 4 : (type === 4 ? 1 : 2));
-        }
-      }
     });
     await dataChar.startNotifications();
     dataChar.addEventListener('characteristicvaluechanged', (e) => handleAccData(e.target.value));
@@ -593,10 +517,6 @@ document.getElementById('btnConnect').onclick = async () => {
     const cmd = new Uint8Array([0x02, 0x02, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 8, 0, 0x04, 0x01, 3]);
     await controlChar.writeValue(cmd);
     log('Flux ACC démarré.');
-
-    const gyroCmd = new Uint8Array([0x02, 0x05, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 0xd0, 0x07, 0x04, 0x01, 3]);
-    await controlChar.writeValue(gyroCmd);
-    log('Flux GYRO démarré.');
 
     try {
       const hrService = await server.getPrimaryService(HR_SERVICE);
@@ -685,7 +605,6 @@ function parseDeltaFramesAll(data, channels, resolution) {
 function handleAccData(value) {
   if (value.byteLength <= 10) return;
   const measType = value.getUint8(0);
-  if (measType === 0x05) { handleGyroData(value); return; }
   if (measType !== 0x02) return;
 
   const frameTypeByte = value.getUint8(9);
@@ -716,32 +635,6 @@ function handleAccData(value) {
   }
   if (historyChart.length > 300) historyChart = historyChart.slice(-300);
   drawChart();
-}
-
-function handleGyroData(value) {
-  const frameTypeByte = value.getUint8(9);
-  const frameType = frameTypeByte & 0x7F;
-  const isCompressed = (frameTypeByte & 0x80) > 0;
-  if (!(isCompressed && frameType === 0)) return; // gyro uses TYPE_0, verified against real device
-  const content = new Uint8Array(value.buffer, value.byteOffset + 10, value.byteLength - 10);
-
-  let sampleList;
-  try {
-    sampleList = parseDeltaFramesAll(content, 3, 16);
-  } catch (e) {
-    log('Erreur décodage GYRO: ' + e);
-    return;
-  }
-  if (sampleList.length === 0) return;
-
-  for (const [x, y, z] of sampleList) {
-    latestGyroRate = { x: x*gyroFactor, y: y*gyroFactor, z: z*gyroFactor };
-    if (isRecording) {
-      const t = (runningGyroSampleCount - recordStartGyroSampleCount) / FS_NOMINAL * 1000;
-      currentGyro.push({ t, x: Math.round(x*gyroFactor*100)/100, y: Math.round(y*gyroFactor*100)/100, z: Math.round(z*gyroFactor*100)/100 });
-    }
-    runningGyroSampleCount += 1;
-  }
 }
 </script>
 </body>
