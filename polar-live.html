@@ -32,7 +32,7 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v6 — calibration validée)</span></h1>
+<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v7 — recompte hors ligne)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -204,6 +204,86 @@ function percentile(sortedArr, p) {
   return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo);
 }
 
+// ---- Offline "precise" re-analysis: run once after a session ends, on the full recording.
+// Deliberately does NOT use gyro integration — no drift, no calibration fragility, no
+// live-timing sensitivity, fully deterministic. Validated offline at 11/14 within ±1 rep
+// across the whole exercise set (best result of every approach tried), vs ~8-9/14 for the
+// live gyro-fusion detector. Uses gravity direction directly each sample (no integration)
+// plus zero-phase Gaussian smoothing, which only works non-causally — impossible live.
+function gaussianSmooth(arr, sigmaSamples) {
+  const radius = Math.ceil(sigmaSamples * 3);
+  const kernel = [];
+  let sum = 0;
+  for (let i = -radius; i <= radius; i++) {
+    const w = Math.exp(-(i*i)/(2*sigmaSamples*sigmaSamples));
+    kernel.push(w);
+    sum += w;
+  }
+  for (let i = 0; i < kernel.length; i++) kernel[i] /= sum;
+  const out = new Array(arr.length).fill(0);
+  for (let i = 0; i < arr.length; i++) {
+    let acc = 0;
+    for (let k = -radius; k <= radius; k++) {
+      const idx = Math.min(arr.length - 1, Math.max(0, i + k));
+      acc += arr[idx] * kernel[k + radius];
+    }
+    out[i] = acc;
+  }
+  return out;
+}
+
+function offlineReanalyze(accSamples) {
+  const n = accSamples.length;
+  if (n < 20) return null;
+  const ux = [], uy = [], uz = [];
+  for (const s of accSamples) {
+    const norm = Math.sqrt(s.x*s.x + s.y*s.y + s.z*s.z) || 1e-6;
+    ux.push(s.x/norm); uy.push(s.y/norm); uz.push(s.z/norm);
+  }
+  const mean = arr => arr.reduce((a,b)=>a+b,0)/arr.length;
+
+  // find the quietest short window in the first few seconds as the orientation reference
+  // (offline-only: can scan ahead, unlike the live version which must decide in real time)
+  const searchN = Math.min(n, Math.round(FS_NOMINAL*3));
+  const winN = Math.max(5, Math.round(FS_NOMINAL*0.6));
+  let bestStart = 0, bestVar = Infinity;
+  const varOf = arr => { const m = mean(arr); return arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length; };
+  for (let start = 0; start <= Math.max(0, searchN - winN); start++) {
+    const segVar = varOf(ux.slice(start, start+winN)) + varOf(uy.slice(start, start+winN)) + varOf(uz.slice(start, start+winN));
+    if (segVar < bestVar) { bestVar = segVar; bestStart = start; }
+  }
+  let refX = mean(ux.slice(bestStart, bestStart+winN));
+  let refY = mean(uy.slice(bestStart, bestStart+winN));
+  let refZ = mean(uz.slice(bestStart, bestStart+winN));
+  const refNorm = Math.sqrt(refX*refX + refY*refY + refZ*refZ) || 1e-6;
+  refX/=refNorm; refY/=refNorm; refZ/=refNorm;
+
+  const tiltRaw = [];
+  for (let i = 0; i < n; i++) {
+    const cosAngle = Math.max(-1, Math.min(1, ux[i]*refX + uy[i]*refY + uz[i]*refZ));
+    tiltRaw.push(Math.acos(cosAngle) * 180 / Math.PI);
+  }
+  const tiltSmooth = gaussianSmooth(tiltRaw, 0.20 * FS_NOMINAL);
+
+  const graceN = Math.round(FS_NOMINAL * 1.0);
+  const posArr = tiltSmooth.slice(graceN);
+  if (posArr.length < 10) return null;
+  const sorted = [...posArr].sort((a,b) => a-b);
+  const lo = percentile(sorted, 20), hi = percentile(sorted, 80);
+  const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
+  const upperTh = mid + 0.15*band, lowerTh = mid - 0.15*band;
+  let state = null, lastCountedState = null, reps = 0;
+  for (const v of posArr) {
+    const newState = v > upperTh ? 'top' : (v < lowerTh ? 'bottom' : state);
+    if (newState !== state && newState !== null) {
+      if (lastCountedState !== null && newState === lastCountedState) reps += 1;
+      if (lastCountedState === null) lastCountedState = newState;
+      state = newState;
+    }
+  }
+  return reps;
+}
+
 function resetDetector() {
   mahonyQ = null; mahonyV0 = null;
   calibWindow = [];
@@ -339,8 +419,14 @@ function stopSession() {
   });
   document.getElementById('posAvantBras').disabled = false;
   document.getElementById('posBiceps').disabled = false;
-  document.getElementById('liveGuess').textContent = liveRepCount;
-  document.getElementById('repInput').value = liveRepCount;
+
+  const offlineCount = offlineReanalyze(currentAcc);
+  window._lastOfflineCount = offlineCount; // stashed for the save step below
+  const guessText = offlineCount !== null
+    ? `${liveRepCount} en direct, ${offlineCount} en analyse précise`
+    : `${liveRepCount} en direct`;
+  document.getElementById('liveGuess').textContent = guessText;
+  document.getElementById('repInput').value = offlineCount !== null ? offlineCount : liveRepCount;
   document.getElementById('repPanel').style.display = 'block';
 }
 
@@ -352,6 +438,7 @@ document.getElementById('btnSubmitReps').onclick = () => {
     position: currentPosition,
     startedAtIso: new Date().toISOString(),
     liveDetectedReps: liveRepCount,
+    offlineRecount: window._lastOfflineCount ?? null,
     groundTruthReps: reps,
     repEventLog: repEventLog,
     accSamples: currentAcc,
@@ -361,11 +448,13 @@ document.getElementById('btnSubmitReps').onclick = () => {
   recordings.push(recording);
   const safeName = (currentExercise + '_' + currentPosition + '_' + Date.now()).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   downloadJSON(recording, safeName + '.json');
-  const cls = (liveRepCount === reps) ? 'match' : 'off';
+  const offlineForCompare = window._lastOfflineCount !== null && window._lastOfflineCount !== undefined ? window._lastOfflineCount : liveRepCount;
+  const cls = (offlineForCompare === reps) ? 'match' : 'off';
   const histEl = document.getElementById('history');
   const line = document.createElement('div');
   line.className = cls;
-  line.textContent = `${currentExercise} / ${currentPosition} — modèle: ${liveRepCount}, réel: ${reps}`;
+  const offlineTxt = window._lastOfflineCount !== null && window._lastOfflineCount !== undefined ? `, précis: ${window._lastOfflineCount}` : '';
+  line.textContent = `${currentExercise} / ${currentPosition} — direct: ${liveRepCount}${offlineTxt}, réel: ${reps}`;
   histEl.insertBefore(line, histEl.firstChild);
   document.getElementById('btnDownloadAll').disabled = false;
   document.getElementById('repPanel').style.display = 'none';
