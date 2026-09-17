@@ -6,7 +6,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Polar — Comptage en direct</title>
+<title>Polar — Enregistrement (analyse hors-ligne)</title>
 <style>
   body { background:#111; color:#eee; font-family: -apple-system, sans-serif; margin:0; padding:16px; }
   h1 { font-size:18px; margin-bottom:4px;}
@@ -20,9 +20,8 @@
   #exerciseGrid { display:grid; grid-template-columns: 1fr 1fr; gap:8px; margin:8px 0; }
   #exerciseGrid button { margin:0; font-size:14px; padding:16px 8px; }
   #hr { font-size:18px; text-align:center; color:#e74c3c; margin-bottom:4px; }
-  #liveCount { font-size:72px; text-align:center; font-weight:bold; color:#2ecc71; margin:10px 0; }
-  #liveLabel { text-align:center; font-size:16px; color:#f39c12; min-height:20px;}
-  canvas { width:100%; height:90px; background:#000; border-radius:6px; margin:8px 0; }
+  #recStatus { text-align:center; font-size:20px; color:#888; margin:16px 0; min-height:28px; }
+  #recStatus.active { color:#c0392b; }
   #repPanel { display:none; background:#1a1a2e; padding:14px; border-radius:8px; margin:10px 0; }
   #repPanel input { width:100%; font-size:24px; text-align:center; padding:10px; border-radius:6px; border:none; }
   #log { background:#000; color:#0f0; font-family:monospace; font-size:10px; padding:6px; height:110px; overflow-y:auto; white-space:pre-wrap; border-radius:6px; margin-top:8px; }
@@ -32,11 +31,9 @@
 </style>
 </head>
 <body>
-<h1>Comptage en direct — Polar Verity Sense <span style="color:#666;font-size:12px;">(v9 — accel seul, sans gyro)</span></h1>
+<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v10 — sans distraction, analyse hors-ligne uniquement)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
-<button id="btnMic" class="secondary">🎤 Activer le micro (repère vocal "maintenant")</button>
-<div id="micStatus" style="text-align:center; font-size:13px; color:#666; min-height:18px;"></div>
 
 <div id="posToggle">
   <button id="posAvantBras" class="active-toggle">Avant-bras</button>
@@ -45,12 +42,10 @@
 
 <div id="exerciseGrid"></div>
 
-<div id="liveLabel"></div>
-<div id="liveCount">–</div>
-<canvas id="chart" width="600" height="90"></canvas>
+<div id="recStatus"></div>
 
 <div id="repPanel">
-  <div style="text-align:center; margin-bottom:8px;">Combien de reps/cycles avez-vous vraiment faits ? (le modèle a compté <span id="liveGuess">–</span>, décimales ok ex: 6.5)</div>
+  <div style="text-align:center; margin-bottom:8px;">Combien de reps/cycles avez-vous vraiment faits ? (analyse précise: <span id="offlineGuess">–</span>, décimales ok ex: 6.5)</div>
   <input id="repInput" type="number" inputmode="decimal" step="0.5">
   <button id="btnSubmitReps">Valider et sauvegarder</button>
   <button id="btnCancelSession" class="secondary">Annuler cette session (ne pas garder)</button>
@@ -76,89 +71,18 @@ let isRecording = false;
 
 let runningSampleCount = 0;
 let recordStartSampleCount = 0;
+let recordStartWallMs = 0;
 let currentAcc = [];
 let currentHr = [];
 let latestHr = null;
 const recordings = [];
+let recTimerInterval = null;
 
 let device, server, controlChar, dataChar, hrChar;
 
-// ---- Microphone cue detection: volume-spike based, not speech recognition ----
-// Deliberately does NOT record or store any audio — only detects "a loud sound just
-// happened" and logs the timestamp. No word recognition, no audio kept anywhere.
-let micStream = null, micAudioCtx = null, micAnalyser = null, micActive = false;
-let micBaseline = 0; // rolling ambient noise floor estimate
-let micLastCueSampleTime = -Infinity;
-const MIC_REFRACTORY_MS = 400; // don't count the same utterance's internal peaks twice
-let currentMicCues = []; // {t} relative to recordStart, saved into the session JSON
-
-document.getElementById('btnMic').onclick = async () => {
-  if (micActive) {
-    if (micStream) micStream.getTracks().forEach(t => t.stop());
-    if (micAudioCtx) micAudioCtx.close();
-    micActive = false;
-    document.getElementById('btnMic').textContent = '🎤 Activer le micro (repère vocal "maintenant")';
-    document.getElementById('micStatus').textContent = '';
-    return;
-  }
-  try {
-    micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    micAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const source = micAudioCtx.createMediaStreamSource(micStream);
-    micAnalyser = micAudioCtx.createAnalyser();
-    micAnalyser.fftSize = 1024;
-    source.connect(micAnalyser);
-    micActive = true;
-    document.getElementById('btnMic').textContent = '🎤 Micro actif (dire "maintenant" pour marquer un repère)';
-    document.getElementById('micStatus').textContent = 'Micro en écoute...';
-    log('Micro activé (détection de repère vocal par pic de volume, aucun audio enregistré).');
-    monitorMic();
-  } catch (err) {
-    log('ERREUR micro: ' + err);
-    document.getElementById('micStatus').textContent = 'Micro refusé ou indisponible.';
-  }
-};
-
-function monitorMic() {
-  if (!micActive) return;
-  const data = new Uint8Array(micAnalyser.fftSize);
-  micAnalyser.getByteTimeDomainData(data);
-  // RMS amplitude of this frame, centered around 128 (silence)
-  let sumSq = 0;
-  for (let i = 0; i < data.length; i++) {
-    const v = (data[i] - 128) / 128;
-    sumSq += v * v;
-  }
-  const rms = Math.sqrt(sumSq / data.length);
-
-  // slow-adapting ambient noise floor, fast-reacting spike detection above it
-  micBaseline = micBaseline * 0.98 + rms * 0.02;
-  const threshold = Math.max(0.06, micBaseline * 4);
-
-  const now = performance.now();
-  if (rms > threshold && (now - micLastCueSampleTime) > MIC_REFRACTORY_MS) {
-    micLastCueSampleTime = now;
-    onMicCueDetected();
-  }
-  requestAnimationFrame(monitorMic);
-}
-
-function onMicCueDetected() {
-  document.getElementById('micStatus').textContent = '🔊 Repère détecté !';
-  setTimeout(() => { if (micActive) document.getElementById('micStatus').textContent = 'Micro en écoute...'; }, 400);
-  if (isRecording) {
-    const t = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000;
-    currentMicCues.push({ t: Math.round(t) });
-    log(`Repère vocal détecté à t=${(t/1000).toFixed(2)}s`);
-  }
-}
 const logEl = document.getElementById('log');
 const hrEl = document.getElementById('hr');
-const liveCountEl = document.getElementById('liveCount');
-const liveLabelEl = document.getElementById('liveLabel');
-const canvas = document.getElementById('chart');
-const ctx = canvas.getContext('2d');
-let historyChart = [];
+const recStatusEl = document.getElementById('recStatus');
 
 function log(msg) {
   const t = new Date().toISOString().substr(11,8);
@@ -173,29 +97,6 @@ function downloadJSON(obj, filename) {
   a.href = url; a.download = filename;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
-}
-
-function speakNumber(n) {
-  try {
-    speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(String(n));
-    u.lang = 'fr-FR';
-    u.rate = 1.3;
-    speechSynthesis.speak(u);
-  } catch (e) { log('TTS erreur: ' + e); }
-}
-
-function drawChart() {
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.strokeStyle = '#2ecc71';
-  ctx.beginPath();
-  const max = Math.max(...historyChart, 100);
-  historyChart.forEach((v, i) => {
-    const x = (i / 300) * canvas.width;
-    const y = canvas.height - (v / max) * canvas.height;
-    if (i === 0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-  });
-  ctx.stroke();
 }
 
 // ---- Position toggle ----
@@ -230,17 +131,6 @@ function setExerciseButtonsEnabled(enabled) {
   Array.from(gridEl.children).forEach(b => { if (b.dataset.exercise !== currentExercise) b.disabled = !enabled; });
 }
 
-// ---- Live rep-detection state (causal accel-only, no gyro/integration/drift).
-// Validated offline (replayed sample-by-sample as if live) at 9/14 within ±1 rep across
-// the whole exercise set — matching or beating the old gyro-fusion live detector, with
-// none of its drift, calibration-stillness, or live-timing fragility.
-const TILT_WINDOW_SAMPLES = Math.round(FS_NOMINAL * 2.2); // rolling window for adaptive top/bottom thresholds
-let tiltBuf = [];
-let posState = null;
-let lastCountedState = null;
-let liveRepCount = 0;
-let repEventLog = [];
-
 function percentile(sortedArr, p) {
   const idx = (p/100) * (sortedArr.length - 1);
   const lo = Math.floor(idx), hi = Math.ceil(idx);
@@ -248,10 +138,10 @@ function percentile(sortedArr, p) {
   return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo);
 }
 
-// ---- Offline "precise" re-analysis: run once after a session ends, on the full recording.
-// Same accel-only approach as the live detector, but with zero-phase (non-causal) smoothing
-// and a whole-session threshold — both only possible after the fact, never live. Validated
-// at 11/14 within ±1 rep, the best result of every approach tried in this project.
+// ---- Offline "precise" re-analysis: the only counting method in this version.
+// Accel-only, no integration, no drift. Zero-phase smoothing + whole-session threshold —
+// both only possible after the fact. Validated at 11/14 within ±1 rep across the full
+// exercise set, the best result of every approach tried in this project.
 function gaussianSmooth(arr, sigmaSamples) {
   const radius = Math.ceil(sigmaSamples * 3);
   const kernel = [];
@@ -312,118 +202,45 @@ function offlineReanalyze(accSamples) {
   const lo = percentile(sorted, 20), hi = percentile(sorted, 80);
   const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
   const upperTh = mid + 0.15*band, lowerTh = mid - 0.15*band;
-  let state = null, lastCountedState2 = null, reps = 0;
+  let state = null, lastCountedState = null, reps = 0;
   for (const v of posArr) {
     const newState = v > upperTh ? 'top' : (v < lowerTh ? 'bottom' : state);
     if (newState !== state && newState !== null) {
-      if (lastCountedState2 !== null && newState === lastCountedState2) reps += 1;
-      if (lastCountedState2 === null) lastCountedState2 = newState;
+      if (lastCountedState !== null && newState === lastCountedState) reps += 1;
+      if (lastCountedState === null) lastCountedState = newState;
       state = newState;
     }
   }
   return reps;
 }
 
-// ---- Live causal detector state ----
-let calibDone = false;
-let calibBuf = []; // unit accel vectors accumulated during calibration
-let liveRef = null; // fixed reference unit vector, set once at calibration
-let liveEma = null; // causal exponential smoothing state
-const CALIB_MIN_SAMPLES = Math.round(FS_NOMINAL * 1.5);
-const CALIB_WIN_SAMPLES = Math.max(5, Math.round(FS_NOMINAL * 0.6));
-const EMA_ALPHA = 1 - Math.exp(-(1.0/FS_NOMINAL) / 0.40); // causal low-pass, tau=0.40s
-
-function resetDetector() {
-  calibDone = false;
-  calibBuf = [];
-  liveRef = null;
-  liveEma = null;
-  tiltBuf = [];
-  posState = null; lastCountedState = null;
-  liveRepCount = 0;
-  repEventLog = [];
-  liveCountEl.textContent = '0';
-}
-
-function processLivePositionSample(ax, ay, az, elapsedS) {
-  const norm = Math.sqrt(ax*ax + ay*ay + az*az) || 1e-6;
-  const ux = ax/norm, uy = ay/norm, uz = az/norm;
-
-  if (!calibDone) {
-    // Accel calibration doesn't need genuine stillness the way gyro bias did — an
-    // imperfect reference here is just a fixed offset, not an accumulating error — so
-    // this can be simple: once we've seen enough samples, pick the quietest short
-    // window among them (causal: only looks at what's already arrived).
-    calibBuf.push([ux, uy, uz]);
-    if (calibBuf.length < CALIB_MIN_SAMPLES) return;
-
-    let bestStart = 0, bestVar = Infinity;
-    for (let start = 0; start <= calibBuf.length - CALIB_WIN_SAMPLES; start++) {
-      const seg = calibBuf.slice(start, start + CALIB_WIN_SAMPLES);
-      const mX = seg.reduce((a,s)=>a+s[0],0)/seg.length;
-      const mY = seg.reduce((a,s)=>a+s[1],0)/seg.length;
-      const mZ = seg.reduce((a,s)=>a+s[2],0)/seg.length;
-      const v = seg.reduce((a,s)=>a+(s[0]-mX)**2+(s[1]-mY)**2+(s[2]-mZ)**2,0)/seg.length;
-      if (v < bestVar) { bestVar = v; bestStart = start; }
-    }
-    const seg = calibBuf.slice(bestStart, bestStart + CALIB_WIN_SAMPLES);
-    let refX = seg.reduce((a,s)=>a+s[0],0)/seg.length;
-    let refY = seg.reduce((a,s)=>a+s[1],0)/seg.length;
-    let refZ = seg.reduce((a,s)=>a+s[2],0)/seg.length;
-    const rn = Math.sqrt(refX*refX+refY*refY+refZ*refZ) || 1e-6;
-    liveRef = [refX/rn, refY/rn, refZ/rn];
-    calibDone = true;
-    calibBuf = [];
-    log(`Calibration terminée (${elapsedS.toFixed(1)}s).`);
-    liveLabelEl.textContent = currentExercise + ' — ' + currentPosition;
-    beep(800, 150, 0);
-    return;
-  }
-
-  const cosAngle = Math.max(-1, Math.min(1, ux*liveRef[0] + uy*liveRef[1] + uz*liveRef[2]));
-  const tilt = Math.acos(cosAngle) * 180 / Math.PI;
-  liveEma = liveEma === null ? tilt : (EMA_ALPHA*tilt + (1-EMA_ALPHA)*liveEma);
-
-  tiltBuf.push(liveEma);
-  if (tiltBuf.length > TILT_WINDOW_SAMPLES) tiltBuf.shift();
-  if (tiltBuf.length < 10) return;
-
-  const sorted = [...tiltBuf].sort((a,b) => a-b);
-  const lo = percentile(sorted, 20), hi = percentile(sorted, 80);
-  const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
-  const upperTh = mid + 0.15*band, lowerTh = mid - 0.15*band;
-
-  const newState = liveEma > upperTh ? 'top' : (liveEma < lowerTh ? 'bottom' : posState);
-  if (newState !== posState && newState !== null) {
-    if (lastCountedState !== null && newState === lastCountedState) {
-      liveRepCount += 1;
-      liveCountEl.textContent = liveRepCount;
-      speakNumber(liveRepCount);
-      log(`Rep #${liveRepCount} détecté (tilt=${liveEma.toFixed(1)}°)`);
-      repEventLog.push({ tilt: Math.round(liveEma*10)/10 });
-    }
-    if (lastCountedState === null) lastCountedState = newState;
-    posState = newState;
-  }
-}
-
 function startSession(ex, btn) {
   currentExercise = ex;
-  currentAcc = []; currentHr = []; currentMicCues = [];
+  currentAcc = []; currentHr = [];
   recordStartSampleCount = runningSampleCount;
-  resetDetector();
+  recordStartWallMs = performance.now();
   isRecording = true;
   btn.classList.add('recording');
   btn.textContent = '⏹ ' + ex;
-  liveLabelEl.textContent = ex + ' — ' + currentPosition + ' (restez immobile...)';
   setExerciseButtonsEnabled(false);
   document.getElementById('posAvantBras').disabled = true;
   document.getElementById('posBiceps').disabled = true;
+  recStatusEl.classList.add('active');
+  recStatusEl.textContent = `● ${ex} — ${currentPosition} (00:00)`;
+  recTimerInterval = setInterval(() => {
+    const s = Math.floor((performance.now() - recordStartWallMs) / 1000);
+    const mm = String(Math.floor(s/60)).padStart(2,'0');
+    const ss = String(s%60).padStart(2,'0');
+    recStatusEl.textContent = `● ${ex} — ${currentPosition} (${mm}:${ss})`;
+  }, 500);
   log('Session démarrée: ' + ex + ' / ' + currentPosition);
 }
 
 function stopSession() {
   isRecording = false;
+  clearInterval(recTimerInterval);
+  recStatusEl.classList.remove('active');
+  recStatusEl.textContent = 'Analyse en cours...';
   Array.from(gridEl.children).forEach(b => {
     b.disabled = false;
     b.classList.remove('recording');
@@ -433,64 +250,54 @@ function stopSession() {
   document.getElementById('posBiceps').disabled = false;
 
   const offlineCount = offlineReanalyze(currentAcc);
-  window._lastOfflineCount = offlineCount; // stashed for the save step below
-  const guessText = offlineCount !== null
-    ? `${liveRepCount} en direct, ${offlineCount} en analyse précise`
-    : `${liveRepCount} en direct`;
-  document.getElementById('liveGuess').textContent = guessText;
-  document.getElementById('repInput').value = offlineCount !== null ? offlineCount : liveRepCount;
+  window._lastOfflineCount = offlineCount;
+  document.getElementById('offlineGuess').textContent = offlineCount !== null ? offlineCount : '–';
+  document.getElementById('repInput').value = offlineCount !== null ? offlineCount : '';
   document.getElementById('repPanel').style.display = 'block';
+  recStatusEl.textContent = '';
 }
 
 document.getElementById('btnSubmitReps').onclick = () => {
   const reps = parseFloat(document.getElementById('repInput').value);
   if (isNaN(reps)) return;
+  const offlineCount = window._lastOfflineCount ?? null;
   const recording = {
     exercise: currentExercise,
     position: currentPosition,
     startedAtIso: new Date().toISOString(),
-    liveDetectedReps: liveRepCount,
-    offlineRecount: window._lastOfflineCount ?? null,
+    offlineRecount: offlineCount,
     groundTruthReps: reps,
-    repEventLog: repEventLog,
     accSamples: currentAcc,
-    micCues: currentMicCues,
     hrSamples: currentHr
   };
   recordings.push(recording);
   const safeName = (currentExercise + '_' + currentPosition + '_' + Date.now()).toLowerCase().replace(/[^a-z0-9]+/g, '-');
   downloadJSON(recording, safeName + '.json');
-  const offlineForCompare = window._lastOfflineCount !== null && window._lastOfflineCount !== undefined ? window._lastOfflineCount : liveRepCount;
-  const cls = (offlineForCompare === reps) ? 'match' : 'off';
+  const cls = (offlineCount === reps) ? 'match' : 'off';
   const histEl = document.getElementById('history');
   const line = document.createElement('div');
   line.className = cls;
-  const offlineTxt = window._lastOfflineCount !== null && window._lastOfflineCount !== undefined ? `, précis: ${window._lastOfflineCount}` : '';
-  line.textContent = `${currentExercise} / ${currentPosition} — direct: ${liveRepCount}${offlineTxt}, réel: ${reps}`;
+  line.textContent = `${currentExercise} / ${currentPosition} — précis: ${offlineCount ?? '–'}, réel: ${reps}`;
   histEl.insertBefore(line, histEl.firstChild);
   document.getElementById('btnDownloadAll').disabled = false;
   document.getElementById('repPanel').style.display = 'none';
   currentExercise = null;
-  liveLabelEl.textContent = '';
-  liveCountEl.textContent = '–';
 };
 
 document.getElementById('btnCancelSession').onclick = () => {
   document.getElementById('repPanel').style.display = 'none';
   currentExercise = null;
-  liveLabelEl.textContent = '';
-  liveCountEl.textContent = '–';
   log('Session annulée (non sauvegardée)');
 };
 
 document.getElementById('btnDownloadAll').onclick = () => {
-  downloadJSON(recordings, 'toutes_les_sessions_live.json');
+  downloadJSON(recordings, 'toutes_les_sessions_offline.json');
 };
 
 // ---- Connect ----
 document.getElementById('btnConnect').onclick = async () => {
-  document.getElementById('btnConnect').disabled = true; // disable immediately, not just on success,
-  document.getElementById('btnConnect').textContent = 'Connexion en cours...';    // so a slow/partial failure can't leave it tappable for a second attempt
+  document.getElementById('btnConnect').disabled = true;
+  document.getElementById('btnConnect').textContent = 'Connexion en cours...';
   try {
     log('Recherche de périphériques "Polar"...');
     device = await navigator.bluetooth.requestDevice({
@@ -530,7 +337,7 @@ document.getElementById('btnConnect').onclick = async () => {
     Array.from(gridEl.children).forEach(b => b.disabled = false);
   } catch (err) {
     log('ERREUR connexion: ' + err);
-    document.getElementById('btnConnect').disabled = false; // only re-enable on genuine failure
+    document.getElementById('btnConnect').disabled = false;
     document.getElementById('btnConnect').textContent = 'Connecter (réessayer)';
   }
 };
@@ -600,8 +407,6 @@ function parseDeltaFramesAll(data, channels, resolution) {
   return samples;
 }
 
-// ---- Verified PMD delta-frame decompression continues above; live detection now driven by Mahony fusion ----
-
 function handleAccData(value) {
   if (value.byteLength <= 10) return;
   const measType = value.getUint8(0);
@@ -624,17 +429,12 @@ function handleAccData(value) {
 
   for (const [x, y, z] of sampleList) {
     const mag = Math.sqrt(x*x + y*y + z*z);
-    historyChart.push(mag);
     if (isRecording) {
       const t = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL * 1000;
       currentAcc.push({ t, x, y, z, mag: Math.round(mag) });
-      const elapsedS = (runningSampleCount - recordStartSampleCount) / FS_NOMINAL;
-      processLivePositionSample(x, y, z, elapsedS);
     }
     runningSampleCount += 1;
   }
-  if (historyChart.length > 300) historyChart = historyChart.slice(-300);
-  drawChart();
 }
 </script>
 </body>
