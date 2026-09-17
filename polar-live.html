@@ -31,7 +31,7 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v10 — sans distraction, analyse hors-ligne uniquement)</span></h1>
+<h1>Enregistrement — Polar Verity Sense <span style="color:#666;font-size:12px;">(v11 — timeout de connexion)</span></h1>
 <button id="btnConnect">Connecter</button>
 <div id="hr">HR: –</div>
 
@@ -295,6 +295,13 @@ document.getElementById('btnDownloadAll').onclick = () => {
 };
 
 // ---- Connect ----
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout (${ms/1000}s) sur: ${label}`)), ms))
+  ]);
+}
+
 document.getElementById('btnConnect').onclick = async () => {
   document.getElementById('btnConnect').disabled = true;
   document.getElementById('btnConnect').textContent = 'Connexion en cours...';
@@ -306,29 +313,29 @@ document.getElementById('btnConnect').onclick = async () => {
     });
     log(`Sélectionné: ${device.name}`);
     device.addEventListener('gattserverdisconnected', () => log('⚠️ Déconnecté'));
-    server = await device.gatt.connect();
+    server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
     log('GATT connecté.');
 
-    const pmdService = await server.getPrimaryService(PMD_SERVICE);
-    controlChar = await pmdService.getCharacteristic(PMD_CONTROL);
-    dataChar = await pmdService.getCharacteristic(PMD_DATA);
-    await controlChar.startNotifications();
+    const pmdService = await withTimeout(server.getPrimaryService(PMD_SERVICE), 15000, 'getPrimaryService(PMD)');
+    controlChar = await withTimeout(pmdService.getCharacteristic(PMD_CONTROL), 15000, 'getCharacteristic(CONTROL)');
+    dataChar = await withTimeout(pmdService.getCharacteristic(PMD_DATA), 15000, 'getCharacteristic(DATA)');
+    await withTimeout(controlChar.startNotifications(), 15000, 'startNotifications(CONTROL)');
     controlChar.addEventListener('characteristicvaluechanged', (e) => {
       const dv = e.target.value;
       log('CONTROL rx: ' + Array.from(new Uint8Array(dv.buffer)).map(b=>b.toString(16).padStart(2,'0')).join(' '));
     });
-    await dataChar.startNotifications();
+    await withTimeout(dataChar.startNotifications(), 15000, 'startNotifications(DATA)');
     dataChar.addEventListener('characteristicvaluechanged', (e) => handleAccData(e.target.value));
     log('PMD prêt.');
 
     const cmd = new Uint8Array([0x02, 0x02, 0x00, 0x01, 52, 0, 0x01, 0x01, 16, 0, 0x02, 0x01, 8, 0, 0x04, 0x01, 3]);
-    await controlChar.writeValue(cmd);
+    await withTimeout(controlChar.writeValue(cmd), 15000, 'writeValue(START ACC)');
     log('Flux ACC démarré.');
 
     try {
-      const hrService = await server.getPrimaryService(HR_SERVICE);
-      hrChar = await hrService.getCharacteristic(HR_CHAR);
-      await hrChar.startNotifications();
+      const hrService = await withTimeout(server.getPrimaryService(HR_SERVICE), 8000, 'getPrimaryService(HR)');
+      hrChar = await withTimeout(hrService.getCharacteristic(HR_CHAR), 8000, 'getCharacteristic(HR)');
+      await withTimeout(hrChar.startNotifications(), 8000, 'startNotifications(HR)');
       hrChar.addEventListener('characteristicvaluechanged', (e) => handleHrData(e.target.value));
       log('HR prêt.');
     } catch (e) { log('HR indisponible: ' + e); }
