@@ -21,7 +21,7 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v5 — diagnostic espace disque)</span></h1>
+<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v6 — tout récupérer)</span></h1>
 <button id="btnConnect">Connecter</button>
 
 <div class="section">
@@ -519,11 +519,31 @@ document.getElementById('btnList').onclick = async () => {
     log(`${recordings.length} enregistrement(s) trouvé(s).`);
     const container = document.getElementById('recordingsList');
     container.innerHTML = '';
+
+    if (recordings.length > 0) {
+      const btnAll = document.createElement('button');
+      btnAll.textContent = `Tout récupérer (${recordings.length})`;
+      btnAll.onclick = async () => {
+        btnAll.disabled = true;
+        const allButtons = container.querySelectorAll('button');
+        // PFTP handles one request at a time over the same characteristic —
+        // fetch sequentially, not concurrently, or responses get mismatched.
+        for (const r of recordings) {
+          const rowBtn = Array.from(allButtons).find(b => b.dataset.path === r.path);
+          if (rowBtn) await fetchAndDecode(r.path, rowBtn);
+        }
+        btnAll.disabled = false;
+        log('Récupération de tous les enregistrements terminée.');
+      };
+      container.appendChild(btnAll);
+    }
+
     recordings.forEach(r => {
       const row = document.createElement('div');
       row.innerHTML = `<span>${r.path} (${r.size} o)</span>`;
       const btn = document.createElement('button');
       btn.textContent = 'Récupérer';
+      btn.dataset.path = r.path;
       btn.onclick = () => fetchAndDecode(r.path, btn);
       row.appendChild(btn);
       container.appendChild(row);
