@@ -233,9 +233,9 @@ body {
 <div class="toast" id="toast"></div>
 <div class="sensor-modal-backdrop" id="sensor-modal" style="display:none;">
   <div class="sensor-modal">
-    <h3>CAPTEUR POLAR</h3>
-    <p>Connecter le bracelet Polar pour enregistrer les données de mouvement de cette séance ?</p>
-    <button class="btn-connect" onclick="sensorModalConnect()">Connecter</button>
+    <h3>CAPTEUR NON TROUVÉ</h3>
+    <p>Impossible de se connecter au bracelet Polar. Continuer sans capteur, ou réessayer ?</p>
+    <button class="btn-connect" onclick="sensorModalRetry()">Réessayer</button>
     <button class="btn-skip" onclick="sensorModalSkip()">Continuer sans capteur</button>
   </div>
 </div>
@@ -920,6 +920,7 @@ async function waitForAdvertisementThenConnect() {
 
 // ======= HIIT app integration: sensor session lifecycle =======
 let sensorActive = false;
+let sensorNeedsPicker = false;
 let sensorBaseline = null;
 let sensorPhaseLog = [];
 const SENSOR_STORAGE_KEY = 'hiitSensorPendingSession';
@@ -934,27 +935,70 @@ function sensorSavePending() {
   }));
 }
 
-function sensorPromptThenStart() {
-  document.getElementById('sensor-modal').style.display = 'flex';
+async function sensorPromptThenStart() {
+  const known = (typeof navigator.bluetooth?.getDevices === 'function')
+    ? await navigator.bluetooth.getDevices().catch(() => [])
+    : [];
+
+  if (known.length === 0) {
+    // Never paired before (or persistent permissions unavailable) — the only way
+    // to get a device at all is the picker, which needs an explicit tap, so show
+    // the modal with that as the "retry" action rather than attempting anything silent.
+    sensorNeedsPicker = true;
+    document.getElementById('sensor-modal').style.display = 'flex';
+    return;
+  }
+
+  sensorNeedsPicker = false;
+  device = known[0];
+  const connected = await sensorSilentConnect();
+  if (connected) {
+    tStartCountdown();
+  } else {
+    document.getElementById('sensor-modal').style.display = 'flex';
+  }
 }
 
-async function sensorModalConnect() {
-  document.getElementById('sensor-modal').style.display = 'none';
+async function sensorSilentConnect() {
   try {
-    device = await navigator.bluetooth.requestDevice({
-      filters: [{ namePrefix: 'Polar' }],
-      optionalServices: [PMD_SERVICE, PFTP_SERVICE]
-    });
-    server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
+    server = await waitForAdvertisementThenConnect();
     await connectPmd();
     sensorActive = true;
     log('Capteur connecté.');
+    return true;
   } catch (err) {
-    console.log('[capteur] connexion annulée ou échouée:', err);
+    console.log('[capteur] connexion silencieuse échouée:', err);
     sensorActive = false;
-    showToast('Capteur non connecté — séance sans capteur');
+    return false;
   }
-  tStartCountdown();
+}
+
+async function sensorModalRetry() {
+  document.getElementById('sensor-modal').style.display = 'none';
+  if (sensorNeedsPicker) {
+    try {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'Polar' }],
+        optionalServices: [PMD_SERVICE, PFTP_SERVICE]
+      });
+      server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
+      await connectPmd();
+      sensorActive = true;
+      log('Capteur connecté (premier appairage).');
+    } catch (err) {
+      console.log('[capteur] appairage annulé ou échoué:', err);
+      sensorActive = false;
+      showToast('Capteur non connecté — séance sans capteur');
+    }
+    tStartCountdown();
+    return;
+  }
+  const connected = await sensorSilentConnect();
+  if (connected) {
+    tStartCountdown();
+  } else {
+    document.getElementById('sensor-modal').style.display = 'flex';
+  }
 }
 
 function sensorModalSkip() {
