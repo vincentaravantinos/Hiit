@@ -21,7 +21,7 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v4 — vérif statut enregistrement)</span></h1>
+<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v5 — diagnostic espace disque)</span></h1>
 <button id="btnConnect">Connecter</button>
 
 <div class="section">
@@ -34,6 +34,7 @@
 <div class="section">
   <div style="font-size:13px; color:#aaa; margin-bottom:4px;">2. Une fois reconnecté après la séance, lister puis récupérer les enregistrements stockés sur le capteur.</div>
   <button id="btnList" disabled>Lister les enregistrements sur le capteur</button>
+  <button id="btnDiskSpace" class="secondary" disabled>Test: espace disque (diagnostic)</button>
   <div id="recordingsList"></div>
 </div>
 
@@ -65,6 +66,7 @@ function resetConnectionUI(reason) {
   document.getElementById('btnStartRec').disabled = true;
   document.getElementById('btnStopRec').disabled = true;
   document.getElementById('btnList').disabled = true;
+  document.getElementById('btnDiskSpace').disabled = true;
   document.getElementById('btnStatus').disabled = true;
   if (reason) log('Déconnecté (' + reason + ') — commandes désactivées jusqu\'à reconnexion.');
 }
@@ -167,6 +169,7 @@ document.getElementById('btnConnect').onclick = async () => {
     document.getElementById('btnConnect').textContent = 'Connecté ✓';
     document.getElementById('btnStartRec').disabled = false;
     document.getElementById('btnList').disabled = false;
+    document.getElementById('btnDiskSpace').disabled = false;
     document.getElementById('btnStatus').disabled = false;
   } catch (err) {
     log('ERREUR connexion: ' + err);
@@ -427,6 +430,25 @@ async function pftpWriteAndRead(payload) {
     if (frame.status === RFC76_STATUS_LAST) return concatBytes(...chunks);
   }
 }
+function decodePftpDiskSpace(data) {
+  let offset = 0, fragmentSize = null, totalFragments = null, freeFragments = null;
+  while (offset < data.length) {
+    const [key, o2] = decodeVarint(data, offset); offset = o2;
+    const fieldNumber = key >>> 3, wireType = key & 0x07;
+    if (wireType !== 0) break;
+    const [v, o3] = decodeVarint(data, offset); offset = o3;
+    if (fieldNumber === 1) fragmentSize = v;
+    else if (fieldNumber === 2) totalFragments = v;
+    else if (fieldNumber === 3) freeFragments = v;
+  }
+  return { fragmentSize, totalFragments, freeFragments };
+}
+async function pftpGetDiskSpace() {
+  await pftpEnsureReady();
+  const response = await pftpWriteAndRead(makeCompleteMessage(null, null, 5)); // PftpQuery.GET_DISK_SPACE = 5
+  return decodePftpDiskSpace(response);
+}
+
 async function pftpListDirectory(path) {
   await pftpEnsureReady();
   const response = await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(0, path)));
@@ -473,8 +495,24 @@ async function listAllRecordings() {
   return recordings;
 }
 
+document.getElementById('btnDiskSpace').onclick = async () => {
+  document.getElementById('btnDiskSpace').disabled = true;
+  try {
+    log('Requête espace disque (PFTP query, différente de la liste de dossiers)...');
+    const space = await pftpGetDiskSpace();
+    log(`Réponse: fragmentSize=${space.fragmentSize}, totalFragments=${space.totalFragments}, freeFragments=${space.freeFragments}`);
+    log('→ Le sous-système PFTP répond normalement (pas occupé).');
+  } catch (err) {
+    log('ERREUR espace disque: ' + err);
+    log('→ Le sous-système PFTP entier semble bloqué, pas seulement le listage.');
+  } finally {
+    document.getElementById('btnDiskSpace').disabled = false;
+  }
+};
+
 document.getElementById('btnList').onclick = async () => {
   document.getElementById('btnList').disabled = true;
+  document.getElementById('btnDiskSpace').disabled = true;
   try {
     log('Recherche des enregistrements sur le capteur...');
     const recordings = await listAllRecordings();
@@ -494,6 +532,7 @@ document.getElementById('btnList').onclick = async () => {
     log('ERREUR listage: ' + err);
   } finally {
     document.getElementById('btnList').disabled = false;
+    document.getElementById('btnDiskSpace').disabled = false;
   }
 };
 
