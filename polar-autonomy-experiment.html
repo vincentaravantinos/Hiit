@@ -19,7 +19,7 @@
 </head>
 <body>
 <h1>Expérience : autonomie complète (sans réappuyer sur "connecter")</h1>
-<p class="note">Teste le scénario réel : connexion une seule fois → enregistrement démarré → déconnexion volontaire (simule l'absence de besoin de rester connecté pendant l'entraînement) → à la fin, tentative de reconnexion et récupération 100% automatiques, avec réessais silencieux si ça échoue.</p>
+<p class="note">Teste le scénario le plus exigeant : connexion une seule fois → enregistrement démarré → déconnexion volontaire → <strong>rechargement complet de la page</strong> (efface toute la mémoire JS, comme un onglet tué par l'OS) → reprise et récupération 100% automatiques via getDevices(), sans aucun nouveau geste.</p>
 
 <label>Durée simulée de "l'entraînement" (secondes) :</label>
 <input type="number" id="simDuration" value="20" min="5" max="120">
@@ -498,6 +498,94 @@ async function fetchAndDecode(path) {
   return result;
 }
 
+const STORAGE_KEY = 'polarExperimentPendingSession';
+
+async function resumeAndRetrieve(baseline, maxAttempts = 5) {
+  let lastError = null;
+  let newRecordings = [];
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    statusEl.textContent = `Récupération automatique... (tentative ${attempt}/${maxAttempts})`;
+    log(`--- Tentative ${attempt}/${maxAttempts} ---`);
+    try {
+      if (!device.gatt.connected) {
+        log('Reconnexion (sans aucun geste utilisateur)...');
+        server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (auto)');
+        await connectPmd();
+        pftpMtuChar = null;
+        log('Reconnecté automatiquement OK');
+      }
+      await stopAllRecordings();
+      await pftpEnsureReady();
+      const current = await listAllRecordings();
+      newRecordings = current.filter(r => !baseline.has(r.path));
+      log(`${newRecordings.length} nouvel(aux) enregistrement(s) trouvé(s) (sur ${current.length} au total).`);
+      if (newRecordings.length === 0) throw new Error('Aucun nouvel enregistrement listé - nouvelle tentative.');
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+      log('Échec de cette tentative: ' + err);
+      if (attempt < maxAttempts) { log('Nouvelle tentative dans 3s...'); await sleep(3000); }
+    }
+  }
+  return { lastError, newRecordings };
+}
+
+async function finishRetrieval(lastError, newRecordings) {
+  if (lastError) {
+    statusEl.textContent = 'Échec après plusieurs tentatives';
+    log('=== ÉCHEC: toutes les tentatives ont échoué. Dernière erreur: ' + lastError + ' ===');
+    log('Les données restent en sécurité sur le capteur - une future tentative pourra réussir.');
+    return;
+  }
+  statusEl.textContent = `Récupération de ${newRecordings.length} fichier(s)...`;
+  for (const r of newRecordings) {
+    log('Récupération: ' + r.path);
+    try {
+      const result = await fetchAndDecode(r.path);
+      log(`  -> décodé: ${result ? result.samples.length : '?'} échantillons.`);
+    } catch (err) {
+      log('  ERREUR sur ce fichier: ' + err);
+    }
+  }
+  statusEl.textContent = 'Expérience terminée avec succès';
+  log('=== SUCCÈS ===');
+}
+
+// ---- On page load: if a session was left pending before a reload, resume it
+// automatically using getDevices() — no requestDevice(), no user gesture at all. ----
+async function tryResumePendingSession() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) return false;
+  const pending = JSON.parse(raw);
+  log('=== Session en attente détectée après rechargement (contexte JS neuf) ===');
+  log(`Capteur attendu: ${pending.deviceName} (id=${pending.deviceId}), démarré à ${pending.startedAt}`);
+  document.getElementById('btnStart').disabled = true;
+  statusEl.textContent = 'Reprise automatique après rechargement...';
+
+  try {
+    if (typeof navigator.bluetooth?.getDevices !== 'function') {
+      throw new Error('getDevices() indisponible — impossible de reprendre sans nouveau geste.');
+    }
+    const known = await navigator.bluetooth.getDevices();
+    log(`getDevices() a retourné ${known.length} appareil(s) déjà autorisé(s).`);
+    device = known.find(d => d.id === pending.deviceId);
+    if (!device) throw new Error('Capteur non retrouvé parmi les appareils autorisés.');
+    log('Capteur retrouvé via getDevices(), aucun choix manuel requis.');
+
+    const baseline = new Set(pending.baseline);
+    const { lastError, newRecordings } = await resumeAndRetrieve(baseline);
+    await finishRetrieval(lastError, newRecordings);
+    if (!lastError) localStorage.removeItem(STORAGE_KEY);
+  } catch (err) {
+    statusEl.textContent = 'Erreur à la reprise';
+    log('ERREUR reprise automatique: ' + err);
+  } finally {
+    document.getElementById('btnStart').disabled = false;
+  }
+  return true;
+}
+
 document.getElementById('btnStart').onclick = async () => {
   document.getElementById('btnStart').disabled = true;
   const simDurationS = parseInt(document.getElementById('simDuration').value, 10) || 20;
@@ -509,86 +597,44 @@ document.getElementById('btnStart').onclick = async () => {
       filters: [{ namePrefix: 'Polar' }],
       optionalServices: [PMD_SERVICE, PFTP_SERVICE]
     });
-    log('Selectionne: ' + device.name);
+    log('Sélectionné: ' + device.name);
     server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
     await connectPmd();
-    log('Connecte et pret.');
+    log('Connecté et prêt.');
 
-    statusEl.textContent = 'Liste de reference...';
+    statusEl.textContent = 'Liste de référence...';
     await pftpEnsureReady();
     const baseline = new Set((await listAllRecordings()).map(r => r.path));
-    log(`Reference: ${baseline.size} enregistrement(s) deja presents (ignores plus tard).`);
+    log(`Référence: ${baseline.size} enregistrement(s) déjà présents (ignorés plus tard).`);
 
-    statusEl.textContent = 'Demarrage de l\'enregistrement...';
-    log('=== Phase 2: demarrage enregistrement puis deconnexion volontaire ===');
+    statusEl.textContent = 'Démarrage de l\'enregistrement...';
+    log('=== Phase 2: démarrage enregistrement, sauvegarde locale, puis déconnexion ===');
     await startAllRecordings();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      deviceId: device.id, deviceName: device.name,
+      baseline: Array.from(baseline), startedAt: new Date().toISOString()
+    }));
+    log('Session sauvegardée localement (survivra à un rechargement complet de la page).');
     device.gatt.disconnect();
-    log('Deconnecte volontairement - le capteur enregistre seul, sans BLE actif.');
+    log('Déconnecté volontairement.');
 
-    statusEl.textContent = `"Entrainement" en cours (${simDurationS}s, aucune connexion active)...`;
-    log(`=== Phase 3: simulation de ${simDurationS}s sans connexion (comme un vrai entrainement) ===`);
+    statusEl.textContent = `"Entraînement" en cours (${simDurationS}s)...`;
+    log(`=== Phase 3: simulation de ${simDurationS}s, puis RECHARGEMENT COMPLET de la page ===`);
+    log('(ceci efface toute la mémoire JS, exactement comme un onglet tué par l\'OS)');
     for (let s = simDurationS; s > 0; s--) {
-      statusEl.textContent = `"Entrainement" en cours... ${s}s restantes (deconnecte)`;
+      statusEl.textContent = `"Entraînement" en cours... ${s}s restantes`;
       await sleep(1000);
     }
-
-    log('=== Phase 4: reconnexion et recuperation 100% automatiques ===');
-    const maxAttempts = 5;
-    let lastError = null;
-    let newRecordings = [];
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      statusEl.textContent = `Recuperation automatique... (tentative ${attempt}/${maxAttempts})`;
-      log(`--- Tentative ${attempt}/${maxAttempts} ---`);
-      try {
-        if (!device.gatt.connected) {
-          log('Reconnexion (SANS nouveau geste utilisateur - c\'est le point cle teste)...');
-          server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (auto)');
-          await connectPmd();
-          pftpMtuChar = null;
-          log('Reconnecte automatiquement OK');
-        }
-        await stopAllRecordings();
-        await pftpEnsureReady();
-        const current = await listAllRecordings();
-        newRecordings = current.filter(r => !baseline.has(r.path));
-        log(`${newRecordings.length} nouvel(aux) enregistrement(s) trouve(s) (sur ${current.length} au total).`);
-        if (newRecordings.length === 0) throw new Error('Aucun nouvel enregistrement liste - nouvelle tentative.');
-        lastError = null;
-        break;
-      } catch (err) {
-        lastError = err;
-        log('Echec de cette tentative: ' + err);
-        if (attempt < maxAttempts) { log('Nouvelle tentative dans 3s...'); await sleep(3000); }
-      }
-    }
-
-    if (lastError) {
-      statusEl.textContent = 'Echec apres plusieurs tentatives';
-      log('=== ECHEC: toutes les tentatives ont echoue. Derniere erreur: ' + lastError + ' ===');
-      log('Les donnees restent en securite sur le capteur - une future tentative pourra reussir.');
-    } else {
-      statusEl.textContent = `Recuperation de ${newRecordings.length} fichier(s)...`;
-      for (const r of newRecordings) {
-        log('Recuperation: ' + r.path);
-        try {
-          const result = await fetchAndDecode(r.path);
-          log(`  -> decode: ${result ? result.samples.length : '?'} echantillons.`);
-        } catch (err) {
-          log('  ERREUR sur ce fichier: ' + err);
-        }
-      }
-      statusEl.textContent = 'Experience terminee avec succes';
-      log('=== SUCCES: connexion unique au debut, tout le reste automatique. ===');
-    }
+    location.reload();
   } catch (err) {
     statusEl.textContent = 'Erreur';
     log('ERREUR: ' + err);
-  } finally {
     document.getElementById('btnStart').disabled = false;
   }
 };
 
 log('navigator.bluetooth.getDevices disponible: ' + (typeof navigator.bluetooth?.getDevices === 'function'));
+tryResumePendingSession();
 </script>
 </body>
 </html>
