@@ -21,13 +21,14 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v3 — UI reflète auto la déconnexion)</span></h1>
+<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v4 — vérif statut enregistrement)</span></h1>
 <button id="btnConnect">Connecter</button>
 
 <div class="section">
   <div style="font-size:13px; color:#aaa; margin-bottom:4px;">1. Démarrer/arrêter l'enregistrement interne (ACC+GYRO+MAG). Une fois démarré, le capteur enregistre seul — plus besoin de rester connecté.</div>
   <button id="btnStartRec" disabled>Démarrer l'enregistrement interne</button>
   <button id="btnStopRec" class="stop" disabled>Arrêter l'enregistrement interne</button>
+  <button id="btnStatus" class="secondary" disabled>Vérifier si un enregistrement est encore actif</button>
 </div>
 
 <div class="section">
@@ -64,6 +65,7 @@ function resetConnectionUI(reason) {
   document.getElementById('btnStartRec').disabled = true;
   document.getElementById('btnStopRec').disabled = true;
   document.getElementById('btnList').disabled = true;
+  document.getElementById('btnStatus').disabled = true;
   if (reason) log('Déconnecté (' + reason + ') — commandes désactivées jusqu\'à reconnexion.');
 }
 let pftpMtuChar = null;
@@ -165,6 +167,7 @@ document.getElementById('btnConnect').onclick = async () => {
     document.getElementById('btnConnect').textContent = 'Connecté ✓';
     document.getElementById('btnStartRec').disabled = false;
     document.getElementById('btnList').disabled = false;
+    document.getElementById('btnStatus').disabled = false;
   } catch (err) {
     log('ERREUR connexion: ' + err);
     document.getElementById('btnConnect').disabled = false;
@@ -231,6 +234,39 @@ document.getElementById('btnStopRec').onclick = async () => {
     document.getElementById('btnStartRec').disabled = false;
   } catch (err) {
     log('ERREUR arrêt enregistrement: ' + err);
+  }
+};
+
+// ---- Query whether the device still thinks any measurement (online or offline
+// recording) is active, per type — lets us confirm a clean stop instead of guessing. ----
+const MEAS_TYPE_NAMES = { 0:'ECG', 1:'PPG', 2:'ACC', 3:'PPI', 5:'GYRO', 6:'MAGNETOMETER', 7:'SKIN_TEMP', 9:'SDK_MODE', 10:'LOCATION', 11:'PRESSURE', 12:'TEMPERATURE', 13:'OFFLINE_RECORDING', 14:'OFFLINE_HR', 15:'DERIVED' };
+const ACTIVE_STATE_NAMES = { 0:'inactif', 1:'streaming en direct', 2:'ENREGISTREMENT INTERNE ACTIF', 3:'direct + interne' };
+
+document.getElementById('btnStatus').onclick = async () => {
+  document.getElementById('btnStatus').disabled = true;
+  try {
+    const cmd = new Uint8Array([0x05]); // GET_MEASUREMENT_STATUS, no type byte needed
+    log('Vérification du statut: ' + toHex(cmd));
+    const respPromise = waitForControlResponse();
+    await controlChar.writeValue(cmd);
+    const resp = await respPromise;
+    const errorCode = resp[3];
+    if (errorCode !== 0) { log(`⚠️ code erreur ${errorCode} sur la vérification de statut`); return; }
+    const statusBytes = resp.slice(5);
+    let anyActive = false;
+    for (const b of statusBytes) {
+      const type = b & 0x3F;
+      const activeVal = (b & 0xC0) >> 6;
+      if (activeVal === 0) continue;
+      anyActive = true;
+      const typeName = MEAS_TYPE_NAMES[type] ?? ('type ' + type);
+      log(`  ${typeName}: ${ACTIVE_STATE_NAMES[activeVal]}`);
+    }
+    if (!anyActive) log('Rien d\'actif — le capteur est en état propre ("sensor mode").');
+  } catch (err) {
+    log('ERREUR vérification statut: ' + err);
+  } finally {
+    document.getElementById('btnStatus').disabled = false;
   }
 };
 
