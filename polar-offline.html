@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Polar — Enregistrement interne (offline)</title>
+<style>
+  body { background:#111; color:#eee; font-family: -apple-system, sans-serif; margin:0; padding:16px; }
+  h1 { font-size:16px; margin-bottom:8px;}
+  button { display:block; width:100%; padding:14px; margin:6px 0; font-size:15px; border:none; border-radius:8px; background:#2d6cdf; color:white; font-weight:bold; }
+  button:disabled { background:#444; color:#888; }
+  button.secondary { background:#333; font-weight:normal; font-size:13px; padding:8px;}
+  button.stop { background:#c0392b; }
+  #log { background:#000; color:#0f0; font-family:monospace; font-size:10px; padding:6px; height:260px; overflow-y:auto; white-space:pre-wrap; border-radius:6px; margin-top:8px; }
+  .section { border-top:1px solid #333; margin-top:14px; padding-top:10px; }
+  #recordingsList div { padding:6px 0; border-bottom:1px solid #333; font-size:12px; display:flex; justify-content:space-between; align-items:center; }
+  #recordingsList button { width:auto; margin:0; padding:6px 10px; font-size:11px; }
+</style>
+</head>
+<body>
+<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v1 — expérimental, non testé sur vrai appareil)</span></h1>
+<button id="btnConnect">Connecter</button>
+
+<div class="section">
+  <div style="font-size:13px; color:#aaa; margin-bottom:4px;">1. Démarrer/arrêter l'enregistrement interne (ACC+GYRO+MAG). Une fois démarré, le capteur enregistre seul — plus besoin de rester connecté.</div>
+  <button id="btnStartRec" disabled>Démarrer l'enregistrement interne</button>
+  <button id="btnStopRec" class="stop" disabled>Arrêter l'enregistrement interne</button>
+</div>
+
+<div class="section">
+  <div style="font-size:13px; color:#aaa; margin-bottom:4px;">2. Une fois reconnecté après la séance, lister puis récupérer les enregistrements stockés sur le capteur.</div>
+  <button id="btnList" disabled>Lister les enregistrements sur le capteur</button>
+  <div id="recordingsList"></div>
+</div>
+
+<div class="log-label">Log :</div>
+<div id="log"></div>
+
+<script>
+const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_CONTROL = 'fb005c81-02e7-f387-1cad-8acd2d8df0c8';
+const PMD_DATA    = 'fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+const PFTP_SERVICE = '0000feee-0000-1000-8000-00805f9b34fb';
+const PFTP_MTU = 'fb005c51-02e7-f387-1cad-8acd2d8df0c8';
+const PFTP_DEVICE_TO_HOST = 'fb005c52-02e7-f387-1cad-8acd2d8df0c8';
+const PFTP_HOST_TO_DEVICE = 'fb005c53-02e7-f387-1cad-8acd2d8df0c8';
+
+let device, server, controlChar, dataChar;
+let pftpMtuChar = null;
+const logEl = document.getElementById('log');
+function log(msg) {
+  const t = new Date().toISOString().substr(11,8);
+  logEl.textContent += `[${t}] ${msg}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+function toHex(bytes) {
+  return Array.from(bytes).map(b => b.toString(16).padStart(2,'0')).join(' ');
+}
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout (${ms/1000}s) sur: ${label}`)), ms))
+  ]);
+}
+
+// ---- Verified PMD delta-frame decompression (identical to the live-streaming tools) ----
+function bytesToBitArray(bytes) {
+  const bits = [];
+  for (const byte of bytes) { for (let i = 0; i < 8; i++) bits.push((byte >> i) & 1); }
+  return bits;
+}
+function parseDeltaFrame(data, channels, bitWidth) {
+  const bits = bytesToBitArray(data);
+  const samples = [];
+  let offset = 0;
+  while (offset + bitWidth * channels <= bits.length) {
+    const chSamples = [];
+    for (let c = 0; c < channels; c++) {
+      let value = 0;
+      for (let i = 0; i < bitWidth; i++) value |= bits[offset + i] << i;
+      offset += bitWidth;
+      if (bitWidth > 1 && (value & (1 << (bitWidth - 1)))) value |= (-1 << bitWidth);
+      chSamples.push(value);
+    }
+    samples.push(chSamples);
+  }
+  return samples;
+}
+function parseDeltaFramesAll(data, channels, resolution) {
+  if (data.length === 0) return [];
+  const resBytes = Math.ceil(resolution / 8);
+  let offset = 0;
+  const ref = [];
+  for (let c = 0; c < channels; c++) {
+    let v = 0;
+    for (let b = 0; b < resBytes; b++) v |= data[offset + b] << (8 * b);
+    const bits = resBytes * 8;
+    if (v & (1 << (bits - 1))) v |= (-1 << bits);
+    offset += resBytes;
+    ref.push(v);
+  }
+  const samples = [ref];
+  while (offset < data.length) {
+    if (offset + 2 > data.length) break;
+    const deltaSize = data[offset]; offset += 1;
+    const sampleCount = data[offset]; offset += 1;
+    const bitLength = sampleCount * deltaSize * channels;
+    const length = Math.ceil(bitLength / 8);
+    if (offset + length > data.length) break;
+    const chunk = data.slice(offset, offset + length);
+    const deltas = parseDeltaFrame(chunk, channels, deltaSize);
+    for (const delta of deltas) {
+      if (delta.length !== channels) continue;
+      const last = samples[samples.length - 1];
+      samples.push(last.map((v, i) => v + delta[i]));
+    }
+    offset += length;
+  }
+  return samples;
+}
+
+// ---- Connect ----
+document.getElementById('btnConnect').onclick = async () => {
+  document.getElementById('btnConnect').disabled = true;
+  document.getElementById('btnConnect').textContent = 'Connexion en cours...';
+  try {
+    log('Recherche de périphériques "Polar"...');
+    device = await navigator.bluetooth.requestDevice({
+      filters: [{ namePrefix: 'Polar' }],
+      optionalServices: [PMD_SERVICE, PFTP_SERVICE]
+    });
+    log(`Sélectionné: ${device.name}`);
+    device.addEventListener('gattserverdisconnected', () => log('⚠️ Déconnecté'));
+    server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
+    log('GATT connecté.');
+
+    const pmdService = await withTimeout(server.getPrimaryService(PMD_SERVICE), 15000, 'getPrimaryService(PMD)');
+    controlChar = await withTimeout(pmdService.getCharacteristic(PMD_CONTROL), 15000, 'getCharacteristic(CONTROL)');
+    dataChar = await withTimeout(pmdService.getCharacteristic(PMD_DATA), 15000, 'getCharacteristic(DATA)');
+    await withTimeout(controlChar.startNotifications(), 15000, 'startNotifications(CONTROL)');
+    controlChar.addEventListener('characteristicvaluechanged', (e) => onControlResponse(e.target.value));
+    await withTimeout(dataChar.startNotifications(), 15000, 'startNotifications(DATA)');
+    log('PMD prêt.');
+
+    document.getElementById('btnConnect').textContent = 'Connecté ✓';
+    document.getElementById('btnStartRec').disabled = false;
+    document.getElementById('btnList').disabled = false;
+  } catch (err) {
+    log('ERREUR connexion: ' + err);
+    document.getElementById('btnConnect').disabled = false;
+    document.getElementById('btnConnect').textContent = 'Connecter (réessayer)';
+  }
+};
+
+let pendingControlResolvers = [];
+function onControlResponse(dv) {
+  const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  log('CONTROL rx: ' + toHex(bytes));
+  const resolver = pendingControlResolvers.shift();
+  if (resolver) resolver(bytes);
+}
+function waitForControlResponse(timeoutMs = 10000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timeout attente réponse CONTROL')), timeoutMs);
+    pendingControlResolvers.push((bytes) => { clearTimeout(timer); resolve(bytes); });
+  });
+}
+
+// ---- PMD offline recording start/stop: same command structure as live streaming,
+// with the measurement-type byte's top bit (0x80) set to mean "record internally"
+// instead of "stream live now". Settings TLVs are the exact same verified values. ----
+const REC_TYPES = [
+  { name: 'ACC', typeByte: 0x02 | 0x80, settings: [0x00,0x01,52,0, 0x01,0x01,16,0, 0x02,0x01,8,0, 0x04,0x01,3] },
+  { name: 'GYRO', typeByte: 0x05 | 0x80, settings: [0x00,0x01,52,0, 0x01,0x01,16,0, 0x02,0x01,0xd0,0x07, 0x04,0x01,3] },
+  { name: 'MAG', typeByte: 0x06 | 0x80, settings: [0x00,0x01,50,0, 0x01,0x01,16,0, 0x02,0x01,50,0, 0x04,0x01,3] },
+];
+
+document.getElementById('btnStartRec').onclick = async () => {
+  document.getElementById('btnStartRec').disabled = true;
+  try {
+    for (const t of REC_TYPES) {
+      const cmd = new Uint8Array([0x02, t.typeByte, ...t.settings]);
+      log(`Démarrage enregistrement interne ${t.name}: ` + toHex(cmd));
+      const respPromise = waitForControlResponse();
+      await controlChar.writeValue(cmd);
+      const resp = await respPromise;
+      const errorCode = resp[3];
+      if (errorCode !== 0) log(`⚠️ ${t.name}: code erreur ${errorCode} (voir CONTROL rx ci-dessus)`);
+      else log(`${t.name}: enregistrement interne démarré.`);
+    }
+    document.getElementById('btnStopRec').disabled = false;
+  } catch (err) {
+    log('ERREUR démarrage enregistrement: ' + err);
+    document.getElementById('btnStartRec').disabled = false;
+  }
+};
+
+document.getElementById('btnStopRec').onclick = async () => {
+  document.getElementById('btnStopRec').disabled = true;
+  try {
+    for (const t of REC_TYPES) {
+      const cmd = new Uint8Array([0x03, t.typeByte & 0x7F]); // stop uses the bare type, no recording bit
+      log(`Arrêt enregistrement interne ${t.name}: ` + toHex(cmd));
+      const respPromise = waitForControlResponse();
+      await controlChar.writeValue(cmd);
+      const resp = await respPromise;
+      const errorCode = resp[3];
+      if (errorCode !== 0) log(`⚠️ ${t.name}: code erreur ${errorCode} à l'arrêt`);
+      else log(`${t.name}: enregistrement interne arrêté.`);
+    }
+    document.getElementById('btnStartRec').disabled = false;
+  } catch (err) {
+    log('ERREUR arrêt enregistrement: ' + err);
+  }
+};
+
+// ================= PFTP (file transfer) client =================
+// RFC76 chunked transport + a small, exact protobuf subset (field numbers verified
+// against the real Polar SDK source, not guessed).
+const RFC76_STATUS_ERROR_OR_RESPONSE = 0x00;
+const RFC76_STATUS_LAST = 0x01;
+const RFC76_STATUS_MORE = 0x03;
+
+function encodeVarint(value) {
+  const out = [];
+  while (true) {
+    let byte = value & 0x7F;
+    value = value >>> 7;
+    if (value) { out.push(byte | 0x80); } else { out.push(byte); return new Uint8Array(out); }
+  }
+}
+function decodeVarint(data, offset) {
+  let shift = 0, result = 0;
+  while (offset < data.length) {
+    const byte = data[offset]; offset += 1;
+    result |= (byte & 0x7F) << shift;
+    if (byte < 0x80) return [result >>> 0, offset];
+    shift += 7;
+  }
+  throw new Error('Varint incomplet');
+}
+function concatBytes(...arrs) {
+  const total = arrs.reduce((a,b) => a + b.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+function encodeKey(fieldNumber, wireType) { return encodeVarint((fieldNumber << 3) | wireType); }
+function encodeUint64Field(fieldNumber, value) { return concatBytes(encodeKey(fieldNumber, 0), encodeVarint(value)); }
+function encodeStringField(fieldNumber, str) {
+  const bytes = new TextEncoder().encode(str);
+  return concatBytes(encodeKey(fieldNumber, 2), encodeVarint(bytes.length), bytes);
+}
+function encodePftpOperation(command, path) {
+  return concatBytes(encodeUint64Field(1, command), encodeStringField(2, path));
+}
+function readLengthDelimited(data, offset) {
+  const [length, o2] = decodeVarint(data, offset);
+  return [data.slice(o2, o2 + length), o2 + length];
+}
+function decodePftpEntry(data) {
+  let offset = 0, name = null, size = null;
+  while (offset < data.length) {
+    const [key, o2] = decodeVarint(data, offset); offset = o2;
+    const fieldNumber = key >>> 3, wireType = key & 0x07;
+    if (fieldNumber === 1 && wireType === 2) {
+      const [raw, o3] = readLengthDelimited(data, offset); offset = o3;
+      name = new TextDecoder().decode(raw);
+    } else if (fieldNumber === 2 && wireType === 0) {
+      const [v, o3] = decodeVarint(data, offset); offset = o3; size = v;
+    } else { break; }
+  }
+  return { name, size };
+}
+function decodePftpDirectory(data) {
+  let offset = 0;
+  const entries = [];
+  while (offset < data.length) {
+    const [key, o2] = decodeVarint(data, offset); offset = o2;
+    const fieldNumber = key >>> 3, wireType = key & 0x07;
+    if (fieldNumber === 1 && wireType === 2) {
+      const [raw, o3] = readLengthDelimited(data, offset); offset = o3;
+      entries.push(decodePftpEntry(raw));
+    } else { break; }
+  }
+  return entries;
+}
+
+function buildRfc76Frames(payload, mtuSize = 20) {
+  const frames = [];
+  let sequence = 0, nextBit = 0, offset = 0;
+  const chunkSize = mtuSize - 1;
+  do {
+    const chunk = payload.slice(offset, offset + chunkSize);
+    offset += chunk.length;
+    const statusBits = offset < payload.length ? 0x06 : 0x02;
+    const header = nextBit | statusBits | (sequence << 4);
+    frames.push(concatBytes(new Uint8Array([header]), chunk));
+    nextBit = 1;
+    sequence = (sequence + 1) & 0x0F;
+  } while (offset < payload.length);
+  return frames;
+}
+function parseRfc76Frame(packet) {
+  const header = packet[0];
+  const nextBit = header & 0x01;
+  const status = (header >> 1) & 0x03;
+  const sequenceNumber = (header >> 4) & 0x0F;
+  if (status === RFC76_STATUS_ERROR_OR_RESPONSE) {
+    const error = packet.length >= 3 ? (packet[1] | (packet[2] << 8)) : null;
+    return { next: nextBit, status, sequenceNumber, payload: new Uint8Array(0), error };
+  }
+  return { next: nextBit, status, sequenceNumber, payload: packet.slice(1), error: null };
+}
+function makeCompleteMessage(header, data, queryId) {
+  if (queryId !== undefined) {
+    const qid = new Uint8Array(2);
+    new DataView(qid.buffer).setUint16(0, (queryId | 0x8000) & 0xFFFF, true);
+    return concatBytes(qid, header || new Uint8Array(0));
+  }
+  const h = header || new Uint8Array(0);
+  const lenPrefix = new Uint8Array(2);
+  new DataView(lenPrefix.buffer).setUint16(0, h.length, true);
+  return concatBytes(lenPrefix, h, data || new Uint8Array(0));
+}
+
+let pftpResponseQueue = [];
+let pftpResponseWaiters = [];
+function onPftpMtuNotification(dv) {
+  const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  const waiter = pftpResponseWaiters.shift();
+  if (waiter) waiter(bytes); else pftpResponseQueue.push(bytes);
+}
+function nextPftpPacket(timeoutMs = 20000) {
+  if (pftpResponseQueue.length > 0) return Promise.resolve(pftpResponseQueue.shift());
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Timeout réponse PFTP')), timeoutMs);
+    pftpResponseWaiters.push((bytes) => { clearTimeout(timer); resolve(bytes); });
+  });
+}
+
+async function pftpEnsureReady() {
+  if (pftpMtuChar) return;
+  const pftpService = await withTimeout(server.getPrimaryService(PFTP_SERVICE), 15000, 'getPrimaryService(PFTP)');
+  pftpMtuChar = await withTimeout(pftpService.getCharacteristic(PFTP_MTU), 15000, 'getCharacteristic(PFTP_MTU)');
+  await withTimeout(pftpMtuChar.startNotifications(), 15000, 'startNotifications(PFTP_MTU)');
+  pftpMtuChar.addEventListener('characteristicvaluechanged', (e) => onPftpMtuNotification(e.target.value));
+  log('PFTP prêt.');
+}
+
+async function pftpWriteAndRead(payload) {
+  const frames = buildRfc76Frames(payload);
+  for (const frame of frames) {
+    await pftpMtuChar.writeValueWithoutResponse(frame);
+  }
+  const chunks = [];
+  let expectedSequence = 0, expectedNext = 0;
+  while (true) {
+    const packet = await nextPftpPacket();
+    const frame = parseRfc76Frame(packet);
+    if (frame.sequenceNumber !== expectedSequence) throw new Error('PFTP: numéro de séquence inattendu');
+    if (frame.next !== expectedNext) throw new Error('PFTP: flux désynchronisé');
+    expectedSequence = (expectedSequence + 1) & 0x0F;
+    expectedNext = 1;
+    if (frame.status === RFC76_STATUS_ERROR_OR_RESPONSE) {
+      if (frame.error === 0) return concatBytes(...chunks);
+      throw new Error('PFTP: erreur code ' + frame.error);
+    }
+    chunks.push(frame.payload);
+    if (frame.status === RFC76_STATUS_LAST) return concatBytes(...chunks);
+  }
+}
+async function pftpListDirectory(path) {
+  await pftpEnsureReady();
+  const response = await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(0, path)));
+  return decodePftpDirectory(response);
+}
+async function pftpGetFile(path) {
+  await pftpEnsureReady();
+  return await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(0, path)));
+}
+
+// ---- Walk the device's recording directory tree to find .REC files ----
+async function listAllRecordings() {
+  const recordings = [];
+  let userDirs;
+  try { userDirs = await pftpListDirectory('/U/'); } catch (e) { log('Pas de dossier /U/: ' + e); return recordings; }
+  for (const user of userDirs) {
+    if (!/^\d+\/?$/.test(user.name)) continue;
+    const userPath = `/U/${user.name.replace(/\/$/,'')}/`;
+    let dayDirs;
+    try { dayDirs = await pftpListDirectory(userPath); } catch { continue; }
+    for (const day of dayDirs) {
+      if (!/^\d{8}\/?$/.test(day.name)) continue;
+      const dayPath = `${userPath}${day.name.replace(/\/$/,'')}/`;
+      let rDirs;
+      try { rDirs = await pftpListDirectory(dayPath); } catch { continue; }
+      const rEntry = rDirs.find(e => e.name.replace(/\/$/,'').toUpperCase() === 'R');
+      if (!rEntry) continue;
+      const rPath = `${dayPath}R/`;
+      let timeDirs;
+      try { timeDirs = await pftpListDirectory(rPath); } catch { continue; }
+      for (const timeDir of timeDirs) {
+        if (!/^\d{6}\/?$/.test(timeDir.name)) continue;
+        const timePath = `${rPath}${timeDir.name.replace(/\/$/,'')}/`;
+        let files;
+        try { files = await pftpListDirectory(timePath); } catch { continue; }
+        for (const f of files) {
+          if (f.name.toUpperCase().endsWith('.REC')) {
+            recordings.push({ path: `${timePath}${f.name}`, size: f.size });
+          }
+        }
+      }
+    }
+  }
+  return recordings;
+}
+
+document.getElementById('btnList').onclick = async () => {
+  document.getElementById('btnList').disabled = true;
+  try {
+    log('Recherche des enregistrements sur le capteur...');
+    const recordings = await listAllRecordings();
+    log(`${recordings.length} enregistrement(s) trouvé(s).`);
+    const container = document.getElementById('recordingsList');
+    container.innerHTML = '';
+    recordings.forEach(r => {
+      const row = document.createElement('div');
+      row.innerHTML = `<span>${r.path} (${r.size} o)</span>`;
+      const btn = document.createElement('button');
+      btn.textContent = 'Récupérer';
+      btn.onclick = () => fetchAndDecode(r.path, btn);
+      row.appendChild(btn);
+      container.appendChild(row);
+    });
+  } catch (err) {
+    log('ERREUR listage: ' + err);
+  } finally {
+    document.getElementById('btnList').disabled = false;
+  }
+};
+
+// ---- Decode a retrieved .REC file: simple metadata header (verified against the
+// real Polar SDK source) + the same PMD delta-frame payload format we already use live ----
+function parseSettingsTlv(bytes) {
+  const settings = {};
+  let offset = 0;
+  const fieldSize = { 0:2, 1:2, 2:2, 3:4, 4:1, 5:4, 6:16 };
+  while (offset + 2 <= bytes.length) {
+    const type = bytes[offset]; const count = bytes[offset+1]; offset += 2;
+    const fs = fieldSize[type] ?? 2;
+    const values = [];
+    for (let i = 0; i < count; i++) {
+      if (offset + fs > bytes.length) break;
+      let v = 0;
+      for (let b = 0; b < fs; b++) v |= bytes[offset+b] << (8*b);
+      values.push(v >>> 0);
+      offset += fs;
+    }
+    settings[type] = values;
+    if (fs > 4 && type !== 6) break; // guard against misparse
+  }
+  return { settings, length: offset };
+}
+
+function decodeRecFile(fileBytes, channels, resolution, frameTypeExpected) {
+  let offset = 0;
+  const securityStrategy = fileBytes[offset]; offset += 1;
+  if (securityStrategy !== 0) {
+    throw new Error('Stratégie de sécurité non gérée par cet outil (valeur=' + securityStrategy + '), fichier probablement chiffré.');
+  }
+  // 16-byte header: magic, version, free, eswHash (all uint32 LE)
+  const dv = new DataView(fileBytes.buffer, fileBytes.byteOffset + offset, 16);
+  const magic = dv.getUint32(0, true);
+  if (magic !== 0x3D7C4C2B) throw new Error('Signature de fichier invalide (magic=0x' + magic.toString(16) + '), format inattendu.');
+  offset += 16;
+
+  // 20-byte ASCII start time, e.g. "2026-09-18 10:15:30" + 1 trailing byte
+  const startTimeBytes = fileBytes.slice(offset, offset + 20);
+  const startTimeStr = new TextDecoder().decode(startTimeBytes).replace(/\0+$/, '');
+  offset += 20;
+
+  // settings: 1-byte length + that many bytes of TLV (same format as GET_SETTINGS)
+  const settingsLen = fileBytes[offset]; offset += 1;
+  const settingsBytes = fileBytes.slice(offset, offset + settingsLen);
+  offset += settingsLen;
+  const { settings } = parseSettingsTlv(settingsBytes);
+
+  // security info: 1-byte length; 0 means no per-payload security
+  const secInfoLen = fileBytes[offset]; offset += 1;
+  if (secInfoLen !== 0) offset += secInfoLen; // (untested path — we expect 0 for an unencrypted device)
+
+  // first packet size: 2-byte LE
+  const firstPacketSize = fileBytes[offset] | (fileBytes[offset+1] << 8);
+  offset += 2;
+
+  const factorRaw = settings[5] ? settings[5][0] : null;
+  const factor = factorRaw !== null ? new Float32Array(new Uint32Array([factorRaw]).buffer)[0] : 1.0;
+
+  const samples = [];
+  let packetSize = firstPacketSize;
+  while (offset < fileBytes.length) {
+    const frameBytes = fileBytes.slice(offset, offset + packetSize);
+    offset += packetSize;
+    if (frameBytes.length > 10) {
+      const frameTypeByte = frameBytes[9];
+      const frameType = frameTypeByte & 0x7F;
+      const isCompressed = (frameTypeByte & 0x80) > 0;
+      if (isCompressed && frameType === frameTypeExpected) {
+        const content = frameBytes.slice(10);
+        try {
+          const decoded = parseDeltaFramesAll(content, channels, resolution);
+          for (const s of decoded) samples.push(s.map(v => v * factor));
+        } catch (e) { log('Erreur décodage trame: ' + e); }
+      }
+    }
+    if (offset + 2 > fileBytes.length) break;
+    packetSize = fileBytes[offset] | (fileBytes[offset+1] << 8);
+    offset += 2;
+  }
+  return { startTimeStr, settings, factor, samples };
+}
+
+async function fetchAndDecode(path, btn) {
+  btn.disabled = true;
+  btn.textContent = '...';
+  try {
+    log('Récupération: ' + path);
+    const bytes = await pftpGetFile(path);
+    log(`Reçu ${bytes.length} octets.`);
+    const upper = path.toUpperCase();
+    let result;
+    if (upper.includes('ACC')) result = decodeRecFile(bytes, 3, 16, 1);
+    else if (upper.includes('GYRO')) result = decodeRecFile(bytes, 3, 16, 0);
+    else if (upper.includes('MAG')) result = decodeRecFile(bytes, 3, 16, 0);
+    else { log('Type de fichier non reconnu pour le décodage, téléchargement brut.'); result = null; }
+
+    if (result) {
+      log(`Décodé: ${result.samples.length} échantillons, départ=${result.startTimeStr}`);
+      const blob = new Blob([JSON.stringify(result, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = path.replace(/\//g,'_') + '.decoded.json';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } else {
+      const blob = new Blob([bytes], { type: 'application/octet-stream' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = path.replace(/\//g,'_');
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  } catch (err) {
+    log('ERREUR récupération/décodage: ' + err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Récupérer';
+  }
+}
+</script>
+</body>
+</html>
