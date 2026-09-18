@@ -21,9 +21,8 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v2 — déconnexion propre ajoutée)</span></h1>
+<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v3 — UI reflète auto la déconnexion)</span></h1>
 <button id="btnConnect">Connecter</button>
-<button id="btnDisconnect" class="secondary" disabled>Déconnecter proprement</button>
 
 <div class="section">
   <div style="font-size:13px; color:#aaa; margin-bottom:4px;">1. Démarrer/arrêter l'enregistrement interne (ACC+GYRO+MAG). Une fois démarré, le capteur enregistre seul — plus besoin de rester connecté.</div>
@@ -51,16 +50,11 @@ const PFTP_HOST_TO_DEVICE = 'fb005c53-02e7-f387-1cad-8acd2d8df0c8';
 
 let device, server, controlChar, dataChar;
 
-document.getElementById('btnDisconnect').onclick = () => {
-  try {
-    if (device && device.gatt && device.gatt.connected) {
-      device.gatt.disconnect();
-      log('Déconnexion propre demandée.');
-    }
-  } catch (e) {
-    log('Erreur à la déconnexion: ' + e);
-  }
-  // reset all connection-scoped state so a fresh reconnect starts clean
+function resetConnectionUI(reason) {
+  // Fires on ANY disconnection — explicit, OS Bluetooth toggle, out of range,
+  // whatever — so the buttons never sit enabled while there's nothing to send
+  // commands to. The sensor keeps recording internally regardless; only the
+  // BLE-dependent controls need to grey out.
   pftpMtuChar = null;
   pendingControlResolvers = [];
   pftpResponseQueue = [];
@@ -70,8 +64,8 @@ document.getElementById('btnDisconnect').onclick = () => {
   document.getElementById('btnStartRec').disabled = true;
   document.getElementById('btnStopRec').disabled = true;
   document.getElementById('btnList').disabled = true;
-  document.getElementById('btnDisconnect').disabled = true;
-};
+  if (reason) log('Déconnecté (' + reason + ') — commandes désactivées jusqu\'à reconnexion.');
+}
 let pftpMtuChar = null;
 const logEl = document.getElementById('log');
 function log(msg) {
@@ -156,7 +150,7 @@ document.getElementById('btnConnect').onclick = async () => {
       optionalServices: [PMD_SERVICE, PFTP_SERVICE]
     });
     log(`Sélectionné: ${device.name}`);
-    device.addEventListener('gattserverdisconnected', () => log('⚠️ Déconnecté'));
+    device.addEventListener('gattserverdisconnected', () => resetConnectionUI('signal GATT'));
     server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
     log('GATT connecté.');
 
@@ -171,7 +165,6 @@ document.getElementById('btnConnect').onclick = async () => {
     document.getElementById('btnConnect').textContent = 'Connecté ✓';
     document.getElementById('btnStartRec').disabled = false;
     document.getElementById('btnList').disabled = false;
-    document.getElementById('btnDisconnect').disabled = false;
   } catch (err) {
     log('ERREUR connexion: ' + err);
     document.getElementById('btnConnect').disabled = false;
