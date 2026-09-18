@@ -21,8 +21,9 @@
 </style>
 </head>
 <body>
-<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v1 — expérimental, non testé sur vrai appareil)</span></h1>
+<h1>Enregistrement interne (offline) — Polar Verity Sense <span style="color:#666;font-size:11px;">(v2 — déconnexion propre ajoutée)</span></h1>
 <button id="btnConnect">Connecter</button>
+<button id="btnDisconnect" class="secondary" disabled>Déconnecter proprement</button>
 
 <div class="section">
   <div style="font-size:13px; color:#aaa; margin-bottom:4px;">1. Démarrer/arrêter l'enregistrement interne (ACC+GYRO+MAG). Une fois démarré, le capteur enregistre seul — plus besoin de rester connecté.</div>
@@ -49,6 +50,28 @@ const PFTP_DEVICE_TO_HOST = 'fb005c52-02e7-f387-1cad-8acd2d8df0c8';
 const PFTP_HOST_TO_DEVICE = 'fb005c53-02e7-f387-1cad-8acd2d8df0c8';
 
 let device, server, controlChar, dataChar;
+
+document.getElementById('btnDisconnect').onclick = () => {
+  try {
+    if (device && device.gatt && device.gatt.connected) {
+      device.gatt.disconnect();
+      log('Déconnexion propre demandée.');
+    }
+  } catch (e) {
+    log('Erreur à la déconnexion: ' + e);
+  }
+  // reset all connection-scoped state so a fresh reconnect starts clean
+  pftpMtuChar = null;
+  pendingControlResolvers = [];
+  pftpResponseQueue = [];
+  pftpResponseWaiters = [];
+  document.getElementById('btnConnect').disabled = false;
+  document.getElementById('btnConnect').textContent = 'Connecter';
+  document.getElementById('btnStartRec').disabled = true;
+  document.getElementById('btnStopRec').disabled = true;
+  document.getElementById('btnList').disabled = true;
+  document.getElementById('btnDisconnect').disabled = true;
+};
 let pftpMtuChar = null;
 const logEl = document.getElementById('log');
 function log(msg) {
@@ -148,6 +171,7 @@ document.getElementById('btnConnect').onclick = async () => {
     document.getElementById('btnConnect').textContent = 'Connecté ✓';
     document.getElementById('btnStartRec').disabled = false;
     document.getElementById('btnList').disabled = false;
+    document.getElementById('btnDisconnect').disabled = false;
   } catch (err) {
     log('ERREUR connexion: ' + err);
     document.getElementById('btnConnect').disabled = false;
