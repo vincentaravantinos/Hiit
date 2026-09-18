@@ -321,7 +321,7 @@ function renderDashboard(){
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
   container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
 }
-function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active');if(name==='dashboard')renderDashboard();}
+function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active');if(name==='dashboard')renderDashboard();if(name==='timer')sensorPrewarmConnect();}
 function toggleReminder(){reminderOn=!reminderOn;S.set(KEYS.reminderOn,reminderOn);document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';reminderOn?scheduleReminder():clearTimeout(reminderTO);}
 function saveReminderTime(){reminderTime=document.getElementById('reminder-time').value;S.set(KEYS.reminderTime,reminderTime);scheduleReminder();}
 function saveGoal(){goal=parseInt(document.getElementById('goal-select').value);S.set(KEYS.goal,goal);renderDashboard();}
@@ -904,23 +904,24 @@ async function waitForAdvertisementThenConnect() {
   const advertisementPromise = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       abortController.abort();
-      reject(new Error('Timeout (15s) en attente d\'une publicité BLE du capteur'));
+      reject(new Error('Recherche de la montre Polar : délai dépassé (15s)'));
     }, 15000);
     device.addEventListener('advertisementreceived', () => {
       clearTimeout(timer);
       resolve();
     }, { once: true });
   });
-  log('Recherche d\'une publicité BLE active du capteur (watchAdvertisements)...');
+  log('Recherche de la montre Polar...');
   await device.watchAdvertisements({ signal: abortController.signal });
   await advertisementPromise;
-  log('Publicité reçue — le capteur est bien à portée, connexion...');
+  log('Montre Polar trouvée, connexion...');
   return await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (auto)');
 }
 
 // ======= HIIT app integration: sensor session lifecycle =======
 let sensorActive = false;
 let sensorNeedsPicker = false;
+let sensorPrewarmPromise = null;
 let sensorBaseline = null;
 let sensorPhaseLog = [];
 const SENSOR_STORAGE_KEY = 'hiitSensorPendingSession';
@@ -935,7 +936,26 @@ function sensorSavePending() {
   }));
 }
 
+async function sensorPrewarmConnect() {
+  if (sensorPrewarmPromise || sensorActive) return; // already warming up or already connected
+  const known = (typeof navigator.bluetooth?.getDevices === 'function')
+    ? await navigator.bluetooth.getDevices().catch(() => [])
+    : [];
+  if (known.length === 0) return; // never paired — nothing to prewarm, DÉMARRER will handle it
+  device = known[0];
+  sensorPrewarmPromise = sensorSilentConnect();
+}
+
 async function sensorPromptThenStart() {
+  if (sensorPrewarmPromise) {
+    sensorNeedsPicker = false;
+    const connected = await sensorPrewarmPromise;
+    sensorPrewarmPromise = null;
+    if (connected) { tStartCountdown(); return; }
+    document.getElementById('sensor-modal').style.display = 'flex';
+    return;
+  }
+
   const known = (typeof navigator.bluetooth?.getDevices === 'function')
     ? await navigator.bluetooth.getDevices().catch(() => [])
     : [];
