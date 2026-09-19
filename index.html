@@ -203,10 +203,6 @@ body {
         <div id="t-list" style="background:rgba(255,255,255,.04);border-radius:14px;padding:11px 14px;border:1px solid var(--border);margin-bottom:16px"></div>
         <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
         <div class="sensor-status" id="sensor-status"></div>
-        <div class="position-toggle" id="position-toggle">
-          <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
-          <button id="pos-biceps" onclick="setSensorPosition('Biceps')">BICEPS</button>
-        </div>
       </div>
     </div>
   </div>
@@ -224,6 +220,14 @@ body {
       <div class="setting-row" id="spotify-playlist-row" style="display:none;flex-direction:column;align-items:stretch;gap:8px">
         <div class="setting-name">Playlist</div>
         <input type="text" id="spotify-playlist-input" placeholder="Lien ou URI Spotify (ex. https://open.spotify.com/playlist/...)" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyPlaylist()">
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Capteur Polar</div>
+      <div class="setting-row"><div><div class="setting-name">Position du bracelet</div><div class="setting-sub">Enregistrée avec les données de chaque séance</div></div></div>
+      <div class="position-toggle" id="position-toggle">
+        <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
+        <button id="pos-biceps" onclick="setSensorPosition('Biceps')">BICEPS</button>
       </div>
     </div>
     <div class="settings-section">
