@@ -917,7 +917,7 @@ async function stopAllRecordings() {
   }
 }
 
-async function waitForAdvertisementThenConnect() {
+async function waitForOneAdvertisement(timeoutMs) {
   if (typeof device.watchAdvertisements !== 'function') {
     throw new Error('watchAdvertisements() indisponible — active aussi chrome://flags/#enable-experimental-web-platform-features');
   }
@@ -925,18 +925,31 @@ async function waitForAdvertisementThenConnect() {
   const advertisementPromise = new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       abortController.abort();
-      reject(new Error('Recherche de la montre Polar : délai dépassé (15s)'));
-    }, 15000);
+      reject(new Error('délai dépassé (' + (timeoutMs/1000) + 's)'));
+    }, timeoutMs);
     device.addEventListener('advertisementreceived', () => {
       clearTimeout(timer);
       resolve();
     }, { once: true });
   });
-  log('Recherche de la montre Polar...');
   await device.watchAdvertisements({ signal: abortController.signal });
   await advertisementPromise;
-  log('Montre Polar trouvée, connexion...');
-  return await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (auto)');
+}
+
+async function waitForAdvertisementThenConnect(maxAttempts = 3) {
+  let lastErr = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    log(`Recherche de la montre Polar... (tentative ${attempt}/${maxAttempts})`);
+    try {
+      await waitForOneAdvertisement(10000);
+      log('Montre Polar trouvée, connexion...');
+      return await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (auto)');
+    } catch (err) {
+      lastErr = err;
+      console.log('[capteur] recherche tentative', attempt, 'échouée:', err);
+    }
+  }
+  throw new Error('Recherche de la montre Polar : ' + (lastErr ? lastErr.message : 'échec'));
 }
 
 // ======= HIIT app integration: sensor session lifecycle =======
