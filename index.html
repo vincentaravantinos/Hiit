@@ -251,6 +251,7 @@ body {
   <div class="sensor-modal">
     <h3>CAPTEUR NON TROUVÉ</h3>
     <p>Impossible de se connecter au bracelet Polar. Continuer sans capteur, ou réessayer ?</p>
+    <p id="sensor-error-detail" style="font-size:11px;color:var(--muted);opacity:0.7;margin-top:-10px;margin-bottom:18px;word-break:break-word;"></p>
     <button class="btn-connect" onclick="sensorModalRetry()">Réessayer</button>
     <button class="btn-skip" onclick="sensorModalSkip()">Continuer sans capteur</button>
   </div>
@@ -942,6 +943,7 @@ async function waitForAdvertisementThenConnect() {
 let sensorActive = false;
 let sensorNeedsPicker = false;
 let sensorPrewarmPromise = null;
+let sensorLastError = null;
 let sensorBaseline = null;
 let sensorPhaseLog = [];
 const SENSOR_STORAGE_KEY = 'hiitSensorPendingSession';
@@ -971,6 +973,7 @@ async function sensorPromptThenStart(btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'CONNEXION...'; }
 
   function showPopupAndResetButton() {
+    document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
     document.getElementById('sensor-modal').style.display = 'flex';
     if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
@@ -1020,6 +1023,7 @@ async function sensorSilentConnect() {
     return true;
   } catch (err) {
     console.log('[capteur] connexion silencieuse échouée:', err);
+    sensorLastError = (err && err.message) ? err.message : String(err);
     sensorActive = false;
     return false;
   }
@@ -1049,6 +1053,7 @@ async function sensorModalRetry() {
   if (connected) {
     tStartCountdown();
   } else {
+    document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
     document.getElementById('sensor-modal').style.display = 'flex';
   }
 }
