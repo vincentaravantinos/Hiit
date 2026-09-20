@@ -43,3 +43,15 @@ BLE, historique, statut général.
 - Les levées de jambes : le signal utile au bras est intrinsèquement très
   faible (mouvement dominant aux jambes) — accepté comme limite structurelle,
   pas une priorité à optimiser davantage.
+
+
+## Données de séances réelles
+
+Stockées dans `/data/sessions/` de ce même repo (pas Google Drive — les fichiers
+sont trop volumineux, ~12 Mo chacun avec l'horodatage ACC/GYRO/MAG/HR complet,
+pour passer par cet outil-là proprement). Une séance par fichier, nommée
+`seance_YYYY-MM-DD.json`.
+
+- `seance_2026-09-19.json` — première séance complète (ACC initialement tronqué
+  par un bug de transfert PFTP, depuis corrigé et réintégré)
+- `seance_2026-09-20.json` — deuxième séance, données propres dès le départ
