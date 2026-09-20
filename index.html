@@ -234,6 +234,11 @@ body {
         <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
         <button onclick="clearSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Vider le journal</button>
       </div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:10px;">
+        <div class="setting-name">Sauvegarde automatique GitHub</div>
+        <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
+        <input type="password" id="github-token-input" placeholder="ghp_..." style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()">
+      </div>
     </div>
     <div class="settings-section">
       <div class="settings-label">Objectif</div>
@@ -472,7 +477,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';}
 
 // ======= Polar sensor integration (optional, additive — workout works identically if skipped) =======
 const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
@@ -1269,14 +1274,8 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
       log(`Échec sur ${kind} (${fileNum}/${newRecordings.length}), poursuite...`);
     }
   }
-  const blob = new Blob([JSON.stringify(combined, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'seance_' + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  await saveSessionData(combined);
   log('Données du capteur récupérées ✓');
-  showToast('📡 Données du capteur récupérées');
   return true;
 }
 
@@ -1317,6 +1316,52 @@ function setSensorPosition(pos) {
   document.getElementById('pos-avant-bras').classList.toggle('active', pos === 'Avant-bras');
   document.getElementById('pos-biceps').classList.toggle('active', pos === 'Biceps');
 }
+
+// ---- GitHub auto-save: token lives only in this device's localStorage, never in
+// the app's (public) source code. Falls back to local download if absent or if
+// the upload itself fails for any reason. ----
+function saveGithubToken() {
+  const token = document.getElementById('github-token-input').value.trim();
+  if (token) localStorage.setItem('hiitGithubToken', token);
+  else localStorage.removeItem('hiitGithubToken');
+  showToast(token ? 'Token GitHub enregistré' : 'Token GitHub retiré');
+}
+
+function downloadSessionLocally(combined, filename) {
+  const blob = new Blob([JSON.stringify(combined, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+async function saveSessionData(combined) {
+  const filename = 'seance_' + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) {
+    downloadSessionLocally(combined, filename);
+    showToast('📥 Séance téléchargée localement');
+    return;
+  }
+  try {
+    const path = 'data/sessions/' + filename;
+    const contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(combined, null, 2))));
+    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
+      method: 'PUT',
+      headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: contentB64 })
+    });
+    if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
+    log('Séance sauvegardée sur GitHub: ' + filename);
+    showToast('📡 Séance sauvegardée sur GitHub');
+  } catch (err) {
+    logError('Échec sauvegarde GitHub, téléchargement local à la place', err);
+    downloadSessionLocally(combined, filename);
+    showToast('⚠️ Échec GitHub — téléchargée localement à la place');
+  }
+}
+
 
 loadProgram().then(init);
 </script>
