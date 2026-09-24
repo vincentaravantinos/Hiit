@@ -200,7 +200,6 @@ body {
         <div id="t-wake" style="display:none;margin-top:8px;font-size:12px;line-height:1.35;color:#ffb454;background:rgba(255,180,84,.10);border:1px solid rgba(255,180,84,.35);border-radius:10px;padding:6px 10px;max-width:320px;margin-left:auto;margin-right:auto"></div>
       </div>
       <div style="width:100%;max-width:400px;z-index:1">
-        <div id="t-variant" style="display:flex;gap:8px;margin-bottom:10px"></div>
         <div id="t-list" style="background:rgba(255,255,255,.04);border-radius:14px;padding:11px 14px;border:1px solid var(--border);margin-bottom:16px"></div>
         <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
         <div class="sensor-status" id="sensor-status"></div>
@@ -378,33 +377,25 @@ const FALLBACK_PROGRAM={
     {name:"Repos",spoken:"Repos, récupérez.",duration:20,type:"rest"}
   ]
 };
-const FALLBACK_HOTEL={"warmup": {"enabled": true, "steps": [{"name": "Montées de genoux", "spoken": "Échauffement : montées de genoux !", "duration": 30}, {"name": "Jumping jacks", "spoken": "Jumping jacks !", "duration": 30}, {"name": "Écartés élastique + bras", "spoken": "Écartés élastique et cercles de bras !", "duration": 30}, {"name": "Squats poids du corps", "spoken": "Squats au poids du corps !", "duration": 30}]}, "rounds": 4, "skip_last_rest": true, "exercises": [{"name": "Mountain climbers", "spoken": "Mountain climbers !", "duration": 30, "type": "work"}, {"name": "Pompes déclinées", "spoken": "Pompes déclinées, pieds sur le lit !", "duration": 30, "type": "work"}, {"name": "Rowing élastique", "spoken": "Rowing élastique !", "duration": 30, "type": "work"}, {"name": "Tirage vertical élastique", "spoken": "Tirage vertical à genoux !", "duration": 30, "type": "work"}, {"name": "Relevés de jambes au sol", "spoken": "Relevés de jambes au sol !", "duration": 30, "type": "work"}, {"name": "Squats élastique", "spoken": "Squats élastique !", "duration": 30, "type": "work"}, {"name": "Repos", "spoken": "Repos, récupérez.", "duration": 20, "type": "rest"}]};
-const PROGRAM_VARIANTS={maison:{url:'HIIT_program.json',fallback:FALLBACK_PROGRAM,label:'🏠 Maison'},hotel:{url:'HIIT_program_hotel.json',fallback:FALLBACK_HOTEL,label:'🏨 Hôtel'}};
-const VARIANT_KEY='hiit_programVariant_v1';
-let programVariant=S.get(VARIANT_KEY,'maison');if(!PROGRAM_VARIANTS[programVariant])programVariant='maison';
-let CIRCUIT=[],ROUNDS=4,TOTAL_DUR=0,SKIP_LAST_REST=false,WU_COUNT=0,WU_STEPS=[];
+let CIRCUIT=[],ROUNDS=4,TOTAL_DUR=0,SKIP_LAST_REST=false;
 const CIRCUM=2*Math.PI*105;
 let SEQ=[];
 function applyProgram(prog){
   CIRCUIT=prog.exercises;
   ROUNDS=prog.rounds||4;
   SKIP_LAST_REST=prog.skip_last_rest||false;
-  WU_STEPS=warmupSteps(prog);WU_COUNT=WU_STEPS.length;
-  const wuDur=WU_STEPS.reduce((a,e)=>a+e.duration,0);
+  const wuDur=(prog.warmup&&prog.warmup.enabled)?prog.warmup.duration:0;
   let circDur=CIRCUIT.reduce((a,e)=>a+e.duration,0)*ROUNDS;
   if(SKIP_LAST_REST){const last=CIRCUIT[CIRCUIT.length-1];if(last&&last.type==='rest')circDur-=last.duration;}
   TOTAL_DUR=wuDur+circDur;
   SEQ=buildSeq(prog);
   if(tState==='idle'){tLeft=SEQ.length?SEQ[0].duration:0;}
 }
-function warmupSteps(prog){
-  const w=prog.warmup;if(!w||!w.enabled)return[];
-  if(Array.isArray(w.steps)&&w.steps.length)return w.steps.map(x=>({name:x.name,spoken:x.spoken,duration:x.duration}));
-  return[{name:w.name,spoken:w.spoken,duration:w.duration}];
-}
 function buildSeq(prog){
   const s=[];
-  warmupSteps(prog).forEach(w=>s.push({name:w.name,spoken:w.spoken,duration:w.duration,type:"work",phase:"WARMUP",round:null}));
+  if(prog.warmup&&prog.warmup.enabled){
+    s.push({name:prog.warmup.name,spoken:prog.warmup.spoken,duration:prog.warmup.duration,type:"work",phase:"WARMUP",round:null});
+  }
   for(let r=1;r<=ROUNDS;r++){
     const isLast=r===ROUNDS;
     CIRCUIT.forEach((ex,i)=>{
@@ -417,24 +408,14 @@ function buildSeq(prog){
 }
 async function loadProgram(){
   try{
-    const r=await fetch(PROGRAM_VARIANTS[programVariant].url+'?v='+Date.now());
+    const r=await fetch(PROGRAM_URL+'?v='+Date.now());
     if(!r.ok)throw new Error('HTTP '+r.status);
     const prog=await r.json();
     applyProgram(prog);
   }catch(e){
-    console.warn(PROGRAM_VARIANTS[programVariant].url+' non chargé, fallback:',e);
-    applyProgram(PROGRAM_VARIANTS[programVariant].fallback);
+    console.warn('HIIT_program.json non chargé, fallback:',e);
+    applyProgram(FALLBACK_PROGRAM);
   }
-}
-function renderVariantPicker(){
-  const el=document.getElementById('t-variant');if(!el)return;
-  el.style.display=tState==='idle'?'flex':'none';
-  el.innerHTML=Object.entries(PROGRAM_VARIANTS).map(([k,v])=>{const on=k===programVariant;return`<button onclick="selectVariant('${k}')" style="flex:1;padding:9px;font-family:'Courier New',monospace;font-size:13px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;border-radius:50px;cursor:pointer;background:${on?'var(--accent)':'rgba(255,255,255,.06)'};color:${on?'#111111':'var(--muted)'};border:1px solid ${on?'var(--accent)':'rgba(255,255,255,.15)'}">${v.label}</button>`;}).join('');
-}
-async function selectVariant(k){
-  if(tState!=='idle'||!PROGRAM_VARIANTS[k]||k===programVariant)return;
-  programVariant=k;S.set(VARIANT_KEY,k);
-  await loadProgram();tReset();showToast('Programme : '+PROGRAM_VARIANTS[k].label);
 }let tIdx=0,tLeft=0,tElapsed=0,tState="idle",ticker=null,audioCtx=null,frVoice=null,wakeLock=null,tickStart=0,tickLastSec=-1,duckTimeout=null,duckReleaseAt=0;
 function setWakeStatus(state,msg){const el=document.getElementById('t-wake');if(!el)return;if(state==='ok'){el.style.display='none';el.textContent='';return;}el.style.display='block';if(state==='unsupported'){el.textContent='\u26a0\ufe0f Wake lock non support\u00e9 par ce navigateur \u2014 l\u2019\u00e9cran peut s\u2019\u00e9teindre.';}else if(state==='lost'){el.textContent='\u26a0\ufe0f Wake lock rel\u00e2ch\u00e9 par le syst\u00e8me \u2014 nouvelle tentative\u2026';}else{el.textContent='\u26a0\ufe0f \u00c9cran non maintenu allum\u00e9. D\u00e9sactive l\u2019\u00e9conomie d\u2019\u00e9nergie.'+(msg?' ('+msg+')':'');}}
 async function acquireWakeLock(){if(!('wakeLock'in navigator)){setWakeStatus('unsupported');return;}if(wakeLock)return;try{const s=await navigator.wakeLock.request('screen');wakeLock=s;setWakeStatus('ok');s.addEventListener('release',()=>{if(wakeLock===s)wakeLock=null;if(tState==='running'||tState==='countdown'){setWakeStatus('lost');setTimeout(()=>{if(!wakeLock&&(tState==='running'||tState==='countdown'))acquireWakeLock();},600);}});}catch(e){wakeLock=null;setWakeStatus('denied',e&&e.name?e.name:'');setTimeout(()=>{if(!wakeLock&&(tState==='running'||tState==='countdown'))acquireWakeLock();},5000);}}
@@ -444,7 +425,7 @@ speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=
 function speak(txt){duckStart();try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=0.95;u.pitch=1.05;u.volume=1;if(frVoice)u.voice=frVoice;u.onend=()=>duckHold(300);u.onerror=()=>duckHold(300);speechSynthesis.speak(u);}catch{duckHold(300);}}
 const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
 const tCol=()=>SEQ[tIdx]&&SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)';
-function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=WU_COUNT+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;renderVariantPicker();if(cur.phase==='WARMUP'&&WU_COUNT>1&&tState!=='idle'){const col=tCol();document.getElementById('t-list').innerHTML=WU_STEPS.map((ex,i)=>{const isA=tIdx===i,isD=tIdx>i;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${i<WU_COUNT-1?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();return;}document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
+function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=1+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
 function tRewind(){
   const timeInEx=SEQ[tIdx].duration-tLeft;
   if(timeInEx>2){tLeft=SEQ[tIdx].duration;tStartTicker();tRender();}
