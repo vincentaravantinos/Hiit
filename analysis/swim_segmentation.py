@@ -80,3 +80,24 @@ def detect_swim_segments(acc, threshold=0.6, min_segment_s=8.0, merge_gap_s=6.0)
             merged.append(seg)
 
     return [(s,e) for s,e in merged if e-s >= min_segment_s]
+
+def classify_stroke_type(acc_window, threshold_alt_diff=12.0):
+    """Classifies a detected swim segment as 'brasse' or 'crawl' based on the
+    alternating-peak-height asymmetry: breaststroke is bilateral/symmetric
+    (small difference between consecutive peaks), crawl seen from one arm is
+    inherently asymmetric (pull phase vs recovery phase differ a lot).
+
+    Validated on real data (29/09): brasse ~4.3, crawl ~24-39 — clean gap,
+    threshold set at the midpoint-ish, biased toward not over-calling crawl.
+    Status: exploratory, only 2 examples per class so far.
+    """
+    tilt = tilt_signal(acc_window)
+    peaks, _ = find_peaks(tilt, prominence=8)
+    heights = tilt[peaks]
+    if len(heights) < 5:
+        return 'indéterminé', None
+    odd, even = heights[0::2], heights[1::2]
+    n = min(len(odd), len(even))
+    alt_diff = np.abs(odd[:n] - even[:n]).mean()
+    stroke = 'crawl' if alt_diff > threshold_alt_diff else 'brasse'
+    return stroke, alt_diff
