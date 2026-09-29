@@ -152,6 +152,7 @@ body {
 <div class="tab-nav">
   <button class="tab-btn active" onclick="showTab('dashboard',this)">SUIVI</button>
   <button class="tab-btn" onclick="showTab('timer',this)">TIMER</button>
+  <button class="tab-btn" onclick="showTab('swim',this)">NATATION</button>
   <button class="tab-btn" onclick="showTab('settings',this)">RÉGLAGES</button>
 </div>
 <div class="tab-content">
@@ -204,6 +205,13 @@ body {
         <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
         <div class="sensor-status" id="sensor-status"></div>
       </div>
+    </div>
+  </div>
+  <div id="tab-swim" class="tab-panel">
+    <div style="padding:30px 20px;text-align:center;">
+      <div id="swim-status" style="font-size:14px;color:var(--muted);margin-bottom:20px;min-height:20px;"></div>
+      <button id="swim-btn" onclick="swimPromptThenStart(this)" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LA NATATION</button>
+      <p style="font-size:12px;color:var(--muted);margin-top:16px;">Enregistrement continu — pauses et changements de nage détectés automatiquement. Arrête uniquement quand tu as vraiment fini.</p>
     </div>
   </div>
   <div id="tab-settings" class="tab-panel">
@@ -348,7 +356,7 @@ function renderDashboard(){
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
   container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
 }
-function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active');if(name==='dashboard')renderDashboard();}
+function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active');if(name==='dashboard')renderDashboard();if(name==='timer'||name==='swim')sensorPrewarmConnect();}
 function toggleReminder(){reminderOn=!reminderOn;S.set(KEYS.reminderOn,reminderOn);document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';reminderOn?scheduleReminder():clearTimeout(reminderTO);}
 function saveReminderTime(){reminderTime=document.getElementById('reminder-time').value;S.set(KEYS.reminderTime,reminderTime);scheduleReminder();}
 function saveGoal(){goal=parseInt(document.getElementById('goal-select').value);S.set(KEYS.goal,goal);renderDashboard();}
@@ -1056,6 +1064,7 @@ async function waitForAdvertisementThenConnect(maxAttempts = 3) {
 // ======= HIIT app integration: sensor session lifecycle =======
 let sensorActive = false;
 let sensorNeedsPicker = false;
+let sensorPendingAction = null; // callback invoked once connect resolves (success or skip) — defaults to the Timer flow
 let sensorPrewarmPromise = null;
 let sensorLastError = null;
 let sensorBaseline = null;
@@ -1097,7 +1106,7 @@ async function sensorPromptThenStart(btn) {
     sensorNeedsPicker = false;
     const connected = await sensorPrewarmPromise;
     sensorPrewarmPromise = null;
-    if (connected) { tStartCountdown(); return; }
+    if (connected) { (sensorPendingAction || tStartCountdown)(); return; }
     showPopupAndResetButton();
     return;
   }
@@ -1119,7 +1128,7 @@ async function sensorPromptThenStart(btn) {
   device = known[0];
   const connected = await sensorSilentConnect();
   if (connected) {
-    tStartCountdown();
+    (sensorPendingAction || tStartCountdown)();
   } else {
     showPopupAndResetButton();
   }
@@ -1160,12 +1169,12 @@ async function sensorModalRetry() {
       sensorActive = false;
       showToast('Capteur non connecté — séance sans capteur');
     }
-    tStartCountdown();
+    (sensorPendingAction || tStartCountdown)();
     return;
   }
   const connected = await sensorSilentConnect();
   if (connected) {
-    tStartCountdown();
+    (sensorPendingAction || tStartCountdown)();
   } else {
     document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
     document.getElementById('sensor-modal').style.display = 'flex';
@@ -1175,7 +1184,7 @@ async function sensorModalRetry() {
 function sensorModalSkip() {
   document.getElementById('sensor-modal').style.display = 'none';
   sensorActive = false;
-  tStartCountdown();
+  (sensorPendingAction || tStartCountdown)();
 }
 
 async function sensorOnSessionStart() {
@@ -1205,7 +1214,11 @@ function sensorOnPhaseChange() {
   sensorSavePending();
 }
 
-async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
+async function retrieveAllSensorData(baseline, maxAttempts = 5) {
+  // Shared by the Timer and Swim flows: reconnect (with retries), stop recording,
+  // list, diff against the baseline, download and decode every new file. Returns
+  // {ok, combined} — combined.phaseLog is left null; callers fill in what's specific
+  // to their flow (Timer's phase log, or nothing for a free-form swim session).
   let lastError = null;
   let newRecordings = [];
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -1232,10 +1245,10 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
 
   if (lastError) {
     log('Récupération capteur reportée (' + lastError + ')');
-    return false;
+    return { ok: false, combined: null };
   }
 
-  const combined = { position: sensorPosition, phaseLog, acc: null, gyro: null, mag: null, hr: null };
+  const combined = { position: sensorPosition, phaseLog: null, acc: null, gyro: null, mag: null, hr: null };
   let fileNum = 0;
   for (const r of newRecordings) {
     fileNum++;
@@ -1274,9 +1287,16 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
       log(`Échec sur ${kind} (${fileNum}/${newRecordings.length}), poursuite...`);
     }
   }
+  log('Données du capteur récupérées ✓');
+  return { ok: true, combined };
+}
+
+async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
+  const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts);
+  if (!ok) return false;
+  combined.phaseLog = phaseLog;
   showSessionResultsModal(combined);
   await saveSessionData(combined);
-  log('Données du capteur récupérées ✓');
   return true;
 }
 
@@ -1337,8 +1357,8 @@ function downloadSessionLocally(combined, filename) {
   URL.revokeObjectURL(url);
 }
 
-async function saveSessionData(combined) {
-  const filename = 'seance_' + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+async function saveSessionData(combined, prefix = 'seance_') {
+  const filename = prefix + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
   const token = localStorage.getItem('hiitGithubToken');
   if (!token) {
     downloadSessionLocally(combined, filename);
@@ -1648,6 +1668,225 @@ function showSessionResultsModal(combined) {
     </div>`;
   document.body.appendChild(modal);
   if (results) combined.analysis = { reps: results };
+}
+
+// ======= Ported from analysis/swim_segmentation.py. Segmentation automatique
+// nage/pause + classification brasse/crawl. Exploratoire, validé sur 1 séance
+// réelle (29/09) — voir /analysis/swim_segmentation.py pour le détail. =======
+function slidingRegularity(tilt, winS = 14.0, stepS = 2.0) {
+  const winN = Math.round(winS * FS_ALGO);
+  const stepN = Math.round(stepS * FS_ALGO);
+  const scores = [], centers = [];
+  for (let start = 0; start <= Math.max(0, tilt.length - winN); start += stepN) {
+    const seg = tilt.slice(start, start + winN);
+    const rng = Math.max(...seg) - Math.min(...seg);
+    if (rng < 8) {
+      scores.push(2.0);
+    } else {
+      const peaks = findPeaksJS(seg, Math.max(rng*0.15, 1));
+      if (peaks.length < 3) {
+        scores.push(1.5);
+      } else {
+        const intervals = [];
+        for (let i=1;i<peaks.length;i++) intervals.push((peaks[i]-peaks[i-1])/FS_ALGO);
+        const mean = intervals.reduce((a,b)=>a+b,0)/intervals.length;
+        const variance = intervals.reduce((a,b)=>a+(b-mean)**2,0)/intervals.length;
+        scores.push(Math.sqrt(variance)/Math.max(mean,1e-6));
+      }
+    }
+    centers.push((start+winN/2)/FS_ALGO);
+  }
+  return { centers, scores };
+}
+
+function swimTiltSignal(acc, smoothSigmaS = 0.15) {
+  // Faithful port of swim_segmentation.py tilt_signal — NOT the same as computeTilt():
+  // this caps winN at n//2 for short windows, which computeTilt() does not do.
+  const n = acc.length;
+  const ux = new Array(n), uy = new Array(n), uz = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const [x, y, z] = acc[i];
+    const norm = Math.sqrt(x*x + y*y + z*z) || 1e-6;
+    ux[i] = x/norm; uy[i] = y/norm; uz[i] = z/norm;
+  }
+  const winN = Math.max(5, Math.min(Math.round(FS_ALGO*0.6), Math.floor(n/2)));
+  const searchN = Math.min(n, Math.round(FS_ALGO*3));
+  let bestStart = 0, bestVar = Infinity;
+  for (let start = 0; start <= Math.max(0, searchN - winN); start++) {
+    let vx=0,vy=0,vz=0, mx=0,my=0,mz=0;
+    for (let i=start;i<start+winN;i++){ mx+=ux[i]; my+=uy[i]; mz+=uz[i]; }
+    mx/=winN; my/=winN; mz/=winN;
+    for (let i=start;i<start+winN;i++){ vx+=(ux[i]-mx)**2; vy+=(uy[i]-my)**2; vz+=(uz[i]-mz)**2; }
+    const v = vx/winN + vy/winN + vz/winN;
+    if (v < bestVar) { bestVar = v; bestStart = start; }
+  }
+  let refX=0, refY=0, refZ=0;
+  for (let i=bestStart;i<bestStart+winN;i++){ refX+=ux[i]; refY+=uy[i]; refZ+=uz[i]; }
+  const refNorm = Math.sqrt(refX*refX+refY*refY+refZ*refZ) || 1e-6;
+  refX/=refNorm; refY/=refNorm; refZ/=refNorm;
+  const tiltRaw = new Array(n);
+  for (let i=0;i<n;i++){
+    const cosang = Math.max(-1, Math.min(1, ux[i]*refX + uy[i]*refY + uz[i]*refZ));
+    tiltRaw[i] = Math.acos(cosang) * 180 / Math.PI;
+  }
+  return gaussianSmoothJS(tiltRaw, smoothSigmaS*FS_ALGO);
+}
+
+function detectSwimSegments(accSamples, threshold = 0.6, minSegmentS = 8.0, mergeGapS = 6.0) {
+  const tilt = swimTiltSignal(accSamples);
+  const { centers, scores } = slidingRegularity(tilt);
+  const isSwim = scores.map(s => s < threshold);
+
+  const rawSegments = [];
+  let curStart = null;
+  for (let i=0;i<isSwim.length;i++) {
+    if (isSwim[i] && curStart === null) curStart = centers[i];
+    else if (!isSwim[i] && curStart !== null) { rawSegments.push([curStart, centers[i]]); curStart = null; }
+  }
+  if (curStart !== null) rawSegments.push([curStart, centers[centers.length-1]]);
+
+  const merged = [];
+  for (const seg of rawSegments) {
+    if (merged.length && seg[0] - merged[merged.length-1][1] <= mergeGapS) {
+      merged[merged.length-1][1] = seg[1];
+    } else {
+      merged.push(seg);
+    }
+  }
+  return merged.filter(([s,e]) => e-s >= minSegmentS);
+}
+
+function classifyStrokeType(accWindow, thresholdAltDiff = 12.0) {
+  const tilt = swimTiltSignal(accWindow);
+  const peaksIdx = findPeaksJS(tilt, 8);
+  const heights = peaksIdx.map(i => tilt[i]);
+  if (heights.length < 5) return { stroke: 'indéterminé', score: null };
+  const odd = heights.filter((_,i) => i%2===0);
+  const even = heights.filter((_,i) => i%2===1);
+  const n = Math.min(odd.length, even.length);
+  let altDiff = 0;
+  for (let i=0;i<n;i++) altDiff += Math.abs(odd[i]-even[i]);
+  altDiff /= n;
+  const stroke = altDiff > thresholdAltDiff ? 'crawl' : 'brasse';
+  return { stroke, score: altDiff };
+}
+
+// ======= Onglet Natation : orchestration (démarrer/arrêter, réutilise le même
+// flux de connexion que le Timer) et affichage des résultats. =======
+let swimBaseline = null;
+let swimStartWallMs = 0;
+let swimTimerInterval = null;
+
+function swimPromptThenStart(btn) {
+  sensorPendingAction = swimActuallyStart;
+  sensorPromptThenStart(btn);
+}
+
+async function swimActuallyStart() {
+  sensorPendingAction = null;
+  const statusEl = document.getElementById('swim-status');
+  if (!sensorActive) {
+    statusEl.textContent = 'Capteur non connecté — natation annulée.';
+    return;
+  }
+  try {
+    statusEl.textContent = 'Démarrage de l\'enregistrement...';
+    await pftpEnsureReady();
+    swimBaseline = new Set((await listAllRecordings()).map(r => r.path));
+    await startAllRecordings();
+    device.gatt.disconnect();
+    swimStartWallMs = performance.now();
+    const btn = document.getElementById('swim-btn');
+    btn.textContent = 'ARRÊTER LA NATATION';
+    btn.style.background = '#c0392b'; btn.style.color = '#fff';
+    btn.disabled = false;
+    btn.onclick = () => swimStop(btn);
+    swimTimerInterval = setInterval(() => {
+      const s = Math.floor((performance.now()-swimStartWallMs)/1000);
+      const mm = String(Math.floor(s/60)).padStart(2,'0'), ss = String(s%60).padStart(2,'0');
+      statusEl.textContent = `Enregistrement en cours... ${mm}:${ss}`;
+    }, 1000);
+  } catch (err) {
+    logError('Échec démarrage natation', err);
+    statusEl.textContent = 'Échec du démarrage — réessaie.';
+  }
+}
+
+async function swimStop(btn) {
+  clearInterval(swimTimerInterval);
+  const durationS = (performance.now()-swimStartWallMs)/1000;
+  btn.disabled = true;
+  btn.textContent = 'ANALYSE EN COURS...';
+  document.getElementById('swim-status').textContent = 'Récupération des données...';
+  await swimRetrieveAndFinish(swimBaseline, durationS);
+  btn.textContent = 'DÉMARRER LA NATATION';
+  btn.style.background = 'var(--accent)'; btn.style.color = '#111';
+  btn.disabled = false;
+  btn.onclick = () => swimPromptThenStart(btn);
+  document.getElementById('swim-status').textContent = '';
+}
+
+async function swimRetrieveAndFinish(baseline, durationS) {
+  const { ok, combined } = await retrieveAllSensorData(baseline);
+  if (!ok) {
+    showToast('⚠️ Récupération reportée — les données restent sur le capteur');
+    return false;
+  }
+  combined.durationS = durationS;
+  showSwimResultsModal(combined);
+  if (durationS >= 600) {
+    logWorkout('R', true);
+    showToast('🏊 Séance natation enregistrée');
+  } else {
+    log(`Séance natation de ${Math.round(durationS)}s — sous les 10 min, non comptée dans le suivi.`);
+  }
+  await saveSessionData(combined, 'natation_');
+  return true;
+}
+
+function analyzeSwimSession(accSamples) {
+  if (!accSamples || accSamples.length < 20) return [];
+  const segments = detectSwimSegments(accSamples);
+  return segments.map(([s, e]) => {
+    const window = accSamples.slice(Math.round(s*FS_ALGO), Math.round(e*FS_ALGO));
+    const { stroke } = classifyStrokeType(window);
+    // Plain tilt counting, not auto-axis — auto-axis was only validated for land
+    // exercises; swim stroke counts were validated using the standard tilt signal.
+    const reps = countRepsOnSignal(computeTilt(window));
+    return { startS: s, endS: e, stroke, reps };
+  });
+}
+
+function renderSwimResultsHtml(segments) {
+  if (!segments || segments.length === 0) return '<p style="color:var(--muted);font-size:13px;">Aucun segment de nage détecté.</p>';
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+  html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Segment</th><th>Nage</th><th>Mouvements</th></tr>';
+  segments.forEach((s, i) => {
+    const mm1 = Math.floor(s.startS/60), ss1 = Math.round(s.startS%60);
+    const mm2 = Math.floor(s.endS/60), ss2 = Math.round(s.endS%60);
+    html += `<tr><td style="padding:4px 0;">${mm1}:${String(ss1).padStart(2,'0')}-${mm2}:${String(ss2).padStart(2,'0')}</td><td>${s.stroke}</td><td>${s.reps}</td></tr>`;
+  });
+  html += '</table>';
+  return html;
+}
+
+function showSwimResultsModal(combined) {
+  const segments = analyzeSwimSession(combined.acc ? combined.acc.samples : null);
+  const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
+  const swimHtml = renderSwimResultsHtml(segments);
+  const modal = document.createElement('div');
+  modal.className = 'sensor-modal-backdrop';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="sensor-modal" style="max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;">
+      <h3 style="text-align:center;">RÉSULTATS NATATION</h3>
+      <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
+      <div style="margin-bottom:16px;">${swimHtml}</div>
+      <div style="margin-bottom:16px;">${hrHtml}</div>
+      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>
+    </div>`;
+  document.body.appendChild(modal);
+  if (segments.length) combined.analysis = { swimSegments: segments };
 }
 
 loadProgram().then(init);
