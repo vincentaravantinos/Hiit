@@ -1274,6 +1274,7 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
       log(`Échec sur ${kind} (${fileNum}/${newRecordings.length}), poursuite...`);
     }
   }
+  showSessionResultsModal(combined);
   await saveSessionData(combined);
   log('Données du capteur récupérées ✓');
   return true;
@@ -1362,6 +1363,292 @@ async function saveSessionData(combined) {
   }
 }
 
+
+// ======= Ported from analysis/*.py — core_offline_algorithm, auto_axis_detect,
+// bayesian_boundary. Kept as close as possible to the validated Python for
+// straightforward cross-checking. FS assumes 52Hz ACC. =======
+const FS_ALGO = 52.0;
+
+function computeTilt(samplesXYZ, searchS = 3.0, winS = 0.6, smoothSigmaS = 0.20) {
+  const n = samplesXYZ.length;
+  const ux = new Array(n), uy = new Array(n), uz = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const [x, y, z] = samplesXYZ[i];
+    const norm = Math.sqrt(x*x + y*y + z*z) || 1e-6;
+    ux[i] = x/norm; uy[i] = y/norm; uz[i] = z/norm;
+  }
+  const searchN = Math.min(n, Math.round(FS_ALGO*searchS));
+  const winN = Math.max(5, Math.round(FS_ALGO*winS));
+  let bestStart = 0, bestVar = Infinity;
+  for (let start = 0; start <= Math.max(0, searchN - winN); start++) {
+    let vx=0,vy=0,vz=0, mx=0,my=0,mz=0;
+    for (let i=start;i<start+winN;i++){ mx+=ux[i]; my+=uy[i]; mz+=uz[i]; }
+    mx/=winN; my/=winN; mz/=winN;
+    for (let i=start;i<start+winN;i++){ vx+=(ux[i]-mx)**2; vy+=(uy[i]-my)**2; vz+=(uz[i]-mz)**2; }
+    const v = vx/winN + vy/winN + vz/winN;
+    if (v < bestVar) { bestVar = v; bestStart = start; }
+  }
+  let refX=0, refY=0, refZ=0;
+  for (let i=bestStart;i<bestStart+winN;i++){ refX+=ux[i]; refY+=uy[i]; refZ+=uz[i]; }
+  const refNorm = Math.sqrt(refX*refX+refY*refY+refZ*refZ) || 1e-6;
+  refX/=refNorm; refY/=refNorm; refZ/=refNorm;
+
+  const tiltRaw = new Array(n);
+  for (let i=0;i<n;i++){
+    const cosang = Math.max(-1, Math.min(1, ux[i]*refX + uy[i]*refY + uz[i]*refZ));
+    tiltRaw[i] = Math.acos(cosang) * 180 / Math.PI;
+  }
+  return gaussianSmoothJS(tiltRaw, smoothSigmaS*FS_ALGO);
+}
+
+function gaussianSmoothJS(arr, sigmaSamples) {
+  const radius = Math.ceil(sigmaSamples * 3);
+  const kernel = [];
+  let sum = 0;
+  for (let i=-radius;i<=radius;i++){ const w = Math.exp(-(i*i)/(2*sigmaSamples*sigmaSamples)); kernel.push(w); sum+=w; }
+  for (let i=0;i<kernel.length;i++) kernel[i]/=sum;
+  const out = new Array(arr.length).fill(0);
+  for (let i=0;i<arr.length;i++){
+    let acc=0;
+    for (let k=-radius;k<=radius;k++){
+      const idx = Math.min(arr.length-1, Math.max(0, i+k));
+      acc += arr[idx]*kernel[k+radius];
+    }
+    out[i]=acc;
+  }
+  return out;
+}
+
+// scipy.signal.find_peaks-equivalent: local maxima filtered by prominence
+function findPeaksJS(signal, prominence) {
+  const n = signal.length;
+  const candidates = [];
+  for (let i=1;i<n-1;i++){
+    if (signal[i] > signal[i-1] && signal[i] >= signal[i+1]) candidates.push(i);
+  }
+  const peaks = [];
+  for (const i of candidates) {
+    const v = signal[i];
+    let leftMin = v;
+    for (let j=i-1;j>=0;j--){ if (signal[j] > v) break; leftMin = Math.min(leftMin, signal[j]); }
+    let rightMin = v;
+    for (let j=i+1;j<n;j++){ if (signal[j] > v) break; rightMin = Math.min(rightMin, signal[j]); }
+    const prom = v - Math.max(leftMin, rightMin);
+    if (prom >= prominence) peaks.push(i);
+  }
+  return peaks;
+}
+
+function percentile(sortedArr, p) {
+  const idx = (p/100) * (sortedArr.length - 1);
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedArr[lo];
+  return sortedArr[lo] + (sortedArr[hi] - sortedArr[lo]) * (idx - lo);
+}
+
+function countRepsOnSignal(signal1d, gracesS = 0.5, lowPct = 20, highPct = 80, bandFrac = 0.15) {
+  const graceN = Math.min(Math.round(FS_ALGO*gracesS), Math.floor(signal1d.length/4));
+  const pos = signal1d.length > graceN + 10 ? signal1d.slice(graceN) : signal1d;
+  if (pos.length < 10) return 0;
+  const sorted = [...pos].sort((a,b)=>a-b);
+  const lo = percentile(sorted, lowPct), hi = percentile(sorted, highPct);
+  const mid = (lo+hi)/2, band = Math.max(hi-lo, 1e-6);
+  const upperTh = mid + bandFrac*band, lowerTh = mid - bandFrac*band;
+  let state=null, lastCountedState=null, reps=0;
+  for (const v of pos) {
+    const newState = v>upperTh ? 'top' : (v<lowerTh ? 'bottom' : state);
+    if (newState !== state && newState !== null) {
+      if (lastCountedState !== null && newState === lastCountedState) reps++;
+      if (lastCountedState === null) lastCountedState = newState;
+      state = newState;
+    }
+  }
+  return reps;
+}
+
+// ---- auto_axis_detect.py port ----
+function periodicityScoreJS(signal) {
+  if (signal.length < FS_ALGO*1.5) return { cv: Infinity, n: 0 };
+  const smooth = gaussianSmoothJS(signal, 0.15*FS_ALGO);
+  const rng = Math.max(...smooth) - Math.min(...smooth);
+  if (rng < 1e-6) return { cv: Infinity, n: 0 };
+  const prom = Math.max(rng*0.15, 1e-6);
+  const peaks = findPeaksJS(smooth, prom);
+  if (peaks.length < 3) return { cv: Infinity, n: peaks.length };
+  const intervals = [];
+  for (let i=1;i<peaks.length;i++) intervals.push((peaks[i]-peaks[i-1])/FS_ALGO);
+  const mean = intervals.reduce((a,b)=>a+b,0)/intervals.length;
+  const variance = intervals.reduce((a,b)=>a+(b-mean)**2,0)/intervals.length;
+  const cv = Math.sqrt(variance) / Math.max(mean, 1e-6);
+  return { cv, n: peaks.length };
+}
+
+function autoAxisRecount(windowXYZ) {
+  const n = windowXYZ.length;
+  const xArr = windowXYZ.map(s=>s[0]), yArr = windowXYZ.map(s=>s[1]), zArr = windowXYZ.map(s=>s[2]);
+  const tiltArr = computeTilt(windowXYZ);
+  const candidates = { X: xArr, Y: yArr, Z: zArr, tilt: tiltArr };
+  const scores = {};
+  for (const name in candidates) scores[name] = periodicityScoreJS(candidates[name]);
+  let winner = null, bestCv = Infinity;
+  for (const name in scores) {
+    if (scores[name].cv !== Infinity && scores[name].cv < bestCv) { bestCv = scores[name].cv; winner = name; }
+  }
+  if (winner === null) return { reps: countRepsOnSignal(tiltArr), winner: 'tilt (fallback)', scores };
+  const chosenSignal = winner === 'tilt' ? tiltArr : gaussianSmoothJS(candidates[winner], 0.20*FS_ALGO);
+  return { reps: countRepsOnSignal(chosenSignal), winner, scores };
+}
+
+// ---- bayesian_boundary.py port ----
+function regularityScore(segment) {
+  if (segment.length < FS_ALGO*1.5) return 2.0;
+  const smooth = gaussianSmoothJS(segment, 0.15*FS_ALGO);
+  const rng = Math.max(...smooth) - Math.min(...smooth);
+  if (rng < 3) return 1.5;
+  const prom = Math.max(rng*0.15, 1e-6);
+  const peaks = findPeaksJS(smooth, prom);
+  if (peaks.length < 2) return 1.5;
+  const intervals = [];
+  for (let i=1;i<peaks.length;i++) intervals.push((peaks[i]-peaks[i-1])/FS_ALGO);
+  if (intervals.length < 2) return 1.0;
+  const mean = intervals.reduce((a,b)=>a+b,0)/intervals.length;
+  const variance = intervals.reduce((a,b)=>a+(b-mean)**2,0)/intervals.length;
+  return Math.sqrt(variance) / Math.max(mean, 1e-6);
+}
+
+function normLogPdf(x, loc, scale) {
+  return -0.5*Math.log(2*Math.PI) - Math.log(scale) - 0.5*((x-loc)/scale)**2;
+}
+
+function bayesianBoundary(tiltSignal, searchCenterS, searchRadiusS, priorMeanS, priorStdS, side, stepS=0.25, likelihoodWindowS=8.0, temperature=0.3) {
+  const candidates = [];
+  for (let c=-searchRadiusS; c<=searchRadiusS+1e-9; c+=stepS) candidates.push(c);
+  const logPrior = candidates.map(c => normLogPdf(c, side==='trailing' ? -priorMeanS : priorMeanS, priorStdS));
+
+  const winN = Math.round(likelihoodWindowS*FS_ALGO);
+  const logLikelihood = candidates.map(c => {
+    const boundaryIdx = Math.round((searchCenterS + c) * FS_ALGO);
+    const before = tiltSignal.slice(Math.max(0, boundaryIdx-winN), boundaryIdx);
+    const after = tiltSignal.slice(boundaryIdx, boundaryIdx+winN);
+    if (before.length < 10 || after.length < 10) return -10;
+    const fit = side === 'trailing' ? (regularityScore(after) - regularityScore(before)) : (regularityScore(before) - regularityScore(after));
+    return fit / temperature;
+  });
+
+  const logPost = logPrior.map((lp,i) => lp + logLikelihood[i]);
+  const maxLog = Math.max(...logPost);
+  const post = logPost.map(lp => Math.exp(lp - maxLog));
+  const postSum = post.reduce((a,b)=>a+b,0);
+  const postNorm = post.map(p => p/postSum);
+
+  let mapIdx = 0, maxP = -Infinity;
+  postNorm.forEach((p,i) => { if (p > maxP) { maxP = p; mapIdx = i; } });
+  const meanOffset = candidates.reduce((a,c,i) => a + c*postNorm[i], 0);
+  const stdOffset = Math.sqrt(candidates.reduce((a,c,i) => a + ((c-meanOffset)**2)*postNorm[i], 0));
+
+  return { mapOffsetS: candidates[mapIdx], meanOffsetS: meanOffset, stdOffsetS: stdOffset };
+}
+// ======= Analyse automatique des séances : comptage de reps (axe auto + frontières
+// bayésiennes) + affichage des résultats. Algorithmes explicitement exploratoires —
+// voir /analysis/ dans le repo pour le détail et le statut de validation. =======
+const REP_LEADING_PRIORS = {
+  'Rowing élastique': [0.5, 1.5],
+  'Pompes déclinées': [0.5, 1.5],
+  'Squats élastique': [3.0, 2.0],
+  'Pull ups': [5.0, 3.0],
+};
+const REP_TRAILING_PRIOR = [4.5, 2.0]; // [mean, std], uniform across exercises
+
+function analyzeSessionReps(accSamples, phaseLog) {
+  if (!accSamples || !phaseLog || accSamples.length < 20) return null;
+  const tilt = computeTilt(accSamples);
+  const durations = phaseLog.map((p, i) => {
+    const next = i+1 < phaseLog.length ? phaseLog[i+1].tElapsedStart : p.tElapsedStart + 30;
+    return next - p.tElapsedStart;
+  });
+
+  const results = [];
+  phaseLog.forEach((p, i) => {
+    const prior = REP_LEADING_PRIORS[p.name];
+    if (!prior) return; // not a rep-based exercise we have a prior for (e.g. warmup, sprint, rest, legraises)
+    const [leadMean, leadStd] = prior;
+    const [trailMean, trailStd] = REP_TRAILING_PRIOR;
+
+    const nominalStart = p.tElapsedStart;
+    const nominalEnd = nominalStart + durations[i];
+
+    const leadRes = bayesianBoundary(tilt, nominalStart, Math.min(10, leadMean+3*leadStd), leadMean, leadStd, 'leading');
+    const trailRes = bayesianBoundary(tilt, nominalEnd, Math.min(16, trailMean+3*trailStd), trailMean, trailStd, 'trailing');
+
+    let startS = nominalStart + leadRes.meanOffsetS;
+    let endS = nominalEnd + trailRes.meanOffsetS;
+    if (endS <= startS + 2) endS = nominalEnd - trailMean;
+
+    const window = accSamples.slice(Math.round(startS*FS_ALGO), Math.round(endS*FS_ALGO));
+    if (window.length < 20) return;
+    const { reps, winner } = autoAxisRecount(window);
+    results.push({ name: p.name, round: p.round || 1, reps, axis: winner });
+  });
+  return results;
+}
+
+function renderHrChartSvg(hrSamples) {
+  if (!hrSamples || hrSamples.length < 2) return '<p style="color:var(--muted);font-size:13px;">Pas de données de fréquence cardiaque.</p>';
+  const values = hrSamples.map(s => s.hr).filter(v => v > 0);
+  if (values.length < 2) return '<p style="color:var(--muted);font-size:13px;">Pas de données de fréquence cardiaque.</p>';
+  const w = 320, h = 140, pad = 28;
+  const minHr = Math.min(...values) - 5, maxHr = Math.max(...values) + 5;
+  const points = values.map((v, i) => {
+    const x = pad + (i/(values.length-1)) * (w - pad - 10);
+    const y = h - pad - ((v - minHr)/(maxHr - minHr)) * (h - pad - 10);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  const avgHr = Math.round(values.reduce((a,b)=>a+b,0)/values.length);
+  const maxHrActual = Math.max(...values);
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;">`;
+  svg += `<text x="4" y="${pad-14}" fill="var(--muted)" font-size="10">${Math.round(maxHr-5)}</text>`;
+  svg += `<text x="4" y="${h-pad+14}" fill="var(--muted)" font-size="10">${Math.round(minHr+5)}</text>`;
+  svg += `<polyline points="${points}" fill="none" stroke="#e74c3c" stroke-width="2"/>`;
+  svg += `</svg>`;
+  svg += `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px;"><span>Moy. ${avgHr} bpm</span><span>Max ${maxHrActual} bpm</span></div>`;
+  return svg;
+}
+
+function renderRepsResultsHtml(results) {
+  if (!results || results.length === 0) return '<p style="color:var(--muted);font-size:13px;">Aucun exercice analysé.</p>';
+  const byExercise = {};
+  results.forEach(r => { (byExercise[r.name] = byExercise[r.name] || []).push(r); });
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
+  html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Exercice</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th></tr>';
+  for (const name in byExercise) {
+    const byRound = {};
+    byExercise[name].forEach(r => byRound[r.round] = r.reps);
+    html += `<tr><td style="padding:4px 0;">${name}</td>`;
+    for (let r=1; r<=4; r++) html += `<td>${byRound[r] !== undefined ? byRound[r] : '—'}</td>`;
+    html += '</tr>';
+  }
+  html += '</table>';
+  return html;
+}
+
+function showSessionResultsModal(combined) {
+  const results = analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog);
+  const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
+  const repsHtml = renderRepsResultsHtml(results);
+  const modal = document.createElement('div');
+  modal.className = 'sensor-modal-backdrop';
+  modal.style.display = 'flex';
+  modal.innerHTML = `
+    <div class="sensor-modal" style="max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;">
+      <h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3>
+      <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
+      <div style="margin-bottom:16px;">${repsHtml}</div>
+      <div style="margin-bottom:16px;">${hrHtml}</div>
+      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>
+    </div>`;
+  document.body.appendChild(modal);
+  if (results) combined.analysis = { reps: results };
+}
 
 loadProgram().then(init);
 </script>
