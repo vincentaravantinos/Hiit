@@ -341,16 +341,18 @@ function renderDashboard(){
     const dot=document.createElement('div');
     let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=entry.type==='I'?' done':' done-recup';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
     dot.className=cls;dot.textContent=isDone?'✓':'';
-    if(isClickable){dot.onclick=()=>toggleDay(dstr);dot.title=!isDone?'Ajouter Intense':entry.type==='I'?'Passer en Récup':'Retirer la séance';}
+    const histEntries=getHistoryEntries(dstr);
+    if(isClickable){
+      if(histEntries.length){dot.onclick=()=>showDayActionMenu(dstr,histEntries,entry);dot.title='Voir les options';}
+      else{dot.onclick=()=>toggleDay(dstr);dot.title=!isDone?'Ajouter Intense':entry.type==='I'?'Passer en Récup':'Retirer la séance';}
+    }
     const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
     cell.append(dot,lbl);
-    const histEntries=getHistoryEntries(dstr);
     if(histEntries.length){
+      const hasHiit=histEntries.some(e=>e.type==='hiit'),hasSwim=histEntries.some(e=>e.type==='swim');
       const badge=document.createElement('div');
-      badge.textContent=histEntries.some(e=>e.type==='swim')?'🏊':'📊';
-      badge.title='Voir le détail de la séance';
-      badge.style.cssText='position:absolute;top:-4px;right:2px;font-size:11px;cursor:pointer;';
-      badge.onclick=(ev)=>{ev.stopPropagation();openHistoryEntry(histEntries[0]);};
+      badge.textContent=hasHiit&&hasSwim?'📊🏊':hasSwim?'🏊':'📊';
+      badge.style.cssText='position:absolute;top:-4px;right:2px;font-size:11px;pointer-events:none;';
       cell.appendChild(badge);
     }
     grid.appendChild(cell);
@@ -1393,6 +1395,44 @@ function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
   index.push({ date, type, filename, savedToGithub, summary });
   if (index.length > 200) index = index.slice(-200);
   localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index));
+}
+
+function showDayActionMenu(dstr, histEntries, entry) {
+  const modal = document.createElement('div');
+  modal.className = 'sensor-modal-backdrop';
+  modal.style.display = 'flex';
+  const box = document.createElement('div');
+  box.className = 'sensor-modal';
+  box.style.cssText = 'max-width:320px;text-align:center;';
+  const title = document.createElement('h3');
+  title.style.marginBottom = '16px';
+  title.textContent = dstr;
+  box.appendChild(title);
+
+  histEntries.forEach(e => {
+    const btn = document.createElement('button');
+    btn.className = 'btn-connect';
+    btn.style.marginBottom = '8px';
+    btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : '📊 Voir le HIIT';
+    btn.onclick = () => { modal.remove(); openHistoryEntry(e); };
+    box.appendChild(btn);
+  });
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.className = 'btn-connect';
+  toggleBtn.style.cssText = 'margin-bottom:8px;background:var(--surface2);color:var(--text);';
+  toggleBtn.textContent = !entry ? 'Ajouter Intense' : entry.type==='I' ? 'Passer en Récup' : 'Retirer la séance';
+  toggleBtn.onclick = () => { modal.remove(); toggleDay(dstr); };
+  box.appendChild(toggleBtn);
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.style.cssText = 'width:100%;padding:10px;background:none;border:none;color:var(--muted);';
+  cancelBtn.textContent = 'Annuler';
+  cancelBtn.onclick = () => modal.remove();
+  box.appendChild(cancelBtn);
+
+  modal.appendChild(box);
+  document.body.appendChild(modal);
 }
 
 function getHistoryEntries(dateStr) {
