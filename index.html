@@ -336,13 +336,23 @@ function renderDashboard(){
   weekDates.forEach((d,i)=>{
     const dstr=ds(d),isToday=dstr===today,isFuture=d>now&&!isToday,isPast=!isToday&&!isFuture;
     const entry=getEntry(dstr),isDone=!!entry,isMissed=isPast&&!isDone,isClickable=!isFuture;
-    const cell=document.createElement('div');cell.className='day-cell';
+    const cell=document.createElement('div');cell.className='day-cell';cell.style.position='relative';
     const dot=document.createElement('div');
     let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=entry.type==='I'?' done':' done-recup';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
     dot.className=cls;dot.textContent=isDone?'✓':'';
     if(isClickable){dot.onclick=()=>toggleDay(dstr);dot.title=!isDone?'Ajouter Intense':entry.type==='I'?'Passer en Récup':'Retirer la séance';}
     const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
-    cell.append(dot,lbl);grid.appendChild(cell);
+    cell.append(dot,lbl);
+    const histEntries=getHistoryEntries(dstr);
+    if(histEntries.length){
+      const badge=document.createElement('div');
+      badge.textContent=histEntries.some(e=>e.type==='swim')?'🏊':'📊';
+      badge.title='Voir le détail de la séance';
+      badge.style.cssText='position:absolute;top:-4px;right:2px;font-size:11px;cursor:pointer;';
+      badge.onclick=(ev)=>{ev.stopPropagation();openHistoryEntry(histEntries[0]);};
+      cell.appendChild(badge);
+    }
+    grid.appendChild(cell);
   });
   const streak=getCurrentStreak();
   document.getElementById('streak-count').textContent=streak;document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
@@ -1357,11 +1367,73 @@ function downloadSessionLocally(combined, filename) {
   URL.revokeObjectURL(url);
 }
 
+function buildSessionSummary(combined, type) {
+  if (type === 'hiit') {
+    if (!combined.analysis || !combined.analysis.reps || !combined.analysis.reps.length) return null;
+    const totalReps = combined.analysis.reps.reduce((a,r) => a + r.reps, 0);
+    return { totalReps, exerciseCount: combined.analysis.reps.length };
+  } else if (type === 'swim') {
+    if (!combined.analysis || !combined.analysis.swimSegments || !combined.analysis.swimSegments.length) return null;
+    const totalReps = combined.analysis.swimSegments.reduce((a,s) => a + s.reps, 0);
+    const strokes = [...new Set(combined.analysis.swimSegments.map(s => s.stroke))];
+    return { totalReps, segments: combined.analysis.swimSegments.length, strokes };
+  }
+  return null;
+}
+
+const HISTORY_INDEX_KEY = 'hiitHistoryIndex';
+function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
+  const type = prefix === 'natation_' ? 'swim' : 'hiit';
+  const date = todayStr();
+  const summary = buildSessionSummary(combined, type);
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
+  index = index.filter(e => !(e.date === date && e.filename === filename));
+  index.push({ date, type, filename, savedToGithub, summary });
+  if (index.length > 200) index = index.slice(-200);
+  localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index));
+}
+
+function getHistoryEntries(dateStr) {
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
+  return index.filter(e => e.date === dateStr);
+}
+
+async function openHistoryEntry(entry) {
+  if (!entry.savedToGithub) {
+    const s = entry.summary;
+    const detail = s ? (entry.type === 'swim'
+      ? `${s.totalReps} mouvements sur ${s.segments} segment(s) (${s.strokes.join(', ')})`
+      : `${s.totalReps} répétitions au total sur ${s.exerciseCount} exercice(s)`)
+      : 'Résumé non disponible.';
+    showToast('📥 Séance locale uniquement — ' + detail);
+    return;
+  }
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) { showToast('Configure ton token GitHub pour rouvrir cette séance.'); return; }
+  try {
+    const path = 'data/sessions/' + entry.filename;
+    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
+      headers: { 'Authorization': 'token ' + token }
+    });
+    if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
+    const data = await resp.json();
+    const combined = JSON.parse(decodeURIComponent(escape(atob(data.content))));
+    if (entry.type === 'swim') showSwimResultsModal(combined);
+    else showSessionResultsModal(combined);
+  } catch (err) {
+    logError('Échec réouverture séance ' + entry.filename, err);
+    showToast('⚠️ Impossible de récupérer cette séance depuis GitHub');
+  }
+}
+
 async function saveSessionData(combined, prefix = 'seance_') {
   const filename = prefix + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
   const token = localStorage.getItem('hiitGithubToken');
   if (!token) {
     downloadSessionLocally(combined, filename);
+    recordHistoryEntry(combined, prefix, filename, false);
     showToast('📥 Séance téléchargée localement');
     return;
   }
@@ -1375,10 +1447,12 @@ async function saveSessionData(combined, prefix = 'seance_') {
     });
     if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
     log('Séance sauvegardée sur GitHub: ' + filename);
+    recordHistoryEntry(combined, prefix, filename, true);
     showToast('📡 Séance sauvegardée sur GitHub');
   } catch (err) {
     logError('Échec sauvegarde GitHub, téléchargement local à la place', err);
     downloadSessionLocally(combined, filename);
+    recordHistoryEntry(combined, prefix, filename, false);
     showToast('⚠️ Échec GitHub — téléchargée localement à la place');
   }
 }
