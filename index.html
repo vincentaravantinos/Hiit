@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T04:20:45Z';</script>
+<script>const APP_BUILD = '2026-09-30T04:22:57Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -506,12 +506,14 @@ function init(){renderDashboard();tRender();document.getElementById('reminder-to
 
 async function checkForUpdate() {
   try {
-    const resp = await fetch('https://raw.githubusercontent.com/vincentaravantinos/Hiit/main/version.txt?t=' + Date.now());
+    const resp = await fetch('https://raw.githubusercontent.com/vincentaravantinos/Hiit/main/version.txt?t=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) return;
     const latest = (await resp.text()).trim();
-    if (latest && latest !== APP_BUILD) {
-      document.getElementById('update-banner').style.display = 'block';
-    }
+    // Strictly newer, not just different — a lagging CDN can momentarily serve an
+    // older version.txt right after reloading onto the actual latest build, which
+    // would otherwise re-trigger the banner on an already-current page.
+    const isNewer = latest && !isNaN(new Date(latest)) && new Date(latest) > new Date(APP_BUILD);
+    document.getElementById('update-banner').style.display = isNewer ? 'block' : 'none';
   } catch (e) { /* silencieux — pas bloquant, retenté au prochain cycle */ }
 }
 
