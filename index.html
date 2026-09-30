@@ -246,6 +246,7 @@ body {
         <div class="setting-name">Sauvegarde automatique GitHub</div>
         <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
         <input type="password" id="github-token-input" placeholder="ghp_..." style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()">
+        <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
       </div>
     </div>
     <div class="settings-section">
@@ -1425,6 +1426,40 @@ async function openHistoryEntry(entry) {
   } catch (err) {
     logError('Échec réouverture séance ' + entry.filename, err);
     showToast('⚠️ Impossible de récupérer cette séance depuis GitHub');
+  }
+}
+
+async function rebuildHistoryFromGithub() {
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) { showToast('Configure ton token GitHub d\'abord.'); return; }
+  try {
+    const resp = await fetch('https://api.github.com/repos/vincentaravantinos/Hiit/contents/data/sessions', {
+      headers: { 'Authorization': 'token ' + token }
+    });
+    if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
+    const files = await resp.json();
+    let index = [];
+    try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
+    let added = 0;
+    for (const f of files) {
+      if (!f.name.endsWith('.json')) continue;
+      let prefix, rest;
+      if (f.name.startsWith('natation_')) { prefix = 'natation_'; rest = f.name.slice('natation_'.length); }
+      else if (f.name.startsWith('seance_')) { prefix = 'seance_'; rest = f.name.slice('seance_'.length); }
+      else continue;
+      const date = rest.slice(0, 10);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      if (index.some(e => e.filename === f.name)) continue;
+      index.push({ date, type: prefix === 'natation_' ? 'swim' : 'hiit', filename: f.name, savedToGithub: true, summary: null });
+      added++;
+    }
+    if (index.length > 200) index = index.slice(-200);
+    localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index));
+    showToast(`✓ ${added} séance(s) ajoutée(s) à l'historique`);
+    renderDashboard();
+  } catch (err) {
+    logError('Échec reconstruction historique', err);
+    showToast('⚠️ Échec de la reconstruction — vérifie le token');
   }
 }
 
