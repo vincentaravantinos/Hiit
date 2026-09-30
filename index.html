@@ -143,8 +143,12 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
+<script>const APP_BUILD = '2026-09-30T04:17:22Z';</script>
 </head>
 <body>
+<div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
+  Nouvelle version disponible — <button onclick="applyUpdate()" style="background:#fff;color:#e67e22;border:none;border-radius:6px;padding:5px 12px;font-weight:bold;margin-left:6px;">Mettre à jour</button>
+</div>
 <div class="app-header">
   <div class="app-title">HIIT TRACKER</div>
   <div class="streak-badge">🔥 <span id="streak-count">0</span>&thinsp;<span style="opacity:.55;font-size:13px;color:var(--text)">jours</span></div>
@@ -498,7 +502,22 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';checkForUpdate();setInterval(checkForUpdate,180000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
+
+async function checkForUpdate() {
+  try {
+    const resp = await fetch('https://raw.githubusercontent.com/vincentaravantinos/Hiit/main/version.txt?t=' + Date.now());
+    if (!resp.ok) return;
+    const latest = (await resp.text()).trim();
+    if (latest && latest !== APP_BUILD) {
+      document.getElementById('update-banner').style.display = 'block';
+    }
+  } catch (e) { /* silencieux — pas bloquant, retenté au prochain cycle */ }
+}
+
+function applyUpdate() {
+  location.href = location.pathname + '?v=' + Date.now();
+}
 
 // ======= Polar sensor integration (optional, additive — workout works identically if skipped) =======
 const PMD_SERVICE = 'fb005c80-02e7-f387-1cad-8acd2d8df0c8';
