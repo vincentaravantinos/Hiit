@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T07:32:06Z';</script>
+<script>const APP_BUILD = '2026-09-30T07:35:15Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1069,6 +1069,17 @@ async function stopAllRecordings() {
     const respPromise = waitForControlResponse();
     await controlChar.writeValue(cmd);
     const resp = await respPromise;
+    if (resp[3] === 6) {
+      // ERROR_ALREADY_IN_STATE (PMD response code 6): the device is already
+      // stopped — almost always because a prior attempt in the same retry cycle
+      // already stopped it successfully, and only a later step (e.g. the file
+      // transfer) failed and triggered a retry. The device correctly refuses to
+      // "stop" something already stopped; treat that refusal as the success it
+      // actually represents rather than a real error, or every retry after the
+      // first would fail here forever regardless of what actually went wrong.
+      log(`  ${t.name}: déjà arrêté (pas d'action nécessaire).`);
+      continue;
+    }
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} a l'arret`);
     log(`  ${t.name}: enregistrement arrete (erreur=0)`);
   }
