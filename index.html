@@ -1460,7 +1460,20 @@ async function openHistoryEntry(entry) {
     });
     if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
     const data = await resp.json();
-    const combined = JSON.parse(decodeURIComponent(escape(atob(data.content))));
+    let combined;
+    if (data.content) {
+      // small file — GitHub's Contents API returns it inline, base64-encoded
+      combined = JSON.parse(decodeURIComponent(escape(atob(data.content))));
+    } else if (data.download_url) {
+      // file over ~1MB — Contents API omits inline content above that size;
+      // fetch the raw file directly instead (this is the case for full HIIT
+      // sessions with all 4 sensors, easily 10+MB)
+      const rawResp = await fetch(data.download_url);
+      if (!rawResp.ok) throw new Error('Téléchargement direct a répondu ' + rawResp.status);
+      combined = await rawResp.json();
+    } else {
+      throw new Error('Réponse GitHub sans contenu ni URL de téléchargement');
+    }
     if (entry.type === 'swim') showSwimResultsModal(combined);
     else showSessionResultsModal(combined);
   } catch (err) {
