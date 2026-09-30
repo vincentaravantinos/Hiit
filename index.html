@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T07:35:15Z';</script>
+<script>const APP_BUILD = '2026-09-30T18:06:35Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1526,8 +1526,8 @@ async function openHistoryEntry(entry) {
     } else {
       throw new Error('Réponse GitHub sans contenu ni URL de téléchargement');
     }
-    if (entry.type === 'swim') showSwimResultsModal(combined);
-    else showSessionResultsModal(combined);
+    if (entry.type === 'swim') showSwimResultsModal(combined, entry.filename);
+    else showSessionResultsModal(combined, entry.filename);
   } catch (err) {
     logError('Échec réouverture séance ' + entry.filename, err);
     showToast('⚠️ Impossible de récupérer cette séance depuis GitHub');
@@ -1865,28 +1865,77 @@ function renderRepsResultsHtml(results) {
   return html;
 }
 
-function showSessionResultsModal(combined) {
-  // Reuse pre-computed results when reopening a past session — recomputing on a
-  // full 15min recording (Bayesian boundaries + auto-axis for every exercise) is
-  // genuinely slow, and pointless when the answer is already saved in the file.
-  const results = (combined.analysis && combined.analysis.reps)
-    ? combined.analysis.reps
-    : analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog);
-  const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
-  const repsHtml = renderRepsResultsHtml(results);
+// Bump only when the counting algorithm itself actually changes — this governs
+// whether a past session's cached results get reused or recomputed on reopen.
+// NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
+// is still open, so bumping now would just force a slow recompute that returns
+// the same wrong-ish numbers. Bump this string when that's actually fixed.
+const REP_ALGO_VERSION = 'v1-bayesian-autoaxis';
+
+async function updateExistingSessionFile(filename, combined) {
+  // Writes a recomputed analysis back to the existing GitHub file (same name, in
+  // place) so the next open reuses it — without this, a stale-cache file would
+  // recompute on every single open forever, not just the first one after an
+  // algorithm change.
+  if (!filename) return; // fresh session (saved separately) or local-only — nothing to update in place
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) return;
+  try {
+    const path = 'data/sessions/' + filename;
+    const metaResp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, { headers: { 'Authorization': 'token ' + token } });
+    if (!metaResp.ok) throw new Error('lecture SHA a répondu ' + metaResp.status);
+    const meta = await metaResp.json();
+    const contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(combined))));
+    const putResp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
+      method: 'PUT',
+      headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Analyse recalculée (algo mis à jour): ' + filename, content: contentB64, sha: meta.sha })
+    });
+    if (!putResp.ok) throw new Error('mise à jour a répondu ' + putResp.status);
+    log('Analyse recalculée sauvegardée: ' + filename);
+  } catch (err) {
+    logError('Échec sauvegarde du recalcul pour ' + filename, err);
+  }
+}
+
+function showSessionResultsModal(combined, filename) {
+  const cacheValid = combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION;
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
-  modal.innerHTML = `
-    <div class="sensor-modal" style="max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;">
+  const box = document.createElement('div');
+  box.className = 'sensor-modal';
+  box.style.cssText = 'max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;';
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+
+  function renderInto(results) {
+    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
+    const repsHtml = renderRepsResultsHtml(results);
+    box.innerHTML = `
       <h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3>
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       <div style="margin-bottom:16px;">${repsHtml}</div>
       <div style="margin-bottom:16px;">${hrHtml}</div>
-      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>
-    </div>`;
-  document.body.appendChild(modal);
-  if (results) combined.analysis = { reps: results };
+      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+  }
+
+  if (cacheValid) {
+    renderInto(combined.analysis.reps);
+    return;
+  }
+
+  box.innerHTML = `<h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3><p style="text-align:center;color:var(--muted);padding:20px 0;">Recalcul des reps en cours sur la base du fichier brut${combined.analysis ? ' (algorithme mis à jour depuis le dernier calcul)' : ''}...</p>`;
+  setTimeout(() => {
+    const results = analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog);
+    if (combined.analysis) {
+      combined.analysisHistory = combined.analysisHistory || [];
+      combined.analysisHistory.push(combined.analysis);
+    }
+    combined.analysis = { reps: results, algoVersion: REP_ALGO_VERSION };
+    renderInto(results);
+    updateExistingSessionFile(filename, combined);
+  }, 30);
 }
 
 // ======= Ported from analysis/swim_segmentation.py. Segmentation automatique
@@ -2089,25 +2138,46 @@ function renderSwimResultsHtml(segments) {
   return html;
 }
 
-function showSwimResultsModal(combined) {
-  const segments = (combined.analysis && combined.analysis.swimSegments)
-    ? combined.analysis.swimSegments
-    : analyzeSwimSession(combined.acc ? combined.acc.samples : null);
-  const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
-  const swimHtml = renderSwimResultsHtml(segments);
+const SWIM_ALGO_VERSION = 'v1-segmentation-strokeclassify';
+
+function showSwimResultsModal(combined, filename) {
+  const cacheValid = combined.analysis && combined.analysis.swimSegments && combined.analysis.algoVersion === SWIM_ALGO_VERSION;
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
-  modal.innerHTML = `
-    <div class="sensor-modal" style="max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;">
+  const box = document.createElement('div');
+  box.className = 'sensor-modal';
+  box.style.cssText = 'max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;';
+  modal.appendChild(box);
+  document.body.appendChild(modal);
+
+  function renderInto(segments) {
+    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
+    const swimHtml = renderSwimResultsHtml(segments);
+    box.innerHTML = `
       <h3 style="text-align:center;">RÉSULTATS NATATION</h3>
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       <div style="margin-bottom:16px;">${swimHtml}</div>
       <div style="margin-bottom:16px;">${hrHtml}</div>
-      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>
-    </div>`;
-  document.body.appendChild(modal);
-  if (segments.length) combined.analysis = { swimSegments: segments };
+      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+  }
+
+  if (cacheValid) {
+    renderInto(combined.analysis.swimSegments);
+    return;
+  }
+
+  box.innerHTML = `<h3 style="text-align:center;">RÉSULTATS NATATION</h3><p style="text-align:center;color:var(--muted);padding:20px 0;">Recalcul en cours sur la base du fichier brut${combined.analysis ? ' (algorithme mis à jour depuis le dernier calcul)' : ''}...</p>`;
+  setTimeout(() => {
+    const segments = analyzeSwimSession(combined.acc ? combined.acc.samples : null);
+    if (combined.analysis) {
+      combined.analysisHistory = combined.analysisHistory || [];
+      combined.analysisHistory.push(combined.analysis);
+    }
+    combined.analysis = { swimSegments: segments, algoVersion: SWIM_ALGO_VERSION };
+    renderInto(segments);
+    updateExistingSessionFile(filename, combined);
+  }, 30);
 }
 
 loadProgram().then(init);
