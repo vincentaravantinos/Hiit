@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T04:17:22Z';</script>
+<script>const APP_BUILD = '2026-09-30T04:20:45Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1839,7 +1839,12 @@ function renderRepsResultsHtml(results) {
 }
 
 function showSessionResultsModal(combined) {
-  const results = analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog);
+  // Reuse pre-computed results when reopening a past session — recomputing on a
+  // full 15min recording (Bayesian boundaries + auto-axis for every exercise) is
+  // genuinely slow, and pointless when the answer is already saved in the file.
+  const results = (combined.analysis && combined.analysis.reps)
+    ? combined.analysis.reps
+    : analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog);
   const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
   const repsHtml = renderRepsResultsHtml(results);
   const modal = document.createElement('div');
@@ -2058,7 +2063,9 @@ function renderSwimResultsHtml(segments) {
 }
 
 function showSwimResultsModal(combined) {
-  const segments = analyzeSwimSession(combined.acc ? combined.acc.samples : null);
+  const segments = (combined.analysis && combined.analysis.swimSegments)
+    ? combined.analysis.swimSegments
+    : analyzeSwimSession(combined.acc ? combined.acc.samples : null);
   const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
   const swimHtml = renderSwimResultsHtml(segments);
   const modal = document.createElement('div');
