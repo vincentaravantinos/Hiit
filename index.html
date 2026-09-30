@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T04:22:57Z';</script>
+<script>const APP_BUILD = '2026-09-30T07:25:48Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -795,6 +795,15 @@ async function pftpEnsureReady() {
 }
 
 async function pftpWriteAndRead(payload) {
+  // Defensive: discard anything left over from a previous request (e.g. a late
+  // notification that arrived after we'd already given up on a prior timed-out
+  // or interrupted operation). PFTP is strictly request/response — there should
+  // never be a queued packet or pending waiter when a new request starts, so
+  // leftover state here can only be stale contamination, never something we're
+  // meant to consume. Left unclosed, it silently corrupts the next transfer's
+  // byte count rather than causing an obvious error.
+  pftpResponseQueue = [];
+  pftpResponseWaiters = [];
   const frames = buildRfc76Frames(payload);
   for (const frame of frames) {
     await pftpMtuChar.writeValueWithoutResponse(frame);
