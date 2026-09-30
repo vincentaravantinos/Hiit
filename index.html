@@ -1463,7 +1463,13 @@ async function openHistoryEntry(entry) {
     let combined;
     if (data.content) {
       // small file — GitHub's Contents API returns it inline, base64-encoded
-      combined = JSON.parse(decodeURIComponent(escape(atob(data.content))));
+      // Avoid decodeURIComponent(escape(atob(...))) for large payloads — it builds
+      // several large intermediate strings and can be slow/memory-heavy on mobile.
+      // Decode straight to bytes, then let TextDecoder handle UTF-8 in one pass.
+      const binaryStr = atob(data.content);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+      combined = JSON.parse(new TextDecoder('utf-8').decode(bytes));
     } else if (data.download_url) {
       // file over ~1MB — Contents API omits inline content above that size;
       // fetch the raw file directly instead (this is the case for full HIIT
