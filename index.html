@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T18:06:35Z';</script>
+<script>const APP_BUILD = '2026-09-30T20:03:46Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -453,6 +453,13 @@ const tCol=()=>SEQ[tIdx]&&SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)'
 function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=1+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
 function tRewind(){
   const timeInEx=SEQ[tIdx].duration-tLeft;
+  // Ground truth for the sensor timeline: a rewind press consumes real wall-clock
+  // time (the person keeps exercising/standing around) that the phaseLog alone
+  // never reflects, especially case 1 below, which doesn't change tIdx and so
+  // never fires sensorOnPhaseChange() — without this, that time is silently
+  // invisible to any later analysis of the recording (confirmed the hard way on
+  // 30/09: a mid-warmup rewind cost ~65s nothing in the data explained).
+  if (sensorActive) { sensorRewindEvents.push({ tElapsedAtPress: tElapsed, exerciseName: SEQ[tIdx].name, timeInExerciseAtPress: timeInEx }); sensorSavePending(); }
   if(timeInEx>2){tLeft=SEQ[tIdx].duration;tStartTicker();tRender();}
   else if(tIdx>0){tIdx--;sensorOnPhaseChange();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(SEQ[tIdx].spoken),150);tStartTicker();tRender();}
   else{tLeft=SEQ[tIdx].duration;tStartTicker();tRender();}
@@ -1128,6 +1135,7 @@ let sensorPrewarmPromise = null;
 let sensorLastError = null;
 let sensorBaseline = null;
 let sensorPhaseLog = [];
+let sensorRewindEvents = []; // ground truth for any tRewind() press during a recording session — see tRewind()
 const SENSOR_STORAGE_KEY = 'hiitSensorPendingSession';
 
 function sensorSavePending() {
@@ -1136,7 +1144,8 @@ function sensorSavePending() {
     deviceId: device.id, deviceName: device.name,
     baseline: Array.from(sensorBaseline || []),
     startedAt: new Date().toISOString(),
-    phaseLog: sensorPhaseLog
+    phaseLog: sensorPhaseLog,
+    rewindEvents: sensorRewindEvents
   }));
 }
 
@@ -1253,6 +1262,7 @@ async function sensorOnSessionStart() {
     sensorBaseline = new Set((await listAllRecordings()).map(r => r.path));
     await startAllRecordings();
     sensorPhaseLog = [];
+    sensorRewindEvents = [];
     sensorSavePending();
     device.gatt.disconnect();
     log('Enregistrement démarré, capteur déconnecté (enregistre seul).');
@@ -1350,10 +1360,11 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5) {
   return { ok: true, combined };
 }
 
-async function sensorRetrieveAndFinish(baseline, phaseLog, maxAttempts = 5) {
+async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5) {
   const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts);
   if (!ok) return false;
   combined.phaseLog = phaseLog;
+  combined.rewindEvents = rewindEvents;
   showSessionResultsModal(combined);
   await saveSessionData(combined);
   return true;
@@ -1363,8 +1374,9 @@ function sensorOnSessionEnd() {
   if (!sensorActive) return;
   const baseline = sensorBaseline;
   const phaseLog = sensorPhaseLog;
+  const rewindEvents = sensorRewindEvents;
   (async () => {
-    const ok = await sensorRetrieveAndFinish(baseline, phaseLog);
+    const ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents);
     if (ok) localStorage.removeItem(SENSOR_STORAGE_KEY);
   })();
 }
@@ -1382,7 +1394,7 @@ async function tryResumePendingSensorSession() {
     device = known.find(d => d.id === pending.deviceId);
     if (!device) throw new Error('Capteur non retrouvé.');
     const baseline = new Set(pending.baseline);
-    const ok = await sensorRetrieveAndFinish(baseline, pending.phaseLog || []);
+    const ok = await sensorRetrieveAndFinish(baseline, pending.phaseLog || [], pending.rewindEvents || []);
     if (ok) localStorage.removeItem(SENSOR_STORAGE_KEY);
   } catch (err) {
     logError('Échec reprise automatique', err);
