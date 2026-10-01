@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T13:38:22Z';</script>
+<script>const APP_BUILD = '2026-10-01T19:45:32Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -192,7 +192,7 @@ body {
   <div id="tab-activity" class="tab-panel">
     <button class="act-card" id="act-card-timer" onclick="openActivity('timer')"><span class="ico">⏱️</span><span><div class="ttl">HIIT</div><div class="sub">Circuit minuté, comptage des répétitions</div></span></button>
     <button class="act-card" id="act-card-swim" onclick="openActivity('swim')"><span class="ico">🏊</span><span><div class="ttl">Natation</div><div class="sub">Contre-courant, analyse des mouvements</div></span></button>
-    <button class="act-card" id="act-card-free" onclick="openActivity('free')"><span class="ico">🏉</span><span><div class="ttl">Activité libre</div><div class="sub">Rugby, escalade… FC seule, classée en fin de séance</div></span></button>
+    <button class="act-card" id="act-card-free" onclick="openActivity('free')"><span class="ico">🧗</span><span><div class="ttl">Activité libre</div><div class="sub">Escalade, vélo… FC seule, classée en fin de séance</div></span></button>
   </div>
   <div id="tab-timer" class="tab-panel" style="padding:0">
     <div class="timer-wrap" id="timer-wrap">
@@ -285,6 +285,7 @@ body {
         <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
         <button onclick="clearSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Vider le journal</button>
       </div>
+      <button onclick="sensorStopEverything(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Arrêter tout enregistrement en cours sur le capteur</button>
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:10px;">
         <div class="setting-name">Sauvegarde automatique GitHub</div>
         <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
@@ -421,7 +422,7 @@ function renderDashboard(){
     if(histEntries.length){
       const hasHiit=histEntries.some(e=>e.type==='hiit'),hasSwim=histEntries.some(e=>e.type==='swim'),hasFree=histEntries.some(e=>e.type==='free');
       const badge=document.createElement('div');
-      badge.textContent=(hasHiit?'📊':'')+(hasSwim?'🏊':'')+(hasFree?'🏉':'');
+      badge.textContent=(hasHiit?'📊':'')+(hasSwim?'🏊':'')+(hasFree?'🧗':'');
       badge.style.cssText='position:absolute;top:-4px;right:2px;font-size:11px;pointer-events:none;';
       cell.appendChild(badge);
     }
@@ -1187,6 +1188,15 @@ async function stopAllRecordings(types = REC_TYPES) {
   }
 }
 
+// Un enregistrement resté actif (séance interrompue, onglet perdu…) ferait échouer le
+// démarrage suivant. On arrête tout, type par type, AVANT de lister la ligne de base :
+// le fichier orphelin ainsi clôturé reste hors de la séance qui commence.
+async function stopStrayRecordings() {
+  for (const t of REC_TYPES) {
+    try { await stopAllRecordings([t]); } catch (err) { log(`  ${t.name}: arrêt préventif ignoré (${err.message || err})`); }
+  }
+}
+
 async function waitForOneAdvertisement(timeoutMs) {
   if (typeof device.watchAdvertisements !== 'function') {
     throw new Error('watchAdvertisements() indisponible — active aussi chrome://flags/#enable-experimental-web-platform-features');
@@ -1354,6 +1364,7 @@ async function sensorOnSessionStart() {
   if (!sensorActive) return;
   try {
     await pftpEnsureReady();
+    await stopStrayRecordings();
     sensorBaseline = new Set((await listAllRecordings()).map(r => r.path));
     await startAllRecordings();
     sensorPhaseLog = [];
@@ -2452,6 +2463,7 @@ async function swimActuallyStart() {
   try {
     statusEl.textContent = 'Démarrage de l\'enregistrement...';
     await pftpEnsureReady();
+    await stopStrayRecordings();
     swimBaseline = new Set((await listAllRecordings()).map(r => r.path));
     await startAllRecordings();
     device.gatt.disconnect();
@@ -3149,12 +3161,43 @@ function hcCloseModal(btn) {
 const FREE_TYPES = REC_TYPES.filter(t => t.name === 'HR');
 const FREE_LS = 'hiitFreePending';
 const FREE_LAST_LS = 'hiitFreeLastActivity';
-const FREE_PRESETS = ['Rugby', 'Escalade'];
+const FREE_PRESETS = ['Escalade'];
 const FREE_INTENSE_MIN_S = 20 * 60;     // en dessous : Récup suggérée
 const FREE_INTENSE_HIGH_S = 10 * 60;    // ≥ 10 min en Z4-Z5 → Intense suggéré
 const FREE_INTENSE_AVG = 0.75;          // ou FC moyenne ≥ 75 % FC max
 let freeTimerInterval = null;
-let freeActivity = localStorage.getItem(FREE_LAST_LS) || 'Rugby';
+let freeActivity = localStorage.getItem(FREE_LAST_LS) || 'Escalade';
+if (freeActivity === 'Rugby') freeActivity = 'Escalade'; // pas de capteur en sport de contact
+
+async function sensorStopEverything(btn) {
+  const label = btn.textContent;
+  btn.disabled = true; btn.textContent = 'Recherche du capteur...';
+  try {
+    if (!device) {
+      let found = null;
+      if (typeof navigator.bluetooth?.getDevices === 'function') {
+        const known = await navigator.bluetooth.getDevices().catch(() => []);
+        found = known[0] || null;
+      }
+      device = found || await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'Polar' }], optionalServices: [PMD_SERVICE, PFTP_SERVICE]
+      });
+    }
+    if (!device.gatt.connected) { server = await waitForAdvertisementThenConnect(); await connectPmd(); pftpMtuChar = null; }
+    btn.textContent = 'Arrêt...';
+    await stopStrayRecordings();
+    device.gatt.disconnect();
+    sensorActive = false;
+    if (freePending()) { localStorage.removeItem(FREE_LS); freeResetButton(); document.getElementById('free-status').textContent = ''; }
+    log('Arrêt manuel de tous les enregistrements.');
+    showToast('✓ Plus aucun enregistrement en cours sur le capteur');
+  } catch (err) {
+    logError('Arrêt manuel des enregistrements', err);
+    showToast('⚠️ Capteur introuvable — rapproche-le et réessaie');
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
 
 function freePending() { try { return JSON.parse(localStorage.getItem(FREE_LS) || 'null'); } catch (e) { return null; } }
 function freeActivityName(combined) { return (combined && combined.activity === 'rugby') ? 'Rugby' : ((combined && combined.activity) || 'Activité libre'); }
@@ -3220,9 +3263,6 @@ function freeShowRunning(p) {
 }
 
 function freeRestoreUi() {
-  // Migration de la version « rugby » éphémère (même jour) vers l'activité libre.
-  const legacy = localStorage.getItem('hiitRugbyPending');
-  if (legacy && !freePending()) { try { const l = JSON.parse(legacy); l.activity = 'Rugby'; localStorage.setItem(FREE_LS, JSON.stringify(l)); } catch (e) {} }
   localStorage.removeItem('hiitRugbyPending');
   const p = freePending();
   if (p && p.startedAtMs) { freeActivity = p.activity || freeActivity; freeShowRunning(p); }
@@ -3247,6 +3287,7 @@ async function freeActuallyStart() {
   try {
     statusEl.textContent = 'Démarrage de l\'enregistrement FC...';
     await pftpEnsureReady();
+    await stopStrayRecordings();
     const baseline = Array.from(new Set((await listAllRecordings()).map(r => r.path)));
     await startAllRecordings(FREE_TYPES);
     const p = { deviceId: device.id, baseline, startedAtMs: Date.now(), activity: freeCurrentName() };
