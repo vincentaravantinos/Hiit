@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T04:23:27Z';</script>
+<script>const APP_BUILD = '2026-10-01T04:42:22Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -421,7 +421,7 @@ const FALLBACK_PROGRAM={
     {name:"Repos",spoken:"Repos, récupérez.",duration:20,type:"rest"}
   ]
 };
-let CIRCUIT=[],ROUNDS=4,TOTAL_DUR=0,SKIP_LAST_REST=false;
+let CIRCUIT=[],ROUNDS=4,TOTAL_DUR=0,SKIP_LAST_REST=false;const RECOVERY_S=60;
 const CIRCUM=2*Math.PI*105;
 let SEQ=[];
 function applyProgram(prog){
@@ -431,8 +431,8 @@ function applyProgram(prog){
   const wuDur=(prog.warmup&&prog.warmup.enabled)?prog.warmup.duration:0;
   let circDur=CIRCUIT.reduce((a,e)=>a+e.duration,0)*ROUNDS;
   if(SKIP_LAST_REST){const last=CIRCUIT[CIRCUIT.length-1];if(last&&last.type==='rest')circDur-=last.duration;}
-  TOTAL_DUR=wuDur+circDur;
   SEQ=buildSeq(prog);
+  TOTAL_DUR=SEQ.reduce((a,e)=>a+e.duration,0);
   if(tState==='idle'){tLeft=SEQ.length?SEQ[0].duration:0;}
 }
 function buildSeq(prog){
@@ -448,6 +448,8 @@ function buildSeq(prog){
       s.push({...ex,phase:"CIRCUIT",round:r});
     });
   }
+  // Minute de récupération mesurée (chute de FC) — ajoutée par l'app, pas par le JSON.
+  if(prog.recovery!==false)s.push({name:"Récupération",spoken:"Bravo ! Circuit terminé. Une minute de récupération, tu peux ranger.",duration:RECOVERY_S,type:"rest",phase:"RECOVERY",round:null});
   return s;
 }
 async function loadProgram(){
@@ -469,7 +471,7 @@ speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=
 function speak(txt){duckStart();try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=0.95;u.pitch=1.05;u.volume=1;if(frVoice)u.voice=frVoice;u.onend=()=>duckHold(300);u.onerror=()=>duckHold(300);speechSynthesis.speak(u);}catch{duckHold(300);}}
 const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
 const tCol=()=>SEQ[tIdx]&&SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)';
-function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=1+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
+function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':cur.phase==='RECOVERY'?'RÉCUPÉRATION':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=1+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
 function tRewind(){
   const timeInEx=SEQ[tIdx].duration-tLeft;
   // Ground truth for the sensor timeline: a rewind press consumes real wall-clock
@@ -1384,6 +1386,8 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], ma
   if (!ok) return false;
   combined.phaseLog = phaseLog;
   combined.rewindEvents = rewindEvents;
+  await new Promise(r => setTimeout(r, 30));
+  combined.analysis = buildHiitAnalysis(combined);
   showSessionResultsModal(combined);
   await saveSessionData(combined);
   return true;
@@ -1451,7 +1455,11 @@ function buildSessionSummary(combined, type) {
   if (type === 'hiit') {
     if (!combined.analysis || !combined.analysis.reps || !combined.analysis.reps.length) return null;
     const totalReps = combined.analysis.reps.reduce((a,r) => a + r.reps, 0);
-    return { totalReps, exerciseCount: combined.analysis.reps.length };
+    const repsByEx = {};
+    combined.analysis.reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
+    const summary = { totalReps, exerciseCount: combined.analysis.reps.length, repsByEx };
+    if (combined.analysis.recovery && combined.analysis.recovery.drop != null) summary.hrRecovery = combined.analysis.recovery.drop;
+    return summary;
   } else if (type === 'swim') {
     if (!combined.analysis || !combined.analysis.swimSegments || !combined.analysis.swimSegments.length) return null;
     const totalReps = combined.analysis.swimSegments.reduce((a,s) => a + s.reps, 0);
@@ -1884,21 +1892,104 @@ function renderHrChartSvg(hrSamples) {
   return svg;
 }
 
-function renderRepsResultsHtml(results) {
+function getHiitHistory(currentFilename) {
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
+  return index
+    .filter(e => e.type === 'hiit' && e.summary)
+    .filter(e => !currentFilename || e.filename < currentFilename)
+    .sort((a,b) => a.filename < b.filename ? -1 : 1);
+}
+
+// Couleur vs moyenne des 3 dernières valeurs disponibles (null si < 3).
+function compareColor(value, pastValues, tol, higherIsBetter = true) {
+  const last3 = pastValues.filter(v => v != null).slice(-3);
+  if (last3.length < 3) return null;
+  const ref = last3.reduce((a,b) => a+b, 0) / 3;
+  const d = (value - ref) * (higherIsBetter ? 1 : -1);
+  return { ref, color: d > tol ? '#2ecc71' : d < -tol ? '#e74c3c' : 'var(--text)', state: d > tol ? 'up' : d < -tol ? 'down' : 'same' };
+}
+
+function renderRepsResultsHtml(results, history = []) {
   if (!results || results.length === 0) return '<p style="color:var(--muted);font-size:13px;">Aucun exercice analysé.</p>';
   const byExercise = {};
   results.forEach(r => { (byExercise[r.name] = byExercise[r.name] || []).push(r); });
+  const past = history.map(e => e.summary.repsByEx).filter(Boolean);
+  let anyColor = false;
   let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
-  html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Exercice</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th></tr>';
+  html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Exercice</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>Total</th></tr>';
   for (const name in byExercise) {
     const byRound = {};
     byExercise[name].forEach(r => byRound[r.round] = r.reps);
     html += `<tr><td style="padding:4px 0;">${name}</td>`;
-    for (let r=1; r<=4; r++) html += `<td>${byRound[r] !== undefined ? byRound[r] : '—'}</td>`;
-    html += '</tr>';
+    for (let r=1; r<=4; r++) {
+      const v = byRound[r];
+      if (v === undefined) { html += '<td>—</td>'; continue; }
+      const c = compareColor(v, past.map(p => p[name] ? p[name][r] : null), 1);
+      if (c) anyColor = true;
+      html += `<td style="${c ? `color:${c.color};font-weight:bold;` : ''}">${v}</td>`;
+    }
+    const total = Object.values(byRound).reduce((a,b) => a+b, 0);
+    const pastTotals = past.map(p => p[name] && Object.keys(p[name]).length === Object.keys(byRound).length ? Object.values(p[name]).reduce((a,b) => a+b, 0) : null);
+    const ct = compareColor(total, pastTotals, 2);
+    html += `<td style="font-weight:bold;${ct ? `color:${ct.color};` : ''}">${total}</td></tr>`;
   }
   html += '</table>';
+  html += `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${anyColor
+    ? '<span style="color:#2ecc71;">Vert</span> : plus que la moyenne des 3 dernières séances au même tour (±1 rep, ±2 sur le total). <span style="color:#e74c3c;">Rouge</span> : moins.'
+    : `Couleurs à partir de 3 séances enregistrées (${Math.min(past.length,3)}/3).`}</div>`;
   return html;
+}
+
+// ======= Récupération (minute finale) et zones HIIT =======
+function hiitPhaseStart(phaseLog, pred) {
+  const p = (phaseLog || []).find(pred);
+  return p ? p.tElapsedStart : null;
+}
+
+function computeHiitRecovery(combined) {
+  const t0 = hiitPhaseStart(combined.phaseLog, p => p.phase === 'RECOVERY');
+  if (t0 == null) return null;
+  const tl = hrTimeline(combined);
+  // Pic : FC max autour de la fin de l'effort (le capteur optique a quelques s de retard).
+  const peakVals = tl.filter(p => p.t >= t0 - 5 && p.t <= t0 + 10).map(p => p.hr);
+  const endVals = tl.filter(p => p.t >= t0 + RECOVERY_S - 8 && p.t <= t0 + RECOVERY_S).map(p => p.hr);
+  if (peakVals.length < 3 || endVals.length < 3) return { drop: null, error: 'Pas assez de données FC sur la minute de récupération' };
+  const peak = Math.max(...peakVals);
+  const end = endVals.reduce((a,b) => a+b, 0) / endVals.length;
+  return { peak, end: Math.round(end), drop: Math.round(peak - end) };
+}
+
+function buildHiitAnalysis(combined) {
+  return {
+    reps: analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog),
+    recovery: computeHiitRecovery(combined),
+    algoVersion: REP_ALGO_VERSION
+  };
+}
+
+function renderRecoveryHtml(combined, filename) {
+  const rec = combined.analysis && combined.analysis.recovery;
+  if (!rec) return '';
+  if (rec.drop == null) return `<div style="font-size:13px;color:var(--muted);">Récupération : ${rec.error}</div>`;
+  const past = getHiitHistory(filename).map(e => e.summary.hrRecovery).filter(v => v != null);
+  const c = compareColor(rec.drop, past, 3);
+  const bg = !c ? '#555' : c.state === 'up' ? '#27ae60' : c.state === 'down' ? '#c0392b' : '#f2ede6';
+  const fg = c && c.state === 'same' ? '#111' : '#fff';
+  const line2 = c
+    ? `${rec.drop - c.ref >= 0 ? '+' : '−'}${Math.abs(Math.round(rec.drop - c.ref))} bpm vs moyenne des 3 dernières (${Math.round(c.ref)} bpm)`
+    : `Référence ${Math.min(past.length, 2) + 1}/3 — comparaison à partir de la 4ᵉ séance`;
+  return `<div style="padding:12px;border-radius:12px;background:${bg};color:${fg};text-align:center;">
+    <div style="font-size:13px;opacity:.85;">Récupération en 1 min (${rec.peak} → ${rec.end} bpm)</div>
+    <div style="font-size:30px;font-weight:900;margin:2px 0;">−${rec.drop} bpm</div>
+    <div style="font-size:12px;opacity:.9;">${line2}</div></div>`;
+}
+
+function hiitZoneOpts(combined) {
+  const start = hiitPhaseStart(combined.phaseLog, p => p.phase === 'CIRCUIT');
+  const end = hiitPhaseStart(combined.phaseLog, p => p.phase === 'RECOVERY');
+  if (start == null) return { scope: 'de l\'enregistrement', focus: 'high' };
+  return { window: { startS: start, endS: end != null ? end : Infinity }, scope: 'du circuit', focus: 'high' };
 }
 
 // Bump only when the counting algorithm itself actually changes — this governs
@@ -1936,6 +2027,8 @@ async function updateExistingSessionFile(filename, combined) {
 
 function showSessionResultsModal(combined, filename) {
   const cacheValid = combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION;
+  // Récupération : calcul léger, ajouté sans relancer le recomptage des reps.
+  if (cacheValid && !('recovery' in combined.analysis)) combined.analysis.recovery = computeHiitRecovery(combined);
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
@@ -1947,11 +2040,15 @@ function showSessionResultsModal(combined, filename) {
 
   function renderInto(results) {
     const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
-    const repsHtml = renderRepsResultsHtml(results);
+    const repsHtml = renderRepsResultsHtml(results, getHiitHistory(filename));
+    const recHtml = renderRecoveryHtml(combined, filename);
+    const zonesHtml = renderHrZonesHtml(combined, null, hiitZoneOpts(combined));
     box.innerHTML = `
       <h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3>
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       <div style="margin-bottom:16px;">${repsHtml}</div>
+      ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
+      ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
@@ -1963,13 +2060,12 @@ function showSessionResultsModal(combined, filename) {
 
   box.innerHTML = `<h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3><p style="text-align:center;color:var(--muted);padding:20px 0;">Recalcul des reps en cours sur la base du fichier brut${combined.analysis ? ' (algorithme mis à jour depuis le dernier calcul)' : ''}...</p>`;
   setTimeout(() => {
-    const results = analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog);
     if (combined.analysis) {
       combined.analysisHistory = combined.analysisHistory || [];
       combined.analysisHistory.push(combined.analysis);
     }
-    combined.analysis = { reps: results, algoVersion: REP_ALGO_VERSION };
-    renderInto(results);
+    combined.analysis = buildHiitAnalysis(combined);
+    renderInto(combined.analysis.reps);
     updateExistingSessionFile(filename, combined);
   }, 30);
 }
@@ -2238,10 +2334,10 @@ function fmtMinSec(s) {
   return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
 }
 
-function renderHrZonesHtml(combined, segments) {
+function renderHrZonesHtml(combined, segments, opts = {}) {
   const tl = hrTimeline(combined);
   if (tl.length < 2) return '';
-  const w = swimWindow(segments);
+  const w = opts.window || swimWindow(segments);
   const pts = w ? tl.filter(p => p.t >= w.startS && p.t <= w.endS) : tl;
   if (pts.length < 2) return '';
   const hrMax = getHrMax();
@@ -2265,14 +2361,17 @@ function renderHrZonesHtml(combined, segments) {
   HR_ZONES.slice().reverse().forEach(z => {
     const i = HR_ZONES.indexOf(z);
     const lo = Math.round(z.lo*hrMax), hi = Math.min(hrMax, Math.round(z.hi*hrMax));
-    const strong = z.name === 'Z2' ? 'font-weight:bold;color:var(--text);' : 'color:var(--muted);';
+    const focused = opts.focus === 'high' ? (z.name === 'Z4' || z.name === 'Z5') : z.name === 'Z2';
+    const strong = focused ? 'font-weight:bold;color:var(--text);' : 'color:var(--muted);';
     rows += `<tr style="${strong}"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${z.color};margin-right:6px;"></span>${z.name}</td><td>${lo}-${hi} bpm</td><td style="text-align:right;">${fmtMinSec(counts[i]*dt)}</td><td style="text-align:right;width:44px;">${pct(counts[i])} %</td></tr>`;
   });
   if (below) rows += `<tr style="color:var(--muted);"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:6px;"></span>&lt; Z1</td><td>&lt; ${Math.round(0.5*hrMax)} bpm</td><td style="text-align:right;">${fmtMinSec(below*dt)}</td><td style="text-align:right;">${pct(below)} %</td></tr>`;
   rows += '</table>';
-  const z2 = pct(counts[1]);
-  const scope = w ? 'du temps de nage' : 'de l\'enregistrement';
-  return `<div style="font-size:14px;">Zone 2 : <b>${z2} %</b> ${scope}</div>${bar}${rows}
+  const scope = opts.scope || (w ? 'du temps de nage' : 'de l\'enregistrement');
+  const headline = opts.focus === 'high'
+    ? `Zones 4-5 : <b>${pct(counts[3] + counts[4])} %</b> ${scope}`
+    : `Zone 2 : <b>${pct(counts[1])} %</b> ${scope}`;
+  return `<div style="font-size:14px;">${headline}</div>${bar}${rows}
     <div style="font-size:11px;color:var(--muted);margin-top:6px;">FC max ${hrMax} bpm (modifiable dans Réglages)</div>`;
 }
 
