@@ -151,17 +151,26 @@ object HealthSync {
             .put("ct", Base64.encodeToString(ct, Base64.NO_WRAP)).toString()
     }
 
+    /** 409 = le repo a bougé entre la lecture du SHA et l'écriture (ex. l'app sauvegarde une
+     *  séance au même moment) : on relit le SHA et on réessaie. */
     private fun upload(cfg: SyncConfig, envelope: String) {
         val url = "https://api.github.com/repos/${cfg.repo}/contents/${cfg.path}"
-        val sha = http("GET", url, cfg.token, null).let { (code, body) ->
-            if (code == 200) JSONObject(body).optString("sha").ifEmpty { null } else null
+        var last = ""
+        repeat(4) { attempt ->
+            if (attempt > 0) Thread.sleep(1500L * attempt)
+            val sha = http("GET", "$url?t=${System.currentTimeMillis()}", cfg.token, null).let { (code, body) ->
+                if (code == 200) JSONObject(body).optString("sha").ifEmpty { null } else null
+            }
+            val body = JSONObject()
+                .put("message", "Données santé (chiffrées) mises à jour")
+                .put("content", Base64.encodeToString(envelope.toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
+            if (sha != null) body.put("sha", sha)
+            val (code, resp) = http("PUT", url, cfg.token, body.toString())
+            if (code in 200..201) return
+            last = "GitHub a répondu $code : ${resp.take(120)}"
+            if (code != 409 && code != 422) throw IllegalStateException(last)
         }
-        val body = JSONObject()
-            .put("message", "Données santé (chiffrées) mises à jour")
-            .put("content", Base64.encodeToString(envelope.toByteArray(Charsets.UTF_8), Base64.NO_WRAP))
-        if (sha != null) body.put("sha", sha)
-        val (code, resp) = http("PUT", url, cfg.token, body.toString())
-        if (code !in 200..201) throw IllegalStateException("GitHub a répondu $code : ${resp.take(200)}")
+        throw IllegalStateException(last)
     }
 
     private fun http(method: String, url: String, token: String, body: String?): Pair<Int, String> {
