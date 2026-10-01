@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T05:36:12Z';</script>
+<script>const APP_BUILD = '2026-10-01T05:54:43Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -531,7 +531,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(backfillHiitSummaries,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(async()=>{await prefillLoadsFromLastSession();backfillHiitSummaries();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
 
 async function checkForUpdate() {
   try {
@@ -1966,12 +1966,40 @@ function saveLoads() {
     const v = parseFloat(document.getElementById(LOAD_EXERCISES[ex]).value);
     if (v >= 0) l[ex] = v;
   }
+  setLoads(l);
+  showToast('Charges enregistrées');
+}
+function setLoads(l) {
   localStorage.setItem('hiitLoads', JSON.stringify(l));
   // Première saisie = charges des séances passées (enregistrées sans charge).
   const legacy = JSON.parse(localStorage.getItem('hiitLegacyLoads') || '{}');
   for (const ex in l) if (legacy[ex] == null) legacy[ex] = l[ex];
   localStorage.setItem('hiitLegacyLoads', JSON.stringify(legacy));
-  showToast('Charges enregistrées');
+}
+
+// Pré-remplit les charges avec celles de la dernière séance enregistrée
+// (historique local, sinon le fichier de la dernière séance sur GitHub).
+async function prefillLoadsFromLastSession() {
+  const cur = getLoads();
+  if (cur && Object.keys(cur).length) return;
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
+  const hiit = index.filter(e => e.type === 'hiit').sort((a,b) => a.filename < b.filename ? -1 : 1);
+  let loads = null;
+  const withLoads = hiit.filter(e => e.summary && e.summary.loads);
+  if (withLoads.length) loads = withLoads[withLoads.length - 1].summary.loads;
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!loads && token) {
+    try {
+      if (!hiit.length) await syncHistoryIndexFromGithub(token);
+      const idx = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]').filter(e => e.type === 'hiit' && e.savedToGithub).sort((a,b) => a.filename < b.filename ? -1 : 1);
+      if (idx.length) {
+        const combined = await fetchSessionFile(idx[idx.length - 1].filename, token);
+        loads = combined.loads || null;
+      }
+    } catch (err) { logError('Pré-remplissage des charges impossible', err); }
+  }
+  if (loads) { setLoads(loads); renderLoadInputs(); log('Charges pré-remplies depuis la dernière séance'); }
 }
 function sessionLoadFor(loads, ex) {
   if (!(ex in LOAD_EXERCISES)) return null;
