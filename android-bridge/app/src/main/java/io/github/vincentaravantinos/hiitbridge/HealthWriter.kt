@@ -65,6 +65,8 @@ object HealthWriter {
         val exerciseType = when (p.kind) {
             "swim" -> ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL
             "rugby" -> ExerciseSessionRecord.EXERCISE_TYPE_RUGBY
+            "climbing" -> ExerciseSessionRecord.EXERCISE_TYPE_ROCK_CLIMBING
+            "other" -> ExerciseSessionRecord.EXERCISE_TYPE_OTHER_WORKOUT
             else -> ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING
         }
 
