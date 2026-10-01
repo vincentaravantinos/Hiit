@@ -143,11 +143,11 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T05:57:04Z';</script>
+<script>const APP_BUILD = '2026-10-01T06:15:03Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
-  Nouvelle version disponible — <button onclick="applyUpdate()" style="background:#fff;color:#e67e22;border:none;border-radius:6px;padding:5px 12px;font-weight:bold;margin-left:6px;">Mettre à jour</button>
+  <span id="update-text">Nouvelle version disponible —</span> <button id="update-btn" onclick="applyUpdate()" style="background:#fff;color:#e67e22;border:none;border-radius:6px;padding:5px 12px;font-weight:bold;margin-left:6px;">Mettre à jour</button>
 </div>
 <div class="app-header">
   <div class="app-title">HIIT TRACKER</div>
@@ -534,9 +534,9 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(async()=>{await prefillLoadsFromLastSession();backfillHiitSummaries();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
-// Pages met ~1 min à déployer la nouvelle page : sans vérification, le bandeau
-// apparaissait trop tôt et le rechargement retombait sur l'ancienne version.
-// On ne propose donc la mise à jour que quand la page déployée est réellement nouvelle.
+// Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
+// au clic, on attend que la page déployée soit réellement nouvelle avant de recharger.
+let updatePolling = false;
 async function deployedBuild() {
   const r = await fetch(location.pathname + '?v=' + Date.now(), { cache: 'no-store' });
   if (!r.ok) return null;
@@ -544,20 +544,32 @@ async function deployedBuild() {
   return m ? m[1] : null;
 }
 async function checkForUpdate() {
+  if (updatePolling) return;
   try {
     const resp = await fetch('https://raw.githubusercontent.com/vincentaravantinos/Hiit/main/version.txt?t=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) return;
     const latest = (await resp.text()).trim();
-    let isNewer = latest && !isNaN(new Date(latest)) && new Date(latest) > new Date(APP_BUILD);
-    if (isNewer) {
-      const d = await deployedBuild();
-      isNewer = !!d && new Date(d) > new Date(APP_BUILD);
-    }
+    const isNewer = latest && !isNaN(new Date(latest)) && new Date(latest) > new Date(APP_BUILD);
     document.getElementById('update-banner').style.display = isNewer ? 'block' : 'none';
   } catch (e) { /* silencieux — pas bloquant, retenté au prochain cycle */ }
 }
-function applyUpdate() {
-  location.href = location.pathname + '?v=' + Date.now();
+async function applyUpdate() {
+  if (updatePolling) return;
+  updatePolling = true;
+  const btn = document.getElementById('update-btn'), txt = document.getElementById('update-text');
+  btn.style.display = 'none';
+  txt.textContent = 'Actualisation en cours… la nouvelle version est en train d\'être mise en ligne';
+  const started = Date.now();
+  while (Date.now() - started < 5 * 60 * 1000) {
+    try {
+      const d = await deployedBuild();
+      if (d && new Date(d) > new Date(APP_BUILD)) { location.href = location.pathname + '?v=' + Date.now(); return; }
+    } catch (e) { /* réessaie */ }
+    await new Promise(r => setTimeout(r, 5000));
+  }
+  updatePolling = false;
+  txt.textContent = 'La mise en ligne prend plus de temps que prévu —';
+  btn.textContent = 'Réessayer'; btn.style.display = '';
 }
 
 // ======= Polar sensor integration (optional, additive — workout works identically if skipped) =======
