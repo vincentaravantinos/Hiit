@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maxxus scan</title>
+<style>
+  :root { --bg:#f3f5f7; --fg:#1d2a33; --muted:#5d6b75; --line:#cfd8de; --accent:#1f6fb2; --ok:#2f8a4e; --bad:#b33a2e; --panel:#fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#141a1f; --fg:#e4ebf0; --muted:#93a2ad; --line:#2c3842; --accent:#5aa7e6; --ok:#5cc282; --bad:#e87a6d; --panel:#1b232a; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         padding: calc(env(safe-area-inset-top,0px) + 16px) 16px calc(env(safe-area-inset-bottom,0px) + 16px); }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { margin:0 0 16px; color:var(--muted); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  button { font:inherit; padding:12px 16px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); }
+  button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:600; }
+  button:disabled { opacity:.5; }
+  #status { margin:8px 0 12px; font-weight:600; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(130px,1fr)); gap:8px; margin-bottom:12px; }
+  .m { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px; }
+  .m b { display:block; font-size:22px; }
+  .m span { color:var(--muted); font-size:13px; }
+  #log { width:100%; height:45vh; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:10px;
+         padding:10px; font:12px/1.4 ui-monospace, Menlo, Consolas, monospace; white-space:pre; overflow:auto; }
+</style>
+</head>
+<body>
+<h1>Maxxus CX 4.3f – scan Bluetooth</h1>
+<p class="sub">Allume la console, ferme iConsole+/Kinomap, puis connecte. Pédale ensuite 30 s et envoie le log.</p>
+<div class="row">
+  <button class="primary" id="connect">Connecter</button>
+  <button id="disconnect" disabled>Déconnecter</button>
+  <button id="copy">Copier le log</button>
+</div>
+<div id="status">Pas connecté</div>
+<div class="grid" id="metrics"></div>
+<textarea id="log" readonly></textarea>
+
+<script>
+const S = n => '0000' + n.toString(16).padStart(4,'0') + '-0000-1000-8000-00805f9b34fb';
+const KNOWN = {
+  [S(0x1826)]:'FTMS (Fitness Machine)', [S(0x180A)]:'Device Information', [S(0x180D)]:'Heart Rate',
+  [S(0x180F)]:'Battery', [S(0x1816)]:'Cycling Speed & Cadence', [S(0x1818)]:'Cycling Power',
+  [S(0xFFF0)]:'Propriétaire FFF0', [S(0xFFE0)]:'Propriétaire FFE0 (UART HM-10)',
+  '49535343-fe7d-4ae5-8fa9-9fafd205e455':'Propriétaire ISSC/Microchip UART',
+  '6e400001-b5a3-f393-e0a9-e50e24dcca9e':'Nordic UART',
+};
+const CHAR_NAMES = {
+  [S(0x2ACC)]:'FTMS Feature', [S(0x2ACE)]:'Cross Trainer Data', [S(0x2AD2)]:'Indoor Bike Data',
+  [S(0x2AD3)]:'Training Status', [S(0x2AD6)]:'Supported Resistance Range', [S(0x2AD8)]:'Supported Power Range',
+  [S(0x2AD9)]:'FTMS Control Point', [S(0x2ADA)]:'FTMS Machine Status', [S(0x2A37)]:'Heart Rate Measurement',
+  [S(0x2A29)]:'Manufacturer', [S(0x2A24)]:'Model', [S(0x2A25)]:'Serial', [S(0x2A26)]:'Firmware', [S(0x2A27)]:'Hardware', [S(0x2A28)]:'Software',
+};
+const OPTIONAL = Object.keys(KNOWN).concat([S(0x1800), S(0x1801)]);
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+let device = null, counts = {};
+const t0 = performance.now();
+
+function log(s){ const t=((performance.now()-t0)/1000).toFixed(1).padStart(6); logEl.value += `[${t}] ${s}\n`; logEl.scrollTop = logEl.scrollHeight; }
+function hex(dv){ return Array.from(new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength)).map(b=>b.toString(16).padStart(2,'0')).join(' '); }
+function props(p){ return ['read','write','writeWithoutResponse','notify','indicate'].filter(k=>p[k]).join(','); }
+function setStatus(s, c){ $('status').textContent = s; $('status').style.color = c ? `var(--${c})` : ''; }
+
+function showMetrics(m){
+  $('metrics').innerHTML = Object.entries(m).map(([k,v]) => `<div class="m"><b>${v}</b><span>${k}</span></div>`).join('');
+}
+
+// FTMS Cross Trainer Data 0x2ACE
+function parseCrossTrainer(dv){
+  const f = dv.getUint8(0) | (dv.getUint8(1)<<8) | (dv.getUint8(2)<<16); let o = 3; const m = {};
+  const u16=()=>{const v=dv.getUint16(o,true);o+=2;return v}, s16=()=>{const v=dv.getInt16(o,true);o+=2;return v};
+  const u8=()=>dv.getUint8(o++), u24=()=>{const v=dv.getUint16(o,true)|(dv.getUint8(o+2)<<16);o+=3;return v};
+  try {
+    if(!(f&1)) m['Vitesse km/h']=(u16()/100).toFixed(1);
+    if(f&2) m['Vitesse moy']=(u16()/100).toFixed(1);
+    if(f&4) m['Distance m']=u24();
+    if(f&8){ m['Pas/min']=u16(); m['Pas/min moy']=u16(); }
+    if(f&16) m['Foulées']=u16();
+    if(f&32){ m['D+ m']=u16(); m['D- m']=u16(); }
+    if(f&64){ m['Inclinaison %']=(s16()/10); m['Rampe °']=(s16()/10); }
+    if(f&128) m['Résistance']=(s16()/10);
+    if(f&256) m['Watts']=s16();
+    if(f&512) m['Watts moy']=s16();
+    if(f&1024){ m['kcal']=u16(); u16(); u8(); }
+    if(f&2048) m['FC']=u8();
+    if(f&4096) m['MET']=u8()/10;
+    if(f&8192) m['Temps s']=u16();
+    if(f&16384) m['Restant s']=u16();
+  } catch(e){ m['parse']='tronqué'; }
+  return m;
+}
+// FTMS Indoor Bike Data 0x2AD2 (some consoles report as bike)
+function parseBike(dv){
+  const f = dv.getUint16(0,true); let o = 2; const m = {};
+  const u16=()=>{const v=dv.getUint16(o,true);o+=2;return v}, s16=()=>{const v=dv.getInt16(o,true);o+=2;return v};
+  const u8=()=>dv.getUint8(o++), u24=()=>{const v=dv.getUint16(o,true)|(dv.getUint8(o+2)<<16);o+=3;return v};
+  try {
+    if(!(f&1)) m['Vitesse km/h']=(u16()/100).toFixed(1);
+    if(f&2) m['Vitesse moy']=(u16()/100).toFixed(1);
+    if(f&4) m['Cadence rpm']=(u16()/2);
+    if(f&8) m['Cadence moy']=(u16()/2);
+    if(f&16) m['Distance m']=u24();
+    if(f&32) m['Résistance']=s16();
+    if(f&64) m['Watts']=s16();
+    if(f&128) m['Watts moy']=s16();
+    if(f&256){ m['kcal']=u16(); u16(); u8(); }
+    if(f&512) m['FC']=u8();
+    if(f&1024) m['MET']=u8()/10;
+    if(f&2048) m['Temps s']=u16();
+    if(f&4096) m['Restant s']=u16();
+  } catch(e){ m['parse']='tronqué'; }
+  return m;
+}
+
+async function connect(){
+  if(!navigator.bluetooth){ setStatus('Web Bluetooth indisponible dans ce navigateur (utilise Chrome Android).','bad'); return; }
+  try {
+    setStatus('Choisis la console dans la liste…');
+    device = await navigator.bluetooth.requestDevice({ acceptAllDevices:true, optionalServices:OPTIONAL });
+    log(`Appareil choisi : "${device.name || '(sans nom)'}" id=${device.id}`);
+    device.addEventListener('gattserverdisconnected', () => { log('Déconnecté'); setStatus('Déconnecté','bad'); $('disconnect').disabled = true; });
+    setStatus('Connexion…');
+    const server = await device.gatt.connect();
+    log('GATT connecté');
+    setStatus(`Connecté à ${device.name || 'appareil'}`,'ok');
+    $('disconnect').disabled = false;
+
+    const services = await server.getPrimaryServices();
+    log(`${services.length} service(s) accessible(s) :`);
+    for (const svc of services){
+      log(`SERVICE ${svc.uuid}  ${KNOWN[svc.uuid] || ''}`);
+      let chars = [];
+      try { chars = await svc.getCharacteristics(); } catch(e){ log('  (caractéristiques illisibles: '+e.message+')'); continue; }
+      for (const ch of chars){
+        const name = CHAR_NAMES[ch.uuid] || '';
+        log(`  CHAR ${ch.uuid}  [${props(ch.properties)}]  ${name}`);
+        if (ch.properties.read){
+          try {
+            const v = await ch.readValue();
+            const txt = new TextDecoder().decode(v).replace(/[^\x20-\x7e]/g,'.');
+            log(`    read: ${hex(v)}   "${txt}"`);
+          } catch(e){ log('    read error: '+e.message); }
+        }
+        if (ch.properties.notify || ch.properties.indicate){
+          try {
+            ch.addEventListener('characteristicvaluechanged', ev => {
+              const dv = ev.target.value; counts[ch.uuid] = (counts[ch.uuid]||0)+1;
+              let parsed = '';
+              if (ch.uuid === S(0x2ACE)) { const m = parseCrossTrainer(dv); showMetrics(m); parsed = JSON.stringify(m); }
+              else if (ch.uuid === S(0x2AD2)) { const m = parseBike(dv); showMetrics(m); parsed = JSON.stringify(m); }
+              // log first 15 notifications per char, then 1 in 10, to keep log readable
+              const n = counts[ch.uuid];
+              if (n <= 15 || n % 10 === 0) log(`  NOTIF ${name || ch.uuid.slice(4,8)} #${n}: ${hex(dv)} ${parsed}`);
+            });
+            await ch.startNotifications();
+            log('    notifications activées');
+          } catch(e){ log('    notify error: '+e.message); }
+        }
+      }
+    }
+    const hasFTMS = services.some(s => s.uuid === S(0x1826));
+    log(hasFTMS ? '>>> FTMS présent : protocole standard.' : '>>> Pas de FTMS parmi les services testés.');
+    log('Pédale maintenant ~30 s, puis copie le log.');
+  } catch(e){
+    log('Erreur : ' + e.message); setStatus('Erreur : ' + e.message,'bad');
+  }
+}
+
+$('connect').onclick = connect;
+$('disconnect').onclick = () => { if (device && device.gatt.connected) device.gatt.disconnect(); };
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(logEl.value); $('copy').textContent = 'Copié'; }
+  catch(e){ logEl.select(); document.execCommand('copy'); $('copy').textContent = 'Copié'; }
+  setTimeout(()=> $('copy').textContent = 'Copier le log', 1500);
+};
+log('Prêt. Navigateur Web Bluetooth : ' + (navigator.bluetooth ? 'oui' : 'NON'));
+</script>
+</body>
+</html>
