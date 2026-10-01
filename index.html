@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T04:42:22Z';</script>
+<script>const APP_BUILD = '2026-10-01T04:48:51Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -530,7 +530,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(backfillHiitSummaries,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
 
 async function checkForUpdate() {
   try {
@@ -1531,6 +1531,36 @@ function getHistoryEntries(dateStr) {
   return index.filter(e => e.date === dateStr);
 }
 
+async function fetchSessionFile(filename, token) {
+  const path = 'data/sessions/' + filename;
+  const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
+    headers: { 'Authorization': 'token ' + token }
+  });
+  if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
+  const data = await resp.json();
+  let combined;
+  if (data.content) {
+    // small file — GitHub's Contents API returns it inline, base64-encoded
+    // Avoid decodeURIComponent(escape(atob(...))) for large payloads — it builds
+    // several large intermediate strings and can be slow/memory-heavy on mobile.
+    // Decode straight to bytes, then let TextDecoder handle UTF-8 in one pass.
+    const binaryStr = atob(data.content);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    combined = JSON.parse(new TextDecoder('utf-8').decode(bytes));
+  } else if (data.download_url) {
+    // file over ~1MB — Contents API omits inline content above that size;
+    // fetch the raw file directly instead (this is the case for full HIIT
+    // sessions with all 4 sensors, easily 10+MB)
+    const rawResp = await fetch(data.download_url);
+    if (!rawResp.ok) throw new Error('Téléchargement direct a répondu ' + rawResp.status);
+    combined = await rawResp.json();
+  } else {
+    throw new Error('Réponse GitHub sans contenu ni URL de téléchargement');
+  }
+  return combined;
+}
+
 async function openHistoryEntry(entry) {
   if (!entry.savedToGithub) {
     const s = entry.summary;
@@ -1544,32 +1574,7 @@ async function openHistoryEntry(entry) {
   const token = localStorage.getItem('hiitGithubToken');
   if (!token) { showToast('Configure ton token GitHub pour rouvrir cette séance.'); return; }
   try {
-    const path = 'data/sessions/' + entry.filename;
-    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
-      headers: { 'Authorization': 'token ' + token }
-    });
-    if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
-    const data = await resp.json();
-    let combined;
-    if (data.content) {
-      // small file — GitHub's Contents API returns it inline, base64-encoded
-      // Avoid decodeURIComponent(escape(atob(...))) for large payloads — it builds
-      // several large intermediate strings and can be slow/memory-heavy on mobile.
-      // Decode straight to bytes, then let TextDecoder handle UTF-8 in one pass.
-      const binaryStr = atob(data.content);
-      const bytes = new Uint8Array(binaryStr.length);
-      for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-      combined = JSON.parse(new TextDecoder('utf-8').decode(bytes));
-    } else if (data.download_url) {
-      // file over ~1MB — Contents API omits inline content above that size;
-      // fetch the raw file directly instead (this is the case for full HIIT
-      // sessions with all 4 sensors, easily 10+MB)
-      const rawResp = await fetch(data.download_url);
-      if (!rawResp.ok) throw new Error('Téléchargement direct a répondu ' + rawResp.status);
-      combined = await rawResp.json();
-    } else {
-      throw new Error('Réponse GitHub sans contenu ni URL de téléchargement');
-    }
+    const combined = await fetchSessionFile(entry.filename, token);
     if (entry.type === 'swim') showSwimResultsModal(combined, entry.filename);
     else showSessionResultsModal(combined, entry.filename);
   } catch (err) {
@@ -1578,10 +1583,7 @@ async function openHistoryEntry(entry) {
   }
 }
 
-async function rebuildHistoryFromGithub() {
-  const token = localStorage.getItem('hiitGithubToken');
-  if (!token) { showToast('Configure ton token GitHub d\'abord.'); return; }
-  try {
+async function syncHistoryIndexFromGithub(token) {
     const resp = await fetch('https://api.github.com/repos/vincentaravantinos/Hiit/contents/data/sessions', {
       headers: { 'Authorization': 'token ' + token }
     });
@@ -1604,11 +1606,58 @@ async function rebuildHistoryFromGithub() {
     }
     if (index.length > 200) index = index.slice(-200);
     localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index));
+    return added;
+}
+
+async function rebuildHistoryFromGithub() {
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) { showToast('Configure ton token GitHub d\'abord.'); return; }
+  try {
+    const added = await syncHistoryIndexFromGithub(token);
     showToast(`✓ ${added} séance(s) ajoutée(s) à l'historique`);
     renderDashboard();
+    backfillHiitSummaries();
   } catch (err) {
     logError('Échec reconstruction historique', err);
     showToast('⚠️ Échec de la reconstruction — vérifie le token');
+  }
+}
+
+// Complète l'historique local avec les reps par tour des anciennes séances
+// (fichiers GitHub), pour que les couleurs vert/blanc/rouge les prennent en compte.
+// Une seule fois par séance : ensuite le résumé reste en local.
+let backfillRunning = false;
+async function backfillHiitSummaries() {
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token || backfillRunning) return;
+  backfillRunning = true;
+  let done = 0;
+  try {
+    await syncHistoryIndexFromGithub(token);
+    const readIndex = () => { try { return JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { return []; } };
+    const todo = readIndex().filter(e => e.type === 'hiit' && e.savedToGithub && !(e.summary && e.summary.repsByEx));
+    for (const entry of todo) {
+      try {
+        const combined = await fetchSessionFile(entry.filename, token);
+        if (!(combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION)) {
+          await new Promise(r => setTimeout(r, 50));
+          combined.analysis = buildHiitAnalysis(combined);
+        }
+        const summary = buildSessionSummary(combined, 'hiit');
+        if (!summary) continue;
+        const index = readIndex();
+        const e = index.find(x => x.filename === entry.filename);
+        if (e) { e.summary = summary; localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index)); done++; }
+        log('Historique complété: ' + entry.filename);
+      } catch (err) {
+        logError('Échec complétion historique ' + entry.filename, err);
+      }
+    }
+    if (done) showToast(`📊 Reps de ${done} ancienne(s) séance(s) ajoutées à l'historique`);
+  } catch (err) {
+    logError('Échec complétion historique', err);
+  } finally {
+    backfillRunning = false;
   }
 }
 
@@ -1905,7 +1954,7 @@ function getHiitHistory(currentFilename) {
 function compareColor(value, pastValues, tol, higherIsBetter = true) {
   const last3 = pastValues.filter(v => v != null).slice(-3);
   if (last3.length < 3) return null;
-  const ref = last3.reduce((a,b) => a+b, 0) / 3;
+  const ref = last3.slice().sort((a,b) => a-b)[1]; // médiane : une séance mal comptée ne fausse pas la référence
   const d = (value - ref) * (higherIsBetter ? 1 : -1);
   return { ref, color: d > tol ? '#2ecc71' : d < -tol ? '#e74c3c' : 'var(--text)', state: d > tol ? 'up' : d < -tol ? 'down' : 'same' };
 }
@@ -1936,7 +1985,7 @@ function renderRepsResultsHtml(results, history = []) {
   }
   html += '</table>';
   html += `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${anyColor
-    ? '<span style="color:#2ecc71;">Vert</span> : plus que la moyenne des 3 dernières séances au même tour (±1 rep, ±2 sur le total). <span style="color:#e74c3c;">Rouge</span> : moins.'
+    ? '<span style="color:#2ecc71;">Vert</span> : mieux que la médiane de tes 3 dernières séances au même tour (±1 rep, ±2 sur le total). <span style="color:#e74c3c;">Rouge</span> : moins bien.'
     : `Couleurs à partir de 3 séances enregistrées (${Math.min(past.length,3)}/3).`}</div>`;
   return html;
 }
@@ -1977,7 +2026,7 @@ function renderRecoveryHtml(combined, filename) {
   const bg = !c ? '#555' : c.state === 'up' ? '#27ae60' : c.state === 'down' ? '#c0392b' : '#f2ede6';
   const fg = c && c.state === 'same' ? '#111' : '#fff';
   const line2 = c
-    ? `${rec.drop - c.ref >= 0 ? '+' : '−'}${Math.abs(Math.round(rec.drop - c.ref))} bpm vs moyenne des 3 dernières (${Math.round(c.ref)} bpm)`
+    ? `${rec.drop - c.ref >= 0 ? '+' : '−'}${Math.abs(Math.round(rec.drop - c.ref))} bpm vs médiane des 3 dernières (${Math.round(c.ref)} bpm)`
     : `Référence ${Math.min(past.length, 2) + 1}/3 — comparaison à partir de la 4ᵉ séance`;
   return `<div style="padding:12px;border-radius:12px;background:${bg};color:${fg};text-align:center;">
     <div style="font-size:13px;opacity:.85;">Récupération en 1 min (${rec.peak} → ${rec.end} bpm)</div>
