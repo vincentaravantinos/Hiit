@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T12:06:10Z';</script>
+<script>const APP_BUILD = '2026-10-01T12:11:10Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -269,7 +269,7 @@ body {
     <div class="settings-section">
       <div class="settings-label">Health Connect</div>
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
-        <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Bouton ❤️ dans l'écran de résultats.</div>
+        <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Envoi automatique en fermant l'écran de résultats d'une séance (une seule fois par séance).</div>
         <div style="display:flex;gap:8px;">
           <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
           <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Autoriser / tester</button>
@@ -2223,7 +2223,6 @@ function showSessionResultsModal(combined, filename) {
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
-      ${hcButtonHtml()}
       <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
   box._hc = { combined, kind: 'hiit', filename };
@@ -2705,7 +2704,6 @@ function showSwimResultsModal(combined, filename) {
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <div style="margin-bottom:16px;">${swimHtml}</div>
-      ${hcButtonHtml()}
       <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
   box._hc = { combined, kind: 'swim', filename };
@@ -2735,9 +2733,6 @@ const HC_BRIDGE_PKG = 'io.github.vincentaravantinos.hiitbridge';
 const HC_APK_URL = 'https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk';
 const HC_PROFILE = { weightKg: 91, ageY: 41, heightCm: 176 }; // pour l'estimation des calories
 
-function hcButtonHtml() {
-  return `<button onclick="hcSendFromModal(this)" class="btn-connect" style="margin-top:8px;background:#1f3b2d;color:#fff;">❤️ Envoyer vers Health Connect</button>`;
-}
 
 function hcParseSensorUtc(str) {
   // "2026-10-01 07:11:43" — horloge du capteur, vérifiée en UTC sur les séances réelles.
@@ -2851,22 +2846,29 @@ function hcOpenBridge(payload) {
   location.href = `intent://write${q}#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
 }
 
-// « Fermer » sur les résultats d'une séance qui vient de se terminer = envoi automatique vers
-// Health Connect (Chrome exige un geste utilisateur pour ouvrir le pont : ce tap en sert).
-// Depuis l'historique (filename connu), Fermer ferme seulement ; le bouton ❤️ reste là pour ça.
+// Envoi transparent : tout tap sur « Fermer » d'un écran de résultats (fin de séance ou
+// historique) envoie la séance à Health Connect, sauf si elle l'a déjà été. Le tap sert de
+// geste utilisateur, exigé par Chrome pour ouvrir le pont. Mémoire des envois : localStorage
+// (identifiant = heure de début, le même que celui qui évite les doublons côté Health Connect).
+const HC_SENT_KEY = 'hcSentSessions';
+function hcSentSet() {
+  try { return new Set(JSON.parse(localStorage.getItem(HC_SENT_KEY) || '[]')); } catch (e) { return new Set(); }
+}
+function hcMarkSent(id) {
+  const set = hcSentSet(); set.add(id);
+  try { localStorage.setItem(HC_SENT_KEY, JSON.stringify([...set])); } catch (e) {}
+}
+
 function hcCloseModal(btn) {
   const modal = btn.closest('.sensor-modal');
   const ctx = modal && modal._hc;
   btn.closest('.sensor-modal-backdrop').remove();
-  if (ctx && !ctx.filename && !ctx.sent) hcSendFromModal(null, ctx);
-}
-
-function hcSendFromModal(btn, ctxArg) {
-  const ctx = ctxArg || btn.closest('.sensor-modal')._hc;
   if (!ctx) return;
-  ctx.sent = true;
-  const payload = buildHcPayload(ctx.combined, ctx.kind, ctx.filename);
-  if (payload.error) { showToast('Health Connect : ' + payload.error); return; }
+  let payload;
+  try { payload = buildHcPayload(ctx.combined, ctx.kind, ctx.filename); } catch (e) { log('Health Connect : ' + e.message); return; }
+  if (payload.error) { log('Health Connect : séance non envoyée — ' + payload.error); return; }
+  if (hcSentSet().has(payload.id)) return;
+  hcMarkSent(payload.id);
   log(`Health Connect : envoi ${payload.kind} ${new Date(payload.start).toISOString()} (${payload.segments.length} segments)`);
   hcOpenBridge(payload);
 }
