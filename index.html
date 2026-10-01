@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T05:20:32Z';</script>
+<script>const APP_BUILD = '2026-10-01T05:36:12Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -207,6 +207,10 @@ body {
       <div style="width:100%;max-width:400px;z-index:1">
         <div id="t-list" style="background:rgba(255,255,255,.04);border-radius:14px;padding:11px 14px;border:1px solid var(--border);margin-bottom:16px"></div>
         <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
+        <div id="t-loads" style="display:flex;gap:10px;justify-content:center;margin-top:12px;font-size:13px;color:var(--muted)">
+          <label style="display:flex;align-items:center;gap:6px">Rowing <input type="number" id="load-rowing" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
+          <label style="display:flex;align-items:center;gap:6px">Squats <input type="number" id="load-squats" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
+        </div>
         <div class="sensor-status" id="sensor-status"></div>
       </div>
     </div>
@@ -483,7 +487,7 @@ function tRewind(){
   else{tLeft=SEQ[tIdx].duration;tStartTicker();tRender();}
 }
 function tForward(){if(tIdx+1<SEQ.length)tGoNext();}
-function tRenderControls(){const ctrl=document.getElementById('t-controls'),col=tCol();
+function tRenderControls(){const ctrl=document.getElementById('t-controls'),col=tCol();const ld=document.getElementById('t-loads');if(ld)ld.style.display=tState==='idle'?'flex':'none';
 const iconBtn=(icon,fn)=>`<button onclick="${fn}" style="padding:15px 18px;font-size:20px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer;line-height:1">${icon}</button>`;
 const bs=`font-family:'Courier New',monospace;font-weight:700;letter-spacing:2px;text-transform:uppercase;border-radius:50px;cursor:pointer;border:none;transition:opacity .2s`;
 const fs=iconBtn('⛶','toggleFS()');
@@ -527,7 +531,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(backfillHiitSummaries,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(backfillHiitSummaries,5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
 
 async function checkForUpdate() {
   try {
@@ -1383,6 +1387,7 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], ma
   if (!ok) return false;
   combined.phaseLog = phaseLog;
   combined.rewindEvents = rewindEvents;
+  combined.loads = getLoads();
   await new Promise(r => setTimeout(r, 30));
   combined.analysis = buildHiitAnalysis(combined);
   showSessionResultsModal(combined);
@@ -1455,6 +1460,7 @@ function buildSessionSummary(combined, type) {
     const repsByEx = {};
     combined.analysis.reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
     const summary = { totalReps, exerciseCount: combined.analysis.reps.length, repsByEx };
+    if (combined.loads) summary.loads = combined.loads;
     if (combined.analysis.recovery && combined.analysis.recovery.drop != null) summary.hrRecovery = combined.analysis.recovery.drop;
     return summary;
   } else if (type === 'swim') {
@@ -1942,6 +1948,60 @@ function renderHrChartSvg(hrSamples) {
   return svg;
 }
 
+// ======= Charges des exercices à élastique =======
+const LOAD_EXERCISES = { 'Rowing élastique': 'load-rowing', 'Squats élastique': 'load-squats' };
+const PROGRESSION_REPS = 15;     // reps à chaque tour...
+const PROGRESSION_SESSIONS = 3;  // ...sur 3 séances d'affilée à la même charge
+
+function getLoads() {
+  try { return JSON.parse(localStorage.getItem('hiitLoads') || 'null'); } catch(e) { return null; }
+}
+function renderLoadInputs() {
+  const l = getLoads() || {};
+  for (const ex in LOAD_EXERCISES) { const el = document.getElementById(LOAD_EXERCISES[ex]); if (el) el.value = l[ex] != null ? l[ex] : ''; }
+}
+function saveLoads() {
+  const l = {};
+  for (const ex in LOAD_EXERCISES) {
+    const v = parseFloat(document.getElementById(LOAD_EXERCISES[ex]).value);
+    if (v >= 0) l[ex] = v;
+  }
+  localStorage.setItem('hiitLoads', JSON.stringify(l));
+  // Première saisie = charges des séances passées (enregistrées sans charge).
+  const legacy = JSON.parse(localStorage.getItem('hiitLegacyLoads') || '{}');
+  for (const ex in l) if (legacy[ex] == null) legacy[ex] = l[ex];
+  localStorage.setItem('hiitLegacyLoads', JSON.stringify(legacy));
+  showToast('Charges enregistrées');
+}
+function sessionLoadFor(loads, ex) {
+  if (!(ex in LOAD_EXERCISES)) return null;
+  if (loads && loads[ex] != null) return loads[ex];
+  const legacy = JSON.parse(localStorage.getItem('hiitLegacyLoads') || '{}');
+  return legacy[ex] != null ? legacy[ex] : null;
+}
+function sameLoadHistory(history, ex, currentLoads) {
+  const cur = sessionLoadFor(currentLoads, ex);
+  return history.filter(e => e.summary.repsByEx && (cur == null || sessionLoadFor(e.summary.loads, ex) === cur));
+}
+
+function renderProgressionHtml(results, combined, history) {
+  if (!results || !results.length) return '';
+  const msgs = [];
+  for (const ex in LOAD_EXERCISES) {
+    const now = {};
+    results.filter(r => r.name === ex).forEach(r => now[r.round] = r.reps);
+    const sessions = sameLoadHistory(history, ex, combined.loads).map(e => e.summary.repsByEx[ex]).filter(Boolean).slice(-(PROGRESSION_SESSIONS - 1)).concat([now]);
+    if (sessions.length < PROGRESSION_SESSIONS) continue;
+    const ok = sessions.every(s => [1,2,3,4].every(r => s[r] != null && s[r] >= PROGRESSION_REPS));
+    if (ok) {
+      const load = sessionLoadFor(combined.loads, ex);
+      msgs.push(`${ex} : ${PROGRESSION_REPS} reps ou plus à chaque tour sur ${PROGRESSION_SESSIONS} séances${load != null ? ` à ${load} kg` : ''}. Passe à un élastique plus fort.`);
+    }
+  }
+  if (!msgs.length) return '';
+  return `<div style="padding:10px 12px;border-radius:10px;background:#27ae60;color:#fff;font-size:13px;margin-bottom:12px;">💪 ${msgs.join('<br>')}</div>`;
+}
+
 function getHiitHistory(currentFilename) {
   let index = [];
   try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
@@ -1960,18 +2020,19 @@ function compareColor(value, pastValues, tol, higherIsBetter = true) {
   return { ref, color: d > tol ? '#2ecc71' : d < -tol ? '#e74c3c' : 'var(--text)', state: d > tol ? 'up' : d < -tol ? 'down' : 'same' };
 }
 
-function renderRepsResultsHtml(results, history = []) {
+function renderRepsResultsHtml(results, history = [], combined = {}) {
   if (!results || results.length === 0) return '<p style="color:var(--muted);font-size:13px;">Aucun exercice analysé.</p>';
   const byExercise = {};
   results.forEach(r => { (byExercise[r.name] = byExercise[r.name] || []).push(r); });
-  const past = history.map(e => e.summary.repsByEx).filter(Boolean);
   let anyColor = false;
   let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
   html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Exercice</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>Total</th></tr>';
   for (const name in byExercise) {
     const byRound = {};
     byExercise[name].forEach(r => byRound[r.round] = r.reps);
-    html += `<tr><td style="padding:4px 0;">${name}</td>`;
+    const loadNow = sessionLoadFor(combined.loads, name);
+    const past = sameLoadHistory(history, name, combined.loads).map(e => e.summary.repsByEx);
+    html += `<tr><td style="padding:4px 0;">${name}${loadNow != null ? ` <span style="color:var(--muted);font-size:11px;">${loadNow} kg</span>` : ''}</td>`;
     for (let r=1; r<=4; r++) {
       const v = byRound[r];
       if (v === undefined) { html += '<td>—</td>'; continue; }
@@ -1986,8 +2047,8 @@ function renderRepsResultsHtml(results, history = []) {
   }
   html += '</table>';
   html += `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${anyColor
-    ? '<span style="color:#2ecc71;">Vert</span> : mieux que la médiane de tes 3 dernières séances au même tour (±1 rep, ±2 sur le total). <span style="color:#e74c3c;">Rouge</span> : moins bien.'
-    : `Couleurs à partir de 3 séances enregistrées (${Math.min(past.length,3)}/3).`}</div>`;
+    ? '<span style="color:#2ecc71;">Vert</span> : mieux que la médiane de tes 3 dernières séances au même tour, à charge égale (±1 rep, ±2 sur le total). <span style="color:#e74c3c;">Rouge</span> : moins bien.'
+    : `Couleurs à partir de 3 séances enregistrées (${Math.min(history.length,3)}/3).`}</div>`;
   return html;
 }
 
@@ -2090,7 +2151,7 @@ function showSessionResultsModal(combined, filename) {
 
   function renderInto(results) {
     const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
-    const repsHtml = renderRepsResultsHtml(results, getHiitHistory(filename));
+    const repsHtml = renderProgressionHtml(results, combined, getHiitHistory(filename)) + renderRepsResultsHtml(results, getHiitHistory(filename), combined);
     const recHtml = renderRecoveryHtml(combined, filename);
     const zonesHtml = renderHrZonesHtml(combined, null, hiitZoneOpts(combined));
     box.innerHTML = `
