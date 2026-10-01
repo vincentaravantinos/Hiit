@@ -60,6 +60,14 @@ body {
 .tab-content { flex: 1; overflow-y: auto; overflow-x: hidden; }
 .tab-panel { display: none; padding: 20px; padding-bottom: 40px; }
 .tab-panel.active { display: block; }
+.act-back { background: none; border: none; color: var(--muted); font-family: var(--font); font-size: 13px; letter-spacing: 1px; padding: 4px 0; margin-bottom: 10px; cursor: pointer; }
+.act-card { display: flex; align-items: center; gap: 14px; width: 100%; text-align: left; padding: 18px 16px; margin-bottom: 12px; border: 1px solid var(--border2); border-radius: 14px; background: var(--surface2); color: var(--text); font-family: var(--font); cursor: pointer; }
+.act-card .ico { font-size: 30px; line-height: 1; }
+.act-card .ttl { font-size: 16px; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; }
+.act-card .sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.act-card.running { border-color: var(--accent); }
+.free-chip { padding: 9px 14px; border: 1px solid var(--border2); border-radius: 20px; background: var(--surface2); color: var(--text); font-family: var(--font); font-size: 14px; cursor: pointer; }
+.free-chip.on { background: var(--accent); color: #111; border-color: var(--accent); font-weight: 700; }
 .row-between { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .week-nav { display: flex; align-items: center; gap: 8px; }
 .week-nav-btn { background: none; border: none; color: var(--muted); font-size: 20px; font-weight: 900; cursor: pointer; padding: 0 4px; line-height: 1; font-family: var(--font); }
@@ -143,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T13:31:29Z';</script>
+<script>const APP_BUILD = '2026-10-01T13:38:22Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -155,8 +163,7 @@ body {
 </div>
 <div class="tab-nav">
   <button class="tab-btn active" onclick="showTab('dashboard',this)">SUIVI</button>
-  <button class="tab-btn" onclick="showTab('timer',this)">TIMER</button>
-  <button class="tab-btn" onclick="showTab('swim',this)">NATATION</button>
+  <button class="tab-btn" id="tab-btn-activity" onclick="showTab('activity',this)">ACTIVITÉ</button>
   <button class="tab-btn" onclick="showTab('settings',this)">RÉGLAGES</button>
 </div>
 <div class="tab-content">
@@ -179,19 +186,19 @@ body {
       <button class="log-btn active" id="log-btn-intense" onclick="logWorkout('I')">✓ HIIT / Rugby</button>
       <button class="log-btn recup-active" id="log-btn-recup" onclick="logWorkout('R')">✓ Récup (vélo / natation)</button>
     </div>
-    <div id="rugby-block" style="margin:4px 0 18px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface2);text-align:center;">
-      <div style="font-size:15px;font-weight:bold;margin-bottom:4px;">🏉 Rugby — séance libre</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">FC seule, enregistrée dans le capteur. Le téléphone peut rester au vestiaire.</div>
-      <div id="rugby-status" style="font-size:13px;color:var(--muted);margin-bottom:10px;min-height:18px;"></div>
-      <button id="rugby-btn" onclick="rugbyPromptThenStart(this)" style="padding:16px;font-size:15px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LE RUGBY</button>
-    </div>
     <div class="streaks-title">Top 3 streaks</div>
     <div id="top-streaks"></div>
+  </div>
+  <div id="tab-activity" class="tab-panel">
+    <button class="act-card" id="act-card-timer" onclick="openActivity('timer')"><span class="ico">⏱️</span><span><div class="ttl">HIIT</div><div class="sub">Circuit minuté, comptage des répétitions</div></span></button>
+    <button class="act-card" id="act-card-swim" onclick="openActivity('swim')"><span class="ico">🏊</span><span><div class="ttl">Natation</div><div class="sub">Contre-courant, analyse des mouvements</div></span></button>
+    <button class="act-card" id="act-card-free" onclick="openActivity('free')"><span class="ico">🏉</span><span><div class="ttl">Activité libre</div><div class="sub">Rugby, escalade… FC seule, classée en fin de séance</div></span></button>
   </div>
   <div id="tab-timer" class="tab-panel" style="padding:0">
     <div class="timer-wrap" id="timer-wrap">
       <div class="t-glow"></div>
       <div style="width:100%;max-width:400px;z-index:1">
+        <button class="act-back" onclick="openActivity('activity')">‹ ACTIVITÉS</button>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span id="t-phase" style="font-size:13px;letter-spacing:3px;color:var(--muted);text-transform:uppercase">ÉCHAUFFEMENT</span>
           <span id="t-total" style="font-size:13px;letter-spacing:2px;color:var(--muted)">15:00</span>
@@ -223,7 +230,8 @@ body {
     </div>
   </div>
   <div id="tab-swim" class="tab-panel">
-    <div style="padding:30px 20px;text-align:center;">
+    <button class="act-back" onclick="openActivity('activity')">‹ ACTIVITÉS</button>
+    <div style="padding:10px 0 30px;text-align:center;">
       <div id="swim-status" style="font-size:14px;color:var(--muted);margin-bottom:20px;min-height:20px;"></div>
       <div id="swim-cc-block">
         <div style="font-size:15px;font-weight:bold;margin-bottom:4px;">Contre-courant</div>
@@ -236,6 +244,17 @@ body {
         <button id="swim-cc-btn" data-mode="countercurrent" data-label="DÉMARRER LE CONTRE-COURANT" onclick="swimPromptThenStart(this,'countercurrent')" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LE CONTRE-COURANT</button>
         <p style="font-size:12px;color:var(--muted);margin-top:16px;">Les 5 premières minutes de nage et les pauses sont exclues du calcul de FC.</p>
       </div>
+    </div>
+  </div>
+  <div id="tab-free" class="tab-panel">
+    <button class="act-back" onclick="openActivity('activity')">‹ ACTIVITÉS</button>
+    <div style="text-align:center;padding-top:10px;">
+      <div style="font-size:15px;font-weight:bold;margin-bottom:4px;">Activité libre</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">FC seule, enregistrée dans le capteur : le téléphone peut rester au vestiaire. Intense ou Récup se choisit à la fin.</div>
+      <div id="free-chips" style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-bottom:10px;"></div>
+      <input type="text" id="free-other-input" placeholder="Nom de l'activité" onchange="freeSetOther(this.value)" style="display:none;width:100%;box-sizing:border-box;margin-bottom:12px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px;text-align:center">
+      <div id="free-status" style="font-size:13px;color:var(--muted);margin:6px 0 12px;min-height:18px;"></div>
+      <button id="free-btn" onclick="freePromptThenStart(this)" style="padding:20px;font-size:16px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER</button>
     </div>
   </div>
   <div id="tab-settings" class="tab-panel">
@@ -400,9 +419,9 @@ function renderDashboard(){
     const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
     cell.append(dot,lbl);
     if(histEntries.length){
-      const hasHiit=histEntries.some(e=>e.type==='hiit'),hasSwim=histEntries.some(e=>e.type==='swim'),hasRugby=histEntries.some(e=>e.type==='rugby');
+      const hasHiit=histEntries.some(e=>e.type==='hiit'),hasSwim=histEntries.some(e=>e.type==='swim'),hasFree=histEntries.some(e=>e.type==='free');
       const badge=document.createElement('div');
-      badge.textContent=(hasHiit?'📊':'')+(hasSwim?'🏊':'')+(hasRugby?'🏉':'');
+      badge.textContent=(hasHiit?'📊':'')+(hasSwim?'🏊':'')+(hasFree?'🏉':'');
       badge.style.cssText='position:absolute;top:-4px;right:2px;font-size:11px;pointer-events:none;';
       cell.appendChild(badge);
     }
@@ -420,7 +439,12 @@ function renderDashboard(){
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
   container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
 }
-function showTab(name,btn){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');btn.classList.add('active');if(name==='dashboard')renderDashboard();if(name==='timer'||name==='swim')sensorPrewarmConnect();}
+function showPanel(name){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');if(name==='dashboard')renderDashboard();if(name==='activity')renderActivityCards();if(name==='free')freeRenderChips();if(name==='timer'||name==='swim'||name==='free')sensorPrewarmConnect();}
+function runningActivity(){if(tState!=='idle')return'timer';if(swimTimerInterval)return'swim';if(freePending())return'free';return null;}
+function renderActivityCards(){const r=runningActivity();['timer','swim','free'].forEach(k=>{const c=document.getElementById('act-card-'+k);if(c)c.classList.toggle('running',r===k);});}
+// L'onglet ACTIVITÉ ramène directement à l'activité en cours s'il y en a une.
+function showTab(name,btn){document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');if(name==='activity')name=runningActivity()||'activity';showPanel(name);}
+function openActivity(name){showPanel(name);}
 function toggleReminder(){reminderOn=!reminderOn;S.set(KEYS.reminderOn,reminderOn);document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';reminderOn?scheduleReminder():clearTimeout(reminderTO);}
 function saveReminderTime(){reminderTime=document.getElementById('reminder-time').value;S.set(KEYS.reminderTime,reminderTime);scheduleReminder();}
 function saveGoal(){goal=parseInt(document.getElementById('goal-select').value);S.set(KEYS.goal,goal);renderDashboard();}
@@ -558,7 +582,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();rugbyRestoreUi();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();freeRestoreUi();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -1526,9 +1550,10 @@ function buildSessionSummary(combined, type) {
       summary.ccHr = combined.analysis.cc.avgHr;
     }
     return summary;
-  } else if (type === 'rugby') {
+  } else if (type === 'free') {
     const vals = (combined.hr && combined.hr.samples ? combined.hr.samples : []).map(s => s.hr).filter(v => v > 0);
-    const summary = { durationMin: Math.round((combined.durationS || 0) / 60) };
+    const summary = { activity: freeActivityName(combined), durationMin: Math.round((combined.durationS || 0) / 60) };
+    if (combined.classification) summary.classification = combined.classification;
     if (vals.length) { summary.avgHr = Math.round(vals.reduce((a,b)=>a+b,0)/vals.length); summary.maxHr = Math.max(...vals); }
     return summary;
   }
@@ -1537,7 +1562,7 @@ function buildSessionSummary(combined, type) {
 
 const HISTORY_INDEX_KEY = 'hiitHistoryIndex';
 function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
-  const type = prefix === 'natation_' ? 'swim' : prefix === 'rugby_' ? 'rugby' : 'hiit';
+  const type = prefix === 'natation_' ? 'swim' : (prefix === 'libre_' || prefix === 'rugby_') ? 'free' : 'hiit';
   const date = todayStr();
   const summary = buildSessionSummary(combined, type);
   let index = [];
@@ -1564,7 +1589,7 @@ function showDayActionMenu(dstr, histEntries, entry) {
     const btn = document.createElement('button');
     btn.className = 'btn-connect';
     btn.style.marginBottom = '8px';
-    btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : e.type === 'rugby' ? '🏉 Voir le rugby' : '📊 Voir le HIIT';
+    btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : e.type === 'free' ? `${freeIcon(e.summary && e.summary.activity)} Voir ${(e.summary && e.summary.activity) || "l'activité libre"}` : '📊 Voir le HIIT';
     btn.onclick = () => { modal.remove(); openHistoryEntry(e); };
     box.appendChild(btn);
   });
@@ -1627,8 +1652,8 @@ async function openHistoryEntry(entry) {
     const s = entry.summary;
     const detail = s ? (entry.type === 'swim'
       ? `${s.totalReps} mouvements sur ${s.segments} segment(s) (${s.strokes.join(', ')})`
-      : entry.type === 'rugby'
-      ? `Rugby ${s.durationMin} min${s.avgHr ? `, FC moy. ${s.avgHr} bpm, max ${s.maxHr}` : ''}`
+      : entry.type === 'free'
+      ? `${s.activity || 'Activité libre'} ${s.durationMin} min${s.avgHr ? `, FC moy. ${s.avgHr} bpm, max ${s.maxHr}` : ''}`
       : `${s.totalReps} répétitions au total sur ${s.exerciseCount} exercice(s)`)
       : 'Résumé non disponible.';
     showToast('📥 Séance locale uniquement — ' + detail);
@@ -1639,7 +1664,7 @@ async function openHistoryEntry(entry) {
   try {
     const combined = await fetchSessionFile(entry.filename, token);
     if (entry.type === 'swim') showSwimResultsModal(combined, entry.filename);
-    else if (entry.type === 'rugby') showRugbyResultsModal(combined, entry.filename);
+    else if (entry.type === 'free') showFreeResultsModal(combined, entry.filename);
     else showSessionResultsModal(combined, entry.filename);
   } catch (err) {
     logError('Échec réouverture séance ' + entry.filename, err);
@@ -1661,12 +1686,13 @@ async function syncHistoryIndexFromGithub(token) {
       let prefix, rest;
       if (f.name.startsWith('natation_')) { prefix = 'natation_'; rest = f.name.slice('natation_'.length); }
       else if (f.name.startsWith('seance_')) { prefix = 'seance_'; rest = f.name.slice('seance_'.length); }
+      else if (f.name.startsWith('libre_')) { prefix = 'libre_'; rest = f.name.slice('libre_'.length); }
       else if (f.name.startsWith('rugby_')) { prefix = 'rugby_'; rest = f.name.slice('rugby_'.length); }
       else continue;
       const date = rest.slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
       if (index.some(e => e.filename === f.name)) continue;
-      index.push({ date, type: prefix === 'natation_' ? 'swim' : prefix === 'rugby_' ? 'rugby' : 'hiit', filename: f.name, savedToGithub: true, summary: null });
+      index.push({ date, type: prefix === 'natation_' ? 'swim' : (prefix === 'libre_' || prefix === 'rugby_') ? 'free' : 'hiit', filename: f.name, savedToGithub: true, summary: null });
       added++;
     }
     if (index.length > 200) index = index.slice(-200);
@@ -2450,6 +2476,7 @@ async function swimActuallyStart() {
 
 async function swimStop(btn) {
   clearInterval(swimTimerInterval);
+  swimTimerInterval = null;
   const durationS = (performance.now()-swimStartWallMs)/1000;
   btn.disabled = true;
   btn.textContent = 'ANALYSE EN COURS...';
@@ -3025,18 +3052,20 @@ function buildHcPayload(combined, kind, filename) {
       kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
   }
 
-  if (kind === 'rugby') {
+  if (kind === 'free') {
     const start = combined.startedAtMs || (hcParseFilenameMs(filename) ? hcParseFilenameMs(filename) - (combined.durationS || 0) * 1000 : null);
     const durMs = Math.round((combined.durationS || 0) * 1000);
     if (!start || !durMs) return { error: 'Heure de début de la séance introuvable' };
     const hr = hcHrBlock(combined, start);
     const vals = hr ? hr.bpm.filter(b => b > 0) : [];
+    const act = freeActivityName(combined);
     const notes = [
+      combined.classification ? `Classée ${combined.classification === 'I' ? 'Intense' : 'Récup'}` : null,
       vals.length ? `FC moyenne ${Math.round(vals.reduce((a,b)=>a+b,0)/vals.length)} bpm, max ${Math.max(...vals)} bpm` : null,
       `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
     ].filter(Boolean).join('\n');
-    return { v: 1, kind: 'rugby', id: String(start), start, end: start + durMs,
-      title: `Rugby ${Math.round(durMs/60000)} min`, notes, segments: [], hr,
+    return { v: 1, kind: freeHcKind(act), id: String(start), start, end: start + durMs,
+      title: `${act} ${Math.round(durMs/60000)} min`, notes, segments: [], hr,
       kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
   }
 
@@ -3111,94 +3140,137 @@ function hcCloseModal(btn) {
   hcOpenBridge(payload);
 }
 
-// ======= Rugby : séance libre, FC seule enregistrée hors-ligne dans le capteur =======
+// ======= Activité libre (rugby, escalade…) : FC seule enregistrée hors-ligne =======
 // Même mécanique que la natation (connexion → enregistrement interne → déconnexion →
-// reconnexion et récupération à l'arrêt), mais HR uniquement : 2 h d'ACC/GYRO/MAG à
-// haute fréquence n'apporteraient rien ici et chargeraient inutilement le capteur.
-// L'état est persisté : si Android tue l'onglet pendant l'entraînement, l'app rouvre
-// en « rugby en cours » et ARRÊTER retrouve le capteur (un choix dans la liste
-// Bluetooth si getDevices() est indisponible).
-const RUGBY_TYPES = REC_TYPES.filter(t => t.name === 'HR');
-const RUGBY_LS = 'hiitRugbyPending';
-const RUGBY_MIN_S = 20 * 60; // en dessous, la séance n'entre pas dans le suivi
-let rugbyTimerInterval = null;
+// reconnexion et récupération à l'arrêt), mais HR uniquement : des heures d'ACC/GYRO/MAG
+// n'apporteraient rien ici. L'état est persisté : si Android tue l'onglet pendant la
+// séance, l'app rouvre sur l'activité en cours et ARRÊTER retrouve le capteur.
+// Le classement Intense/Récup est choisi à la fin (suggestion d'après durée et FC).
+const FREE_TYPES = REC_TYPES.filter(t => t.name === 'HR');
+const FREE_LS = 'hiitFreePending';
+const FREE_LAST_LS = 'hiitFreeLastActivity';
+const FREE_PRESETS = ['Rugby', 'Escalade'];
+const FREE_INTENSE_MIN_S = 20 * 60;     // en dessous : Récup suggérée
+const FREE_INTENSE_HIGH_S = 10 * 60;    // ≥ 10 min en Z4-Z5 → Intense suggéré
+const FREE_INTENSE_AVG = 0.75;          // ou FC moyenne ≥ 75 % FC max
+let freeTimerInterval = null;
+let freeActivity = localStorage.getItem(FREE_LAST_LS) || 'Rugby';
 
-function rugbyPending() { try { return JSON.parse(localStorage.getItem(RUGBY_LS) || 'null'); } catch (e) { return null; } }
+function freePending() { try { return JSON.parse(localStorage.getItem(FREE_LS) || 'null'); } catch (e) { return null; } }
+function freeActivityName(combined) { return (combined && combined.activity === 'rugby') ? 'Rugby' : ((combined && combined.activity) || 'Activité libre'); }
+function freeIcon(act) { const a = (act || '').toLowerCase(); return a.includes('rugby') ? '🏉' : (a.includes('escalade') || a.includes('grimpe')) ? '🧗' : '💪'; }
+function freeHcKind(act) { const a = (act || '').toLowerCase(); return a.includes('rugby') ? 'rugby' : (a.includes('escalade') || a.includes('grimpe')) ? 'climbing' : 'other'; }
 
-function rugbyResetButton() {
-  const btn = document.getElementById('rugby-btn');
+function freeRenderChips() {
+  const box = document.getElementById('free-chips');
+  if (!box) return;
+  const running = !!freePending();
+  const isOther = !FREE_PRESETS.includes(freeActivity);
+  box.innerHTML = [...FREE_PRESETS, 'Autre'].map(a => {
+    const on = a === 'Autre' ? isOther : a === freeActivity;
+    return `<button class="free-chip${on ? ' on' : ''}" ${running ? 'disabled' : ''} onclick="freePick('${a}')">${a === 'Autre' ? '💪' : freeIcon(a)} ${a}</button>`;
+  }).join('');
+  const inp = document.getElementById('free-other-input');
+  inp.style.display = isOther && !running ? 'block' : 'none';
+  if (isOther && document.activeElement !== inp) inp.value = freeActivity === 'Autre' ? '' : freeActivity;
+}
+function freePick(a) {
+  freeActivity = a;
+  if (a !== 'Autre') localStorage.setItem(FREE_LAST_LS, a);
+  freeRenderChips();
+  if (a === 'Autre') document.getElementById('free-other-input').focus();
+}
+function freeSetOther(v) {
+  v = (v || '').trim();
+  freeActivity = v || 'Autre';
+  if (v) localStorage.setItem(FREE_LAST_LS, v);
+}
+function freeCurrentName() {
+  if (freeActivity === 'Autre') { const v = document.getElementById('free-other-input').value.trim(); return v || 'Activité libre'; }
+  return freeActivity;
+}
+
+function freeResetButton() {
+  const btn = document.getElementById('free-btn');
   if (!btn) return;
-  clearInterval(rugbyTimerInterval);
-  btn.textContent = 'DÉMARRER LE RUGBY';
+  clearInterval(freeTimerInterval);
+  btn.textContent = 'DÉMARRER';
   btn.style.background = 'var(--accent)'; btn.style.color = '#111';
   btn.disabled = false;
-  btn.onclick = () => rugbyPromptThenStart(btn);
+  btn.onclick = () => freePromptThenStart(btn);
+  freeRenderChips();
 }
 
-function rugbyShowRunning(startedAtMs) {
-  const btn = document.getElementById('rugby-btn');
-  const statusEl = document.getElementById('rugby-status');
-  btn.textContent = 'ARRÊTER LE RUGBY';
+function freeShowRunning(p) {
+  const btn = document.getElementById('free-btn');
+  const statusEl = document.getElementById('free-status');
+  btn.textContent = 'ARRÊTER';
   btn.style.background = '#c0392b'; btn.style.color = '#fff';
   btn.disabled = false;
-  btn.onclick = () => rugbyStop(btn);
-  clearInterval(rugbyTimerInterval);
+  btn.onclick = () => freeStop(btn);
+  freeRenderChips();
+  clearInterval(freeTimerInterval);
   const tick = () => {
-    const s = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+    const s = Math.max(0, Math.floor((Date.now() - p.startedAtMs) / 1000));
     const hh = Math.floor(s/3600), mm = String(Math.floor(s/60)%60).padStart(2,'0'), ss = String(s%60).padStart(2,'0');
-    statusEl.textContent = `Enregistrement FC en cours... ${hh}:${mm}:${ss}`;
+    statusEl.textContent = `${freeIcon(p.activity)} ${p.activity} — enregistrement FC... ${hh}:${mm}:${ss}`;
   };
   tick();
-  rugbyTimerInterval = setInterval(tick, 1000);
+  freeTimerInterval = setInterval(tick, 1000);
 }
 
-function rugbyRestoreUi() {
-  const p = rugbyPending();
-  if (p && p.startedAtMs) rugbyShowRunning(p.startedAtMs);
+function freeRestoreUi() {
+  // Migration de la version « rugby » éphémère (même jour) vers l'activité libre.
+  const legacy = localStorage.getItem('hiitRugbyPending');
+  if (legacy && !freePending()) { try { const l = JSON.parse(legacy); l.activity = 'Rugby'; localStorage.setItem(FREE_LS, JSON.stringify(l)); } catch (e) {} }
+  localStorage.removeItem('hiitRugbyPending');
+  const p = freePending();
+  if (p && p.startedAtMs) { freeActivity = p.activity || freeActivity; freeShowRunning(p); }
+  else freeRenderChips();
 }
 
-function rugbyPromptThenStart(btn) {
-  sensorPendingAction = rugbyActuallyStart;
+function freePromptThenStart(btn) {
+  sensorPendingAction = freeActuallyStart;
   sensorPromptThenStart(btn);
 }
 
-async function rugbyActuallyStart() {
+async function freeActuallyStart() {
   sensorPendingAction = null;
-  const statusEl = document.getElementById('rugby-status');
+  const statusEl = document.getElementById('free-status');
   if (!sensorActive) {
-    statusEl.textContent = 'Capteur non connecté — rugby non démarré.';
-    rugbyResetButton();
+    statusEl.textContent = 'Capteur non connecté — activité non démarrée.';
+    freeResetButton();
     return;
   }
-  const btn = document.getElementById('rugby-btn');
+  const btn = document.getElementById('free-btn');
   btn.disabled = true; btn.textContent = 'DÉMARRAGE...';
   try {
     statusEl.textContent = 'Démarrage de l\'enregistrement FC...';
     await pftpEnsureReady();
     const baseline = Array.from(new Set((await listAllRecordings()).map(r => r.path)));
-    await startAllRecordings(RUGBY_TYPES);
-    const startedAtMs = Date.now();
-    localStorage.setItem(RUGBY_LS, JSON.stringify({ deviceId: device.id, baseline, startedAtMs }));
+    await startAllRecordings(FREE_TYPES);
+    const p = { deviceId: device.id, baseline, startedAtMs: Date.now(), activity: freeCurrentName() };
+    localStorage.setItem(FREE_LS, JSON.stringify(p));
     device.gatt.disconnect();
-    log('Rugby : enregistrement FC démarré, capteur déconnecté.');
-    rugbyShowRunning(startedAtMs);
-    showToast('🏉 Enregistrement lancé — bon entraînement !');
+    log(`Activité libre (${p.activity}) : enregistrement FC démarré, capteur déconnecté.`);
+    freeShowRunning(p);
+    showToast('Enregistrement lancé — bonne séance !');
   } catch (err) {
-    logError('Échec démarrage rugby', err);
+    logError('Échec démarrage activité libre', err);
     statusEl.textContent = 'Échec du démarrage — réessaie.';
-    rugbyResetButton();
+    freeResetButton();
   }
 }
 
-async function rugbyStop(btn) {
-  const p = rugbyPending();
-  if (!p) { rugbyResetButton(); return; }
-  const statusEl = document.getElementById('rugby-status');
+async function freeStop(btn) {
+  const p = freePending();
+  if (!p) { freeResetButton(); return; }
+  const statusEl = document.getElementById('free-status');
   btn.disabled = true;
   try {
     if (!device) {
-      // Onglet rechargé pendant l'entraînement : on retrouve le capteur. requestDevice doit
-      // être le premier await après le tap (geste utilisateur exigé par Chrome).
+      // Onglet rechargé pendant la séance : on retrouve le capteur. requestDevice doit
+      // rester le premier await après le tap (geste utilisateur exigé par Chrome).
       let found = null;
       if (typeof navigator.bluetooth?.getDevices === 'function') {
         const known = await navigator.bluetooth.getDevices().catch(() => []);
@@ -3210,60 +3282,113 @@ async function rugbyStop(btn) {
       });
     }
   } catch (err) {
-    logError('Rugby : capteur non retrouvé', err);
+    logError('Activité libre : capteur non retrouvé', err);
     statusEl.textContent = 'Capteur non sélectionné — réessaie (l\'enregistrement continue).';
     btn.disabled = false;
     return;
   }
-  clearInterval(rugbyTimerInterval);
+  clearInterval(freeTimerInterval);
   const endedAtMs = Date.now();
   const durationS = (endedAtMs - p.startedAtMs) / 1000;
   btn.textContent = 'RÉCUPÉRATION...';
   statusEl.textContent = 'Récupération des données FC...';
-  const { ok, combined } = await retrieveAllSensorData(new Set(p.baseline), 5, RUGBY_TYPES);
+  const { ok, combined } = await retrieveAllSensorData(new Set(p.baseline), 5, FREE_TYPES);
   if (!ok) {
-    showToast('⚠️ Récupération échouée — les données restent sur le capteur, réessaie');
-    rugbyShowRunning(p.startedAtMs);
+    showToast('⚠️ Récupération échouée — les données restent sur le capteur');
+    freeShowRunning(p);
     statusEl.textContent = 'Récupération échouée — rapproche le capteur et réappuie sur ARRÊTER.';
     return;
   }
-  combined.activity = 'rugby';
+  combined.activity = p.activity;
   combined.startedAtMs = p.startedAtMs;
   combined.endedAtMs = endedAtMs;
   combined.durationS = durationS;
-  localStorage.removeItem(RUGBY_LS);
-  rugbyResetButton();
+  combined.suggestedClass = freeSuggest(combined).cls;
+  combined.classification = combined.suggestedClass;
+  localStorage.removeItem(FREE_LS);
+  freeResetButton();
   statusEl.textContent = '';
-  showRugbyResultsModal(combined);
-  if (durationS >= RUGBY_MIN_S) {
-    const t = todayStr(), cur = getEntry(t);
-    if (cur && cur.type === 'R') { cur.type = 'I'; S.set(KEYS.workouts, workouts); renderDashboard(); }
-    else logWorkout('I', true);
-    showToast('🏉 Rugby enregistré en Intense');
-  } else {
-    log(`Rugby de ${Math.round(durationS/60)} min — sous les 20 min, non compté dans le suivi.`);
-  }
-  await saveSessionData(combined, 'rugby_');
+  // Le suivi reçoit tout de suite la suggestion ; le choix dans la modale la remplace.
+  const dayKey = todayStr();
+  const prevType = (getEntry(dayKey) || {}).type || null;
+  freeApplyClass(dayKey, prevType, combined.classification);
+  showFreeResultsModal(combined, null, { dayKey, prevType });
+  await saveSessionData(combined, 'libre_');
 }
 
-function showRugbyResultsModal(combined, filename) {
+function freeSuggest(combined) {
+  const tl = hrTimeline(combined);
+  const hrMax = getHrMax();
+  const dur = combined.durationS || 0;
+  if (!tl.length) return { cls: dur >= FREE_INTENSE_MIN_S ? 'I' : 'R', why: 'pas de FC, d\'après la durée seule' };
+  const dt = tl.length > 1 ? (tl[tl.length-1].t - tl[0].t) / (tl.length-1) : 1;
+  const highS = tl.filter(p => p.hr >= 0.8 * hrMax).length * dt;
+  const avg = tl.reduce((a,p) => a + p.hr, 0) / tl.length;
+  const intense = dur >= FREE_INTENSE_MIN_S && (highS >= FREE_INTENSE_HIGH_S || avg >= FREE_INTENSE_AVG * hrMax);
+  const why = `${Math.round(dur/60)} min, ${Math.round(highS/60)} min en Z4-Z5, FC moy. ${Math.round(avg)} bpm (${Math.round(100*avg/hrMax)} % FC max)`;
+  return { cls: intense ? 'I' : 'R', why };
+}
+
+// Intense l'emporte sur Récup ; une activité libre ne dégrade jamais un Intense déjà loggé.
+function freeApplyClass(dayKey, prevType, cls) {
+  const final = (prevType === 'I' || cls === 'I') ? 'I' : 'R';
+  const cur = getEntry(dayKey);
+  if (cur) cur.type = final; else workouts.unshift({ date: dayKey, type: final });
+  workouts.sort((a,b) => b.date.localeCompare(a.date));
+  S.set(KEYS.workouts, workouts);
+  renderDashboard();
+}
+
+function showFreeResultsModal(combined, filename, live = null) {
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
   const box = document.createElement('div');
   box.className = 'sensor-modal';
   box.style.cssText = 'max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;';
+  const act = freeActivityName(combined);
   const dur = combined.durationS ? fmtMinSec(combined.durationS) : '?';
+  const sug = freeSuggest(combined);
   const zonesHtml = renderHrZonesHtml(combined, null, { focus: 'high', scope: 'de la séance' });
+  const clsBtn = (c, label) => `<button data-cls="${c}" style="flex:1;padding:12px;border-radius:10px;font-family:var(--font);font-weight:bold;font-size:14px;border:1px solid var(--border2);cursor:pointer;">${label}</button>`;
+  const classHtml = live
+    ? `<div style="font-size:13px;margin-bottom:6px;">Classer la séance :</div>
+       <div style="display:flex;gap:8px;margin-bottom:6px;">${clsBtn('I','🔥 Intense')}${clsBtn('R','🌿 Récup')}</div>
+       <div style="font-size:11px;color:var(--muted);margin-bottom:16px;">Suggestion : ${sug.cls === 'I' ? 'Intense' : 'Récup'} (${sug.why})</div>`
+    : `<p style="font-size:13px;text-align:center;margin-bottom:14px;">Classée ${combined.classification === 'I' ? '🔥 Intense' : combined.classification === 'R' ? '🌿 Récup' : '—'}</p>`;
   box.innerHTML = `
-    <h3 style="text-align:center;">RÉSULTATS RUGBY</h3>
+    <h3 style="text-align:center;">${freeIcon(act)} ${act.toUpperCase()}</h3>
     <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:14px;">Durée ${dur}</p>
+    ${classHtml}
     ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
     <div style="margin-bottom:16px;">${renderHrChartSvg(combined.hr ? combined.hr.samples : null)}</div>
     <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
-  box._hc = { combined, kind: 'rugby', filename };
+  box._hc = { combined, kind: 'free', filename };
+  if (live) {
+    const paint = () => box.querySelectorAll('[data-cls]').forEach(b => {
+      const on = b.dataset.cls === combined.classification;
+      b.style.background = on ? 'var(--accent)' : 'var(--surface2)';
+      b.style.color = on ? '#111' : 'var(--text)';
+    });
+    box.querySelectorAll('[data-cls]').forEach(b => b.onclick = () => {
+      combined.classification = b.dataset.cls;
+      freeApplyClass(live.dayKey, live.prevType, combined.classification);
+      freeUpdateIndexClass(combined);
+      paint();
+    });
+    paint();
+  }
   modal.appendChild(box);
   document.body.appendChild(modal);
+}
+
+// Le fichier de séance est sauvegardé dès l'arrêt (sécurité des données) ; le choix final
+// est reporté dans l'index d'historique, le suivi (workouts) restant la référence.
+function freeUpdateIndexClass(combined) {
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { return; }
+  const e = index.slice().reverse().find(x => x.type === 'free' && x.summary && x.summary.durationMin === Math.round((combined.durationS || 0) / 60) && x.date === todayStr());
+  if (e) { e.summary.classification = combined.classification; localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index)); }
 }
 
 loadProgram().then(init);
