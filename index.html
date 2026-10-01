@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T05:11:02Z';</script>
+<script>const APP_BUILD = '2026-10-01T05:20:32Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1463,6 +1463,7 @@ function buildSessionSummary(combined, type) {
     const strokes = [...new Set(combined.analysis.swimSegments.map(s => s.stroke))];
     const summary = { totalReps, segments: combined.analysis.swimSegments.length, strokes };
     summary.ccChecked = true;
+    summary.strokeStats = computeStrokeStats(combined.analysis.swimSegments);
     if (combined.analysis.cc && combined.analysis.cc.avgHr) {
       summary.ccLevel = combined.currentLevel;
       summary.ccHr = combined.analysis.cc.avgHr;
@@ -2432,6 +2433,51 @@ function renderHrZonesHtml(combined, segments, opts = {}) {
     <div style="font-size:11px;color:var(--muted);margin-top:6px;">FC max ${hrMax} bpm (modifiable dans Réglages)</div>`;
 }
 
+const CADENCE_MIN_S = 180;      // au moins 3 min dans une nage pour comparer sa cadence
+const CADENCE_FLAG_PCT = 0.15;   // jaune au-delà de ±15 % vs médiane des 3 dernières
+
+function computeStrokeStats(segments) {
+  const stats = {};
+  (segments || []).forEach(sg => {
+    const st = stats[sg.stroke] = stats[sg.stroke] || { s: 0, reps: 0 };
+    st.s += sg.endS - sg.startS; st.reps += sg.reps;
+  });
+  for (const k in stats) stats[k].rate = stats[k].s > 0 ? Math.round(stats[k].reps / (stats[k].s / 60) * 10) / 10 : null;
+  return stats;
+}
+
+function cadenceFlag(stroke, st, history) {
+  if (!st || st.s < CADENCE_MIN_S || !st.rate) return null;
+  const past = history
+    .map(e => e.summary.strokeStats && e.summary.strokeStats[stroke])
+    .filter(x => x && x.s >= CADENCE_MIN_S && x.rate)
+    .map(x => x.rate).slice(-3);
+  if (past.length < 3) return null;
+  const med = past.slice().sort((a,b) => a-b)[1];
+  const dev = (st.rate - med) / med;
+  return { med, dev, flagged: Math.abs(dev) > CADENCE_FLAG_PCT };
+}
+
+function renderStrokeMixHtml(segments, history) {
+  const stats = computeStrokeStats(segments);
+  const strokes = Object.keys(stats).sort((a,b) => stats[b].s - stats[a].s);
+  if (!strokes.length) return '';
+  const total = strokes.reduce((a,k) => a + stats[k].reps, 0);
+  let anyFlag = false;
+  const parts = strokes.map((k, i) => {
+    const st = stats[k];
+    const f = cadenceFlag(k, st, history);
+    const name = i === 0 ? k.charAt(0).toUpperCase() + k.slice(1) : k;
+    let txt = `${name} ${Math.round(st.s/60)} min`;
+    if (st.s >= CADENCE_MIN_S && st.rate) txt += ` (${Math.round(st.rate)} mvt/min${f ? `, d'habitude ${Math.round(f.med)}` : ''})`;
+    if (f && f.flagged) { anyFlag = true; return `<span style="color:#f1c40f;font-weight:bold;">${txt}</span>`; }
+    return txt;
+  });
+  let html = `<div style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.5;">${parts.join(', ')}<br>${total} mouvements au total</div>`;
+  if (anyFlag) html += `<div style="font-size:11px;color:#f1c40f;text-align:center;margin-top:4px;">Cadence inhabituelle (écart de plus de 15 %) : vérifie le réglage de la bague avant de te fier au badge.</div>`;
+  return html;
+}
+
 function getCcHistory(level, currentFilename) {
   let index = [];
   try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
@@ -2462,8 +2508,7 @@ function renderCcKpiHtml(combined, filename) {
     <div style="font-size:13px;opacity:.85;">Niveau ${level} — FC moyenne sur ${fmtMinSec(cc.swimS || (cc.winEndS - cc.winStartS))} de nage (${fmtMinSec(cc.winStartS)} → ${fmtMinSec(cc.winEndS)})</div>
     <div style="font-size:34px;font-weight:900;margin:2px 0;">${hr} bpm</div>
     <div style="font-size:12px;opacity:.9;">${line2}</div></div>`;
-  const totalStrokes = (combined.analysis.swimSegments || []).reduce((a, sg) => a + sg.reps, 0);
-  if (totalStrokes) html += `<div style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px;">${totalStrokes} mouvements au total</div>`;
+  html += renderStrokeMixHtml(combined.analysis.swimSegments, prev);
   // mini-courbe des séances à ce niveau
   const series = prev.slice(-9).map(e => e.summary.ccHr).concat([cc.avgHr]);
   if (series.length >= 2) {
