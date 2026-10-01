@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T05:54:43Z';</script>
+<script>const APP_BUILD = '2026-10-01T05:57:04Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -533,19 +533,29 @@ function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenEl
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
 function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(async()=>{await prefillLoadsFromLastSession();backfillHiitSummaries();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
 
+// version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
+// Pages met ~1 min à déployer la nouvelle page : sans vérification, le bandeau
+// apparaissait trop tôt et le rechargement retombait sur l'ancienne version.
+// On ne propose donc la mise à jour que quand la page déployée est réellement nouvelle.
+async function deployedBuild() {
+  const r = await fetch(location.pathname + '?v=' + Date.now(), { cache: 'no-store' });
+  if (!r.ok) return null;
+  const m = (await r.text()).match(/APP_BUILD\s*=\s*'([0-9T:Z.-]+)'/);
+  return m ? m[1] : null;
+}
 async function checkForUpdate() {
   try {
     const resp = await fetch('https://raw.githubusercontent.com/vincentaravantinos/Hiit/main/version.txt?t=' + Date.now(), { cache: 'no-store' });
     if (!resp.ok) return;
     const latest = (await resp.text()).trim();
-    // Strictly newer, not just different — a lagging CDN can momentarily serve an
-    // older version.txt right after reloading onto the actual latest build, which
-    // would otherwise re-trigger the banner on an already-current page.
-    const isNewer = latest && !isNaN(new Date(latest)) && new Date(latest) > new Date(APP_BUILD);
+    let isNewer = latest && !isNaN(new Date(latest)) && new Date(latest) > new Date(APP_BUILD);
+    if (isNewer) {
+      const d = await deployedBuild();
+      isNewer = !!d && new Date(d) > new Date(APP_BUILD);
+    }
     document.getElementById('update-banner').style.display = isNewer ? 'block' : 'none';
   } catch (e) { /* silencieux — pas bloquant, retenté au prochain cycle */ }
 }
-
 function applyUpdate() {
   location.href = location.pathname + '?v=' + Date.now();
 }
