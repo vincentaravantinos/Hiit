@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-09-30T20:03:46Z';</script>
+<script>const APP_BUILD = '2026-10-01T04:23:27Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -214,8 +214,20 @@ body {
   <div id="tab-swim" class="tab-panel">
     <div style="padding:30px 20px;text-align:center;">
       <div id="swim-status" style="font-size:14px;color:var(--muted);margin-bottom:20px;min-height:20px;"></div>
-      <button id="swim-btn" onclick="swimPromptThenStart(this)" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LA NATATION</button>
-      <p style="font-size:12px;color:var(--muted);margin-top:16px;">Enregistrement continu — pauses et changements de nage détectés automatiquement. Arrête uniquement quand tu as vraiment fini.</p>
+      <div id="swim-free-block">
+        <button id="swim-btn" data-mode="free" data-label="DÉMARRER LA NATATION" onclick="swimPromptThenStart(this,'free')" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LA NATATION</button>
+        <p style="font-size:12px;color:var(--muted);margin-top:16px;">Enregistrement continu — pauses et changements de nage détectés automatiquement. Arrête uniquement quand tu as vraiment fini.</p>
+      </div>
+      <div id="swim-cc-block" style="margin-top:28px;padding-top:24px;border-top:1px solid var(--border);">
+        <div style="font-size:15px;font-weight:bold;margin-bottom:4px;">Contre-courant</div>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">Bloc fixe de 20 min. Choisis le niveau de la pompe.</div>
+        <div style="display:flex;align-items:center;justify-content:center;gap:18px;margin-bottom:16px;">
+          <button onclick="ccChangeLevel(-1)" style="width:48px;height:48px;border-radius:50%;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:24px;">−</button>
+          <div style="min-width:90px;"><div style="font-size:12px;color:var(--muted);">Niveau</div><div id="cc-level" style="font-size:40px;font-weight:900;">1</div></div>
+          <button onclick="ccChangeLevel(1)" style="width:48px;height:48px;border-radius:50%;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:24px;">+</button>
+        </div>
+        <button id="swim-cc-btn" data-mode="countercurrent" data-label="DÉMARRER LE CONTRE-COURANT" onclick="swimPromptThenStart(this,'countercurrent')" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LE CONTRE-COURANT</button>
+      </div>
     </div>
   </div>
   <div id="tab-settings" class="tab-panel">
@@ -251,6 +263,13 @@ body {
         <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
         <input type="password" id="github-token-input" placeholder="ghp_..." style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()">
         <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Fréquence cardiaque</div>
+      <div class="setting-row">
+        <div><div class="setting-name">FC max</div><div class="setting-sub">Sert à calculer les zones (Z2 = 60-70 % de la FC max). Par défaut 220 − âge.</div></div>
+        <input type="number" id="hrmax-input" min="120" max="230" style="width:80px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px;text-align:center" onchange="saveHrMax()">
       </div>
     </div>
     <div class="settings-section">
@@ -509,7 +528,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';checkForUpdate();setInterval(checkForUpdate,180000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
 
 async function checkForUpdate() {
   try {
@@ -1437,7 +1456,12 @@ function buildSessionSummary(combined, type) {
     if (!combined.analysis || !combined.analysis.swimSegments || !combined.analysis.swimSegments.length) return null;
     const totalReps = combined.analysis.swimSegments.reduce((a,s) => a + s.reps, 0);
     const strokes = [...new Set(combined.analysis.swimSegments.map(s => s.stroke))];
-    return { totalReps, segments: combined.analysis.swimSegments.length, strokes };
+    const summary = { totalReps, segments: combined.analysis.swimSegments.length, strokes };
+    if (combined.swimMode === 'countercurrent' && combined.analysis.cc && combined.analysis.cc.avgHr) {
+      summary.ccLevel = combined.currentLevel;
+      summary.ccHr = combined.analysis.cc.avgHr;
+    }
+    return summary;
   }
   return null;
 }
@@ -2056,8 +2080,41 @@ function classifyStrokeType(accWindow, thresholdAltDiff = 12.0) {
 let swimBaseline = null;
 let swimStartWallMs = 0;
 let swimTimerInterval = null;
+let swimMode = 'free';
+let swimActiveBtn = null;
 
-function swimPromptThenStart(btn) {
+function getHrMax() {
+  const v = parseInt(localStorage.getItem('hiitHrMax'), 10);
+  return v >= 120 && v <= 230 ? v : 179; // 220 - 41 ans
+}
+function saveHrMax() {
+  const v = parseInt(document.getElementById('hrmax-input').value, 10);
+  if (v >= 120 && v <= 230) { localStorage.setItem('hiitHrMax', String(v)); showToast('FC max enregistrée : ' + v + ' bpm'); }
+  else { document.getElementById('hrmax-input').value = getHrMax(); showToast('FC max invalide (120 à 230)'); }
+}
+function getCcLevel() {
+  const v = parseInt(localStorage.getItem('hiitCcLevel'), 10);
+  return v >= 1 && v <= 99 ? v : 1;
+}
+function ccChangeLevel(d) {
+  const v = Math.min(99, Math.max(1, getCcLevel() + d));
+  localStorage.setItem('hiitCcLevel', String(v));
+  document.getElementById('cc-level').textContent = v;
+}
+
+function swimResetButton(btn) {
+  btn.textContent = btn.dataset.label;
+  btn.style.background = 'var(--accent)'; btn.style.color = '#111';
+  btn.disabled = false;
+  const mode = btn.dataset.mode;
+  btn.onclick = () => swimPromptThenStart(btn, mode);
+  document.getElementById('swim-free-block').style.display = '';
+  document.getElementById('swim-cc-block').style.display = '';
+}
+
+function swimPromptThenStart(btn, mode = 'free') {
+  swimMode = mode;
+  swimActiveBtn = btn;
   sensorPendingAction = swimActuallyStart;
   sensorPromptThenStart(btn);
 }
@@ -2065,8 +2122,10 @@ function swimPromptThenStart(btn) {
 async function swimActuallyStart() {
   sensorPendingAction = null;
   const statusEl = document.getElementById('swim-status');
+  const btn = swimActiveBtn || document.getElementById('swim-btn');
   if (!sensorActive) {
     statusEl.textContent = 'Capteur non connecté — natation annulée.';
+    swimResetButton(btn);
     return;
   }
   try {
@@ -2076,19 +2135,22 @@ async function swimActuallyStart() {
     await startAllRecordings();
     device.gatt.disconnect();
     swimStartWallMs = performance.now();
-    const btn = document.getElementById('swim-btn');
-    btn.textContent = 'ARRÊTER LA NATATION';
+    // hide the other start option while recording
+    document.getElementById(swimMode === 'countercurrent' ? 'swim-free-block' : 'swim-cc-block').style.display = 'none';
+    btn.textContent = swimMode === 'countercurrent' ? 'ARRÊTER LE CONTRE-COURANT' : 'ARRÊTER LA NATATION';
     btn.style.background = '#c0392b'; btn.style.color = '#fff';
     btn.disabled = false;
     btn.onclick = () => swimStop(btn);
+    const lvl = swimMode === 'countercurrent' ? ` (niveau ${getCcLevel()})` : '';
     swimTimerInterval = setInterval(() => {
       const s = Math.floor((performance.now()-swimStartWallMs)/1000);
       const mm = String(Math.floor(s/60)).padStart(2,'0'), ss = String(s%60).padStart(2,'0');
-      statusEl.textContent = `Enregistrement en cours... ${mm}:${ss}`;
+      statusEl.textContent = `Enregistrement en cours${lvl}... ${mm}:${ss}`;
     }, 1000);
   } catch (err) {
     logError('Échec démarrage natation', err);
     statusEl.textContent = 'Échec du démarrage — réessaie.';
+    swimResetButton(btn);
   }
 }
 
@@ -2098,21 +2160,25 @@ async function swimStop(btn) {
   btn.disabled = true;
   btn.textContent = 'ANALYSE EN COURS...';
   document.getElementById('swim-status').textContent = 'Récupération des données...';
-  await swimRetrieveAndFinish(swimBaseline, durationS);
-  btn.textContent = 'DÉMARRER LA NATATION';
-  btn.style.background = 'var(--accent)'; btn.style.color = '#111';
-  btn.disabled = false;
-  btn.onclick = () => swimPromptThenStart(btn);
+  await swimRetrieveAndFinish(swimBaseline, durationS, swimMode, getCcLevel());
+  swimResetButton(btn);
   document.getElementById('swim-status').textContent = '';
 }
 
-async function swimRetrieveAndFinish(baseline, durationS) {
+async function swimRetrieveAndFinish(baseline, durationS, mode = 'free', level = null) {
   const { ok, combined } = await retrieveAllSensorData(baseline);
   if (!ok) {
     showToast('⚠️ Récupération reportée — les données restent sur le capteur');
     return false;
   }
   combined.durationS = durationS;
+  combined.swimMode = mode;
+  if (mode === 'countercurrent') combined.currentLevel = level;
+  // Analyse faite ici (et non dans la modale) pour que le fichier sauvegardé et
+  // le résumé d'historique contiennent déjà le KPI contre-courant.
+  document.getElementById('swim-status').textContent = 'Analyse...';
+  await new Promise(r => setTimeout(r, 30));
+  combined.analysis = buildSwimAnalysis(combined);
   showSwimResultsModal(combined);
   if (durationS >= 600) {
     logWorkout('R', true);
@@ -2122,6 +2188,140 @@ async function swimRetrieveAndFinish(baseline, durationS) {
   }
   await saveSessionData(combined, 'natation_');
   return true;
+}
+
+// ======= Zones FC et KPI contre-courant =======
+const HR_ZONES = [
+  { name: 'Z1', lo: 0.50, hi: 0.60, color: '#95a5a6' },
+  { name: 'Z2', lo: 0.60, hi: 0.70, color: '#3498db' },
+  { name: 'Z3', lo: 0.70, hi: 0.80, color: '#2ecc71' },
+  { name: 'Z4', lo: 0.80, hi: 0.90, color: '#f39c12' },
+  { name: 'Z5', lo: 0.90, hi: 1.01, color: '#e74c3c' },
+];
+const CC_WARMUP_S = 300;   // FC ignorée les 5 premières minutes de nage
+const CC_MIN_WINDOW_S = 300;
+
+function hrTimeline(combined) {
+  // HR hors-ligne ~1 Hz ; recalé sur la durée ACC (52 Hz) quand elle est connue.
+  const samples = combined.hr && combined.hr.samples ? combined.hr.samples : [];
+  if (!samples.length) return [];
+  const accDur = combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0;
+  const dt = accDur > 0 ? accDur / samples.length : 1;
+  return samples.map((x, i) => ({ t: i * dt, hr: x.hr })).filter(p => p.hr > 0);
+}
+
+function swimWindow(segments) {
+  if (!segments || !segments.length) return null;
+  return { startS: segments[0].startS, endS: segments[segments.length-1].endS };
+}
+
+function computeCcKpi(segments, tl) {
+  const w = swimWindow(segments);
+  if (!w) return { error: 'Aucune nage détectée' };
+  const winStart = w.startS + CC_WARMUP_S;
+  if (w.endS - winStart < CC_MIN_WINDOW_S) return { error: 'Bloc trop court pour le calcul (min. 10 min de nage)' };
+  const vals = tl.filter(p => p.t >= winStart && p.t <= w.endS).map(p => p.hr);
+  if (vals.length < 30) return { error: 'Pas assez de données FC' };
+  const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
+  return { avgHr: Math.round(avg*10)/10, winStartS: winStart, winEndS: w.endS };
+}
+
+function buildSwimAnalysis(combined) {
+  const segments = analyzeSwimSession(combined.acc ? combined.acc.samples : null);
+  const analysis = { swimSegments: segments, algoVersion: SWIM_ALGO_VERSION };
+  if (combined.swimMode === 'countercurrent') analysis.cc = computeCcKpi(segments, hrTimeline(combined));
+  return analysis;
+}
+
+function fmtMinSec(s) {
+  s = Math.round(s);
+  return Math.floor(s/60) + ':' + String(s%60).padStart(2,'0');
+}
+
+function renderHrZonesHtml(combined, segments) {
+  const tl = hrTimeline(combined);
+  if (tl.length < 2) return '';
+  const w = swimWindow(segments);
+  const pts = w ? tl.filter(p => p.t >= w.startS && p.t <= w.endS) : tl;
+  if (pts.length < 2) return '';
+  const hrMax = getHrMax();
+  const dt = pts.length > 1 ? (pts[pts.length-1].t - pts[0].t) / (pts.length-1) : 1;
+  const counts = HR_ZONES.map(() => 0);
+  let below = 0;
+  pts.forEach(p => {
+    const r = p.hr / hrMax;
+    if (r < HR_ZONES[0].lo) { below++; return; }
+    let i = HR_ZONES.findIndex(z => r >= z.lo && r < z.hi);
+    if (i < 0) i = HR_ZONES.length - 1;
+    counts[i]++;
+  });
+  const total = pts.length;
+  const pct = n => Math.round(100*n/total);
+  let bar = '<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:8px 0 10px;">';
+  if (below) bar += `<div style="width:${100*below/total}%;background:#555;"></div>`;
+  HR_ZONES.forEach((z,i) => { if (counts[i]) bar += `<div style="width:${100*counts[i]/total}%;background:${z.color};"></div>`; });
+  bar += '</div>';
+  let rows = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
+  HR_ZONES.slice().reverse().forEach(z => {
+    const i = HR_ZONES.indexOf(z);
+    const lo = Math.round(z.lo*hrMax), hi = Math.min(hrMax, Math.round(z.hi*hrMax));
+    const strong = z.name === 'Z2' ? 'font-weight:bold;color:var(--text);' : 'color:var(--muted);';
+    rows += `<tr style="${strong}"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${z.color};margin-right:6px;"></span>${z.name}</td><td>${lo}-${hi} bpm</td><td style="text-align:right;">${fmtMinSec(counts[i]*dt)}</td><td style="text-align:right;width:44px;">${pct(counts[i])} %</td></tr>`;
+  });
+  if (below) rows += `<tr style="color:var(--muted);"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:6px;"></span>&lt; Z1</td><td>&lt; ${Math.round(0.5*hrMax)} bpm</td><td style="text-align:right;">${fmtMinSec(below*dt)}</td><td style="text-align:right;">${pct(below)} %</td></tr>`;
+  rows += '</table>';
+  const z2 = pct(counts[1]);
+  const scope = w ? 'du temps de nage' : 'de l\'enregistrement';
+  return `<div style="font-size:14px;">Zone 2 : <b>${z2} %</b> ${scope}</div>${bar}${rows}
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;">FC max ${hrMax} bpm (modifiable dans Réglages)</div>`;
+}
+
+function getCcHistory(level, currentFilename) {
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
+  return index
+    .filter(e => e.type === 'swim' && e.summary && e.summary.ccLevel === level && e.summary.ccHr)
+    .filter(e => !currentFilename || e.filename < currentFilename)
+    .sort((a,b) => a.filename < b.filename ? -1 : 1);
+}
+
+function renderCcKpiHtml(combined, filename) {
+  const cc = combined.analysis && combined.analysis.cc;
+  const level = combined.currentLevel;
+  if (!cc || cc.error) return `<div style="padding:12px;border-radius:10px;background:var(--surface2);font-size:13px;color:var(--muted);">Niveau ${level} — ${cc ? cc.error : 'KPI non calculé'}</div>`;
+  const prev = getCcHistory(level, filename);
+  const last3 = prev.slice(-3);
+  let bg, fg, line2;
+  const hr = Math.round(cc.avgHr);
+  if (last3.length < 3) {
+    bg = '#555'; fg = '#fff';
+    line2 = `Référence ${prev.length + 1}/3 — comparaison à partir de la 4ᵉ séance à ce niveau`;
+  } else {
+    const ref = last3.reduce((a,e) => a + e.summary.ccHr, 0) / 3;
+    const delta = cc.avgHr - ref;
+    const d = Math.round(delta);
+    if (delta <= -2) { bg = '#27ae60'; fg = '#fff'; }
+    else if (delta >= 2) { bg = '#c0392b'; fg = '#fff'; }
+    else { bg = '#f2ede6'; fg = '#111'; }
+    line2 = `${d > 0 ? '+' : d < 0 ? '−' : '±'}${Math.abs(d)} bpm vs moyenne des 3 dernières (${Math.round(ref)} bpm)`;
+  }
+  let html = `<div style="padding:14px;border-radius:12px;background:${bg};color:${fg};text-align:center;">
+    <div style="font-size:13px;opacity:.85;">Niveau ${level} — FC moyenne de ${fmtMinSec(cc.winStartS)} à ${fmtMinSec(cc.winEndS)}</div>
+    <div style="font-size:34px;font-weight:900;margin:2px 0;">${hr} bpm</div>
+    <div style="font-size:12px;opacity:.9;">${line2}</div></div>`;
+  // mini-courbe des séances à ce niveau
+  const series = prev.slice(-9).map(e => e.summary.ccHr).concat([cc.avgHr]);
+  if (series.length >= 2) {
+    const w = 300, h = 60, pad = 8;
+    const mn = Math.min(...series) - 2, mx = Math.max(...series) + 2;
+    const xy = series.map((v,i) => [pad + i*(w-2*pad)/(series.length-1), h - pad - (v-mn)/(mx-mn)*(h-2*pad)]);
+    let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;margin-top:8px;">`;
+    svg += `<polyline points="${xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--muted)" stroke-width="1.5"/>`;
+    xy.forEach((p,i) => { const last = i === xy.length-1; svg += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${last?5:3}" fill="${last?bg:'var(--muted)'}" stroke="${last?'#fff':'none'}" stroke-width="1.5"/>`; });
+    svg += '</svg>';
+    html += svg + `<div style="font-size:11px;color:var(--muted);text-align:center;">${series.length} dernières séances au niveau ${level} (plus bas = mieux)</div>`;
+  }
+  return html;
 }
 
 function analyzeSwimSession(accSamples) {
@@ -2153,7 +2353,7 @@ function renderSwimResultsHtml(segments) {
 const SWIM_ALGO_VERSION = 'v1-segmentation-strokeclassify';
 
 function showSwimResultsModal(combined, filename) {
-  const cacheValid = combined.analysis && combined.analysis.swimSegments && combined.analysis.algoVersion === SWIM_ALGO_VERSION;
+  const cacheValid = combined.analysis && combined.analysis.swimSegments && combined.analysis.algoVersion === SWIM_ALGO_VERSION && (combined.swimMode !== 'countercurrent' || combined.analysis.cc);
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
@@ -2166,11 +2366,16 @@ function showSwimResultsModal(combined, filename) {
   function renderInto(segments) {
     const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
     const swimHtml = renderSwimResultsHtml(segments);
+    const isCc = combined.swimMode === 'countercurrent';
+    const ccHtml = isCc ? `<div style="margin-bottom:16px;">${renderCcKpiHtml(combined, filename)}</div>` : '';
+    const zonesHtml = renderHrZonesHtml(combined, segments);
     box.innerHTML = `
-      <h3 style="text-align:center;">RÉSULTATS NATATION</h3>
+      <h3 style="text-align:center;">${isCc ? 'RÉSULTATS CONTRE-COURANT' : 'RÉSULTATS NATATION'}</h3>
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
-      <div style="margin-bottom:16px;">${swimHtml}</div>
+      ${ccHtml}
+      ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
+      <div style="margin-bottom:16px;">${swimHtml}</div>
       <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
 
@@ -2181,13 +2386,12 @@ function showSwimResultsModal(combined, filename) {
 
   box.innerHTML = `<h3 style="text-align:center;">RÉSULTATS NATATION</h3><p style="text-align:center;color:var(--muted);padding:20px 0;">Recalcul en cours sur la base du fichier brut${combined.analysis ? ' (algorithme mis à jour depuis le dernier calcul)' : ''}...</p>`;
   setTimeout(() => {
-    const segments = analyzeSwimSession(combined.acc ? combined.acc.samples : null);
     if (combined.analysis) {
       combined.analysisHistory = combined.analysisHistory || [];
       combined.analysisHistory.push(combined.analysis);
     }
-    combined.analysis = { swimSegments: segments, algoVersion: SWIM_ALGO_VERSION };
-    renderInto(segments);
+    combined.analysis = buildSwimAnalysis(combined);
+    renderInto(combined.analysis.swimSegments);
     updateExistingSessionFile(filename, combined);
   }, 30);
 }
