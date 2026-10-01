@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T06:15:03Z';</script>
+<script>const APP_BUILD = '2026-10-01T10:37:07Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -264,6 +264,16 @@ body {
         <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
         <input type="password" id="github-token-input" placeholder="ghp_..." style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()">
         <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
+      </div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Health Connect</div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Bouton ❤️ dans l'écran de résultats.</div>
+        <div style="display:flex;gap:8px;">
+          <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
+          <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Autoriser / tester</button>
+        </div>
       </div>
     </div>
     <div class="settings-section">
@@ -1322,7 +1332,7 @@ function sensorOnPhaseChange() {
   sensorPhaseLog.push({
     name: SEQ[tIdx].name, type: SEQ[tIdx].type,
     round: SEQ[tIdx].round, phase: SEQ[tIdx].phase,
-    tElapsedStart: tElapsed
+    tElapsedStart: tElapsed, atMs: Date.now()
   });
   sensorSavePending();
 }
@@ -1404,10 +1414,11 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5) {
   return { ok: true, combined };
 }
 
-async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5) {
+async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5, endedAtMs = null) {
   const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts);
   if (!ok) return false;
   combined.phaseLog = phaseLog;
+  if (endedAtMs) combined.endedAtMs = endedAtMs;
   combined.rewindEvents = rewindEvents;
   combined.loads = getLoads();
   await new Promise(r => setTimeout(r, 30));
@@ -1422,8 +1433,9 @@ function sensorOnSessionEnd() {
   const baseline = sensorBaseline;
   const phaseLog = sensorPhaseLog;
   const rewindEvents = sensorRewindEvents;
+  const endedAtMs = Date.now();
   (async () => {
-    const ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents);
+    const ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 5, endedAtMs);
     if (ok) localStorage.removeItem(SENSOR_STORAGE_KEY);
   })();
 }
@@ -2211,8 +2223,10 @@ function showSessionResultsModal(combined, filename) {
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
+      ${hcButtonHtml()}
       <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
+  box._hc = { combined, kind: 'hiit', filename };
 
   if (cacheValid) {
     renderInto(combined.analysis.reps);
@@ -2374,6 +2388,7 @@ function swimPromptThenStart(btn, mode = 'countercurrent') {
   sensorPromptThenStart(btn);
 }
 
+let swimStartEpochMs = null;
 async function swimActuallyStart() {
   sensorPendingAction = null;
   const statusEl = document.getElementById('swim-status');
@@ -2390,6 +2405,7 @@ async function swimActuallyStart() {
     await startAllRecordings();
     device.gatt.disconnect();
     swimStartWallMs = performance.now();
+    swimStartEpochMs = Date.now();
     btn.textContent = swimMode === 'countercurrent' ? 'ARRÊTER LE CONTRE-COURANT' : 'ARRÊTER LA NATATION';
     btn.style.background = '#c0392b'; btn.style.color = '#fff';
     btn.disabled = false;
@@ -2413,18 +2429,19 @@ async function swimStop(btn) {
   btn.disabled = true;
   btn.textContent = 'ANALYSE EN COURS...';
   document.getElementById('swim-status').textContent = 'Récupération des données...';
-  await swimRetrieveAndFinish(swimBaseline, durationS, swimMode, getCcLevel());
+  await swimRetrieveAndFinish(swimBaseline, durationS, swimMode, getCcLevel(), swimStartEpochMs);
   swimResetButton(btn);
   document.getElementById('swim-status').textContent = '';
 }
 
-async function swimRetrieveAndFinish(baseline, durationS, mode = 'countercurrent', level = null) {
+async function swimRetrieveAndFinish(baseline, durationS, mode = 'countercurrent', level = null, startedAtMs = null) {
   const { ok, combined } = await retrieveAllSensorData(baseline);
   if (!ok) {
     showToast('⚠️ Récupération reportée — les données restent sur le capteur');
     return false;
   }
   combined.durationS = durationS;
+  if (startedAtMs) combined.startedAtMs = startedAtMs;
   combined.swimMode = mode;
   if (mode === 'countercurrent') combined.currentLevel = level;
   // Analyse faite ici (et non dans la modale) pour que le fichier sauvegardé et
@@ -2688,8 +2705,10 @@ function showSwimResultsModal(combined, filename) {
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <div style="margin-bottom:16px;">${swimHtml}</div>
+      ${hcButtonHtml()}
       <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
+  box._hc = { combined, kind: 'swim', filename };
 
   if (cacheValid) {
     renderInto(combined.analysis.swimSegments);
@@ -2706,6 +2725,139 @@ function showSwimResultsModal(combined, filename) {
     renderInto(combined.analysis.swimSegments);
     updateExistingSessionFile(filename, combined);
   }, 30);
+}
+
+// ======= Health Connect (via l'app Android « HIIT Bridge », android-bridge/ dans le repo) =======
+// Une PWA n'a pas accès à Health Connect : on passe la séance résumée (~10 ko) à l'app native
+// par un lien intent://. Le pont écrit séance + segments (reps) + FC + calories, puis se ferme.
+// Ré-envoyer une même séance la met à jour (identifiant stable = heure de début), sans doublon.
+const HC_BRIDGE_PKG = 'io.github.vincentaravantinos.hiitbridge';
+const HC_APK_URL = 'https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk';
+const HC_PROFILE = { weightKg: 91, ageY: 41, heightCm: 176 }; // pour l'estimation des calories
+
+function hcButtonHtml() {
+  return `<button onclick="hcSendFromModal(this)" class="btn-connect" style="margin-top:8px;background:#1f3b2d;color:#fff;">❤️ Envoyer vers Health Connect</button>`;
+}
+
+function hcParseSensorUtc(str) {
+  // "2026-10-01 07:11:43" — horloge du capteur, vérifiée en UTC sur les séances réelles.
+  const m = str && str.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/);
+  return m ? Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]) : null;
+}
+
+function hcParseFilenameMs(filename) {
+  const m = filename && filename.match(/(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z/);
+  return m ? Date.parse(`${m[1]}T${m[2]}:${m[3]}:${m[4]}.${m[5]}Z`) : null;
+}
+
+function hcSegType(name, type) {
+  if (type === 'rest') return 'REST';
+  const n = (name || '').toLowerCase();
+  if (n.includes('elliptique')) return 'ELLIPTICAL';
+  if (n.includes('squat')) return 'SQUAT';
+  if (n.includes('pull') || n.includes('traction')) return 'PULL_UP';
+  if (n.includes('jambe') || n.includes('leg raise')) return 'LEG_RAISE';
+  if (n.includes('burpee')) return 'BURPEE';
+  if (n.includes('fente')) return 'LUNGE';
+  if (n.includes('gainage') || n.includes('planche')) return 'PLANK';
+  if (n.includes('vélo')) return 'BIKING_STATIONARY';
+  return 'OTHER_WORKOUT'; // rowing élastique, pompes : pas de type Health Connect équivalent
+}
+
+function hcActiveKcal(bpmList, dtS) {
+  // Keytel et al. 2005 (homme), moins le métabolisme de base (Mifflin) : estimation, pas une mesure.
+  const { weightKg: w, ageY: a, heightCm: h } = HC_PROFILE;
+  const bmrPerMin = (10*w + 6.25*h - 5*a + 5) / 1440;
+  let kcal = 0;
+  for (const hr of bpmList) {
+    if (!(hr >= 30 && hr <= 250)) continue;
+    const gross = (-55.0969 + 0.6309*hr + 0.1988*w + 0.2017*a) / 4.184; // kcal/min
+    kcal += Math.max(0, gross - bmrPerMin) * dtS / 60;
+  }
+  return Math.round(kcal);
+}
+
+function hcHrBlock(combined, t0) {
+  const samples = combined.hr && combined.hr.samples ? combined.hr.samples : [];
+  if (!samples.length || t0 == null) return null;
+  const accDur = combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0;
+  const dt = accDur > 0 ? accDur / samples.length : 1; // même recalage que hrTimeline()
+  return { t0, dtMs: Math.round(dt * 1000), bpm: samples.map(x => x.hr || 0) };
+}
+
+function buildHcPayload(combined, kind, filename) {
+  if (kind === 'swim') {
+    const segs = (combined.analysis && combined.analysis.swimSegments) || [];
+    const durMs = (combined.durationS || 0) * 1000;
+    let start = combined.startedAtMs
+      || hcParseSensorUtc(combined.acc && combined.acc.startTimeStr)
+      || (hcParseFilenameMs(filename) ? hcParseFilenameMs(filename) - durMs - 60000 : null);
+    if (!start || !durMs) return { error: 'Heure de début de la séance introuvable' };
+    const strokeType = { brasse: 'SWIMMING_BREASTSTROKE', crawl: 'SWIMMING_FREESTYLE', dos: 'SWIMMING_BACKSTROKE' };
+    const segments = segs.map(s => ({ s: start + s.startS*1000, e: start + s.endS*1000, type: strokeType[s.stroke] || 'SWIMMING_OTHER', reps: s.reps }));
+    const hr = hcHrBlock(combined, start);
+    const cc = combined.analysis && combined.analysis.cc;
+    const byStroke = {};
+    segs.forEach(s => byStroke[s.stroke] = (byStroke[s.stroke] || 0) + s.reps);
+    const notes = [
+      `Contre-courant, niveau ${combined.currentLevel ?? '?'}`,
+      'Mouvements : ' + (Object.entries(byStroke).map(([k,v]) => `${k} ${v}`).join(', ') || '—'),
+      cc && cc.avgHr ? `FC moyenne en nage (après 5 min) : ${cc.avgHr} bpm` : null,
+      `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
+    ].filter(Boolean).join('\n');
+    return { v: 1, kind: 'swim', id: String(start), start, end: start + durMs,
+      title: `Nage contre-courant · niveau ${combined.currentLevel ?? '?'}`, notes, segments, hr,
+      kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
+  }
+
+  const log = combined.phaseLog || [];
+  if (!log.length) return { error: 'Pas de déroulé de séance' };
+  const t0 = log[0].atMs != null ? log[0].atMs - log[0].tElapsedStart*1000 : hcParseSensorUtc(combined.acc && combined.acc.startTimeStr);
+  if (!t0) return { error: 'Heure de début de la séance introuvable' };
+  const at = p => p.atMs != null ? p.atMs : t0 + p.tElapsedStart*1000;
+  const last = log[log.length-1];
+  const end = combined.endedAtMs || (at(last) + (last.phase === 'RECOVERY' ? RECOVERY_S : 30) * 1000);
+  const reps = (combined.analysis && combined.analysis.reps) || [];
+  const repsFor = p => { const r = reps.find(r => r.name === p.name && r.round === (p.round || 1)); return r ? r.reps : null; };
+  const segments = log.map((p, i) => ({
+    s: at(p), e: i+1 < log.length ? at(log[i+1]) : end,
+    type: p.phase === 'RECOVERY' ? 'REST' : hcSegType(p.name, p.type),
+    reps: p.type === 'work' ? repsFor(p) : null
+  }));
+
+  const byEx = {};
+  reps.forEach(r => (byEx[r.name] = byEx[r.name] || []).push(r.reps));
+  const loads = combined.loads || {};
+  const rec = combined.analysis && combined.analysis.recovery;
+  const notes = [
+    ...Object.entries(byEx).map(([n, arr]) => `${n}${loads[n] != null ? ` (${loads[n]} kg)` : ''} : ${arr.join(' / ')} = ${arr.reduce((a,b)=>a+b,0)}`),
+    rec && rec.drop != null ? `Récupération 1 min : ${rec.peak} → ${rec.end} bpm (−${rec.drop})` : null,
+    `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
+  ].filter(Boolean).join('\n');
+  const hr = hcHrBlock(combined, t0);
+  return { v: 1, kind: 'hiit', id: String(Math.round(t0)), start: Math.round(t0), end: Math.round(end),
+    title: `HIIT ${Math.round((end - t0)/60000)} min`, notes, segments, hr,
+    kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
+}
+
+function hcOpenBridge(payload) {
+  let q = '';
+  if (payload) {
+    const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+    q = '?d=' + b64;
+  }
+  // Si le pont n'est pas installé, Chrome ouvre l'URL de secours (téléchargement de l'APK).
+  location.href = `intent://write${q}#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
+}
+
+function hcSendFromModal(btn) {
+  const ctx = btn.closest('.sensor-modal')._hc;
+  if (!ctx) return;
+  const payload = buildHcPayload(ctx.combined, ctx.kind, ctx.filename);
+  if (payload.error) { showToast('Health Connect : ' + payload.error); return; }
+  log(`Health Connect : envoi ${payload.kind} ${new Date(payload.start).toISOString()} (${payload.segments.length} segments)`);
+  hcOpenBridge(payload);
 }
 
 loadProgram().then(init);
