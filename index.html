@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T05:07:17Z';</script>
+<script>const APP_BUILD = '2026-10-01T05:11:02Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2462,6 +2462,8 @@ function renderCcKpiHtml(combined, filename) {
     <div style="font-size:13px;opacity:.85;">Niveau ${level} — FC moyenne sur ${fmtMinSec(cc.swimS || (cc.winEndS - cc.winStartS))} de nage (${fmtMinSec(cc.winStartS)} → ${fmtMinSec(cc.winEndS)})</div>
     <div style="font-size:34px;font-weight:900;margin:2px 0;">${hr} bpm</div>
     <div style="font-size:12px;opacity:.9;">${line2}</div></div>`;
+  const totalStrokes = (combined.analysis.swimSegments || []).reduce((a, sg) => a + sg.reps, 0);
+  if (totalStrokes) html += `<div style="font-size:12px;color:var(--muted);text-align:center;margin-top:6px;">${totalStrokes} mouvements au total</div>`;
   // mini-courbe des séances à ce niveau
   const series = prev.slice(-9).map(e => e.summary.ccHr).concat([cc.avgHr]);
   if (series.length >= 2) {
