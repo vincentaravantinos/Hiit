@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T12:29:45Z';</script>
+<script>const APP_BUILD = '2026-10-01T13:31:29Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -178,6 +178,12 @@ body {
     <div class="log-btn-row">
       <button class="log-btn active" id="log-btn-intense" onclick="logWorkout('I')">✓ HIIT / Rugby</button>
       <button class="log-btn recup-active" id="log-btn-recup" onclick="logWorkout('R')">✓ Récup (vélo / natation)</button>
+    </div>
+    <div id="rugby-block" style="margin:4px 0 18px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface2);text-align:center;">
+      <div style="font-size:15px;font-weight:bold;margin-bottom:4px;">🏉 Rugby — séance libre</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:12px;">FC seule, enregistrée dans le capteur. Le téléphone peut rester au vestiaire.</div>
+      <div id="rugby-status" style="font-size:13px;color:var(--muted);margin-bottom:10px;min-height:18px;"></div>
+      <button id="rugby-btn" onclick="rugbyPromptThenStart(this)" style="padding:16px;font-size:15px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LE RUGBY</button>
     </div>
     <div class="streaks-title">Top 3 streaks</div>
     <div id="top-streaks"></div>
@@ -394,9 +400,9 @@ function renderDashboard(){
     const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
     cell.append(dot,lbl);
     if(histEntries.length){
-      const hasHiit=histEntries.some(e=>e.type==='hiit'),hasSwim=histEntries.some(e=>e.type==='swim');
+      const hasHiit=histEntries.some(e=>e.type==='hiit'),hasSwim=histEntries.some(e=>e.type==='swim'),hasRugby=histEntries.some(e=>e.type==='rugby');
       const badge=document.createElement('div');
-      badge.textContent=hasHiit&&hasSwim?'📊🏊':hasSwim?'🏊':'📊';
+      badge.textContent=(hasHiit?'📊':'')+(hasSwim?'🏊':'')+(hasRugby?'🏉':'');
       badge.style.cssText='position:absolute;top:-4px;right:2px;font-size:11px;pointer-events:none;';
       cell.appendChild(badge);
     }
@@ -552,7 +558,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();rugbyRestoreUi();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -1125,8 +1131,8 @@ async function connectPmd() {
   await withTimeout(dataChar.startNotifications(), 15000, 'startNotifications(DATA)');
 }
 
-async function startAllRecordings() {
-  for (const t of REC_TYPES) {
+async function startAllRecordings(types = REC_TYPES) {
+  for (const t of types) {
     const cmd = new Uint8Array([0x02, t.typeByte, ...t.settings]);
     const respPromise = waitForControlResponse();
     await controlChar.writeValue(cmd);
@@ -1135,8 +1141,8 @@ async function startAllRecordings() {
     log(`  ${t.name}: enregistrement demarre (erreur=0)`);
   }
 }
-async function stopAllRecordings() {
-  for (const t of REC_TYPES) {
+async function stopAllRecordings(types = REC_TYPES) {
+  for (const t of types) {
     const cmd = new Uint8Array([0x03, t.typeByte & 0x7F]);
     const respPromise = waitForControlResponse();
     await controlChar.writeValue(cmd);
@@ -1348,7 +1354,7 @@ function sensorOnPhaseChange() {
   sensorSavePending();
 }
 
-async function retrieveAllSensorData(baseline, maxAttempts = 5) {
+async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES) {
   // Shared by the Timer and Swim flows: reconnect (with retries), stop recording,
   // list, diff against the baseline, download and decode every new file. Returns
   // {ok, combined} — combined.phaseLog is left null; callers fill in what's specific
@@ -1362,7 +1368,7 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5) {
         await connectPmd();
         pftpMtuChar = null;
       }
-      await stopAllRecordings();
+      await stopAllRecordings(types);
       await pftpEnsureReady();
       const current = await listAllRecordings();
       newRecordings = current.filter(r => !baseline.has(r.path));
@@ -1520,13 +1526,18 @@ function buildSessionSummary(combined, type) {
       summary.ccHr = combined.analysis.cc.avgHr;
     }
     return summary;
+  } else if (type === 'rugby') {
+    const vals = (combined.hr && combined.hr.samples ? combined.hr.samples : []).map(s => s.hr).filter(v => v > 0);
+    const summary = { durationMin: Math.round((combined.durationS || 0) / 60) };
+    if (vals.length) { summary.avgHr = Math.round(vals.reduce((a,b)=>a+b,0)/vals.length); summary.maxHr = Math.max(...vals); }
+    return summary;
   }
   return null;
 }
 
 const HISTORY_INDEX_KEY = 'hiitHistoryIndex';
 function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
-  const type = prefix === 'natation_' ? 'swim' : 'hiit';
+  const type = prefix === 'natation_' ? 'swim' : prefix === 'rugby_' ? 'rugby' : 'hiit';
   const date = todayStr();
   const summary = buildSessionSummary(combined, type);
   let index = [];
@@ -1553,7 +1564,7 @@ function showDayActionMenu(dstr, histEntries, entry) {
     const btn = document.createElement('button');
     btn.className = 'btn-connect';
     btn.style.marginBottom = '8px';
-    btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : '📊 Voir le HIIT';
+    btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : e.type === 'rugby' ? '🏉 Voir le rugby' : '📊 Voir le HIIT';
     btn.onclick = () => { modal.remove(); openHistoryEntry(e); };
     box.appendChild(btn);
   });
@@ -1616,6 +1627,8 @@ async function openHistoryEntry(entry) {
     const s = entry.summary;
     const detail = s ? (entry.type === 'swim'
       ? `${s.totalReps} mouvements sur ${s.segments} segment(s) (${s.strokes.join(', ')})`
+      : entry.type === 'rugby'
+      ? `Rugby ${s.durationMin} min${s.avgHr ? `, FC moy. ${s.avgHr} bpm, max ${s.maxHr}` : ''}`
       : `${s.totalReps} répétitions au total sur ${s.exerciseCount} exercice(s)`)
       : 'Résumé non disponible.';
     showToast('📥 Séance locale uniquement — ' + detail);
@@ -1626,6 +1639,7 @@ async function openHistoryEntry(entry) {
   try {
     const combined = await fetchSessionFile(entry.filename, token);
     if (entry.type === 'swim') showSwimResultsModal(combined, entry.filename);
+    else if (entry.type === 'rugby') showRugbyResultsModal(combined, entry.filename);
     else showSessionResultsModal(combined, entry.filename);
   } catch (err) {
     logError('Échec réouverture séance ' + entry.filename, err);
@@ -1647,11 +1661,12 @@ async function syncHistoryIndexFromGithub(token) {
       let prefix, rest;
       if (f.name.startsWith('natation_')) { prefix = 'natation_'; rest = f.name.slice('natation_'.length); }
       else if (f.name.startsWith('seance_')) { prefix = 'seance_'; rest = f.name.slice('seance_'.length); }
+      else if (f.name.startsWith('rugby_')) { prefix = 'rugby_'; rest = f.name.slice('rugby_'.length); }
       else continue;
       const date = rest.slice(0, 10);
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
       if (index.some(e => e.filename === f.name)) continue;
-      index.push({ date, type: prefix === 'natation_' ? 'swim' : 'hiit', filename: f.name, savedToGithub: true, summary: null });
+      index.push({ date, type: prefix === 'natation_' ? 'swim' : prefix === 'rugby_' ? 'rugby' : 'hiit', filename: f.name, savedToGithub: true, summary: null });
       added++;
     }
     if (index.length > 200) index = index.slice(-200);
@@ -3010,6 +3025,21 @@ function buildHcPayload(combined, kind, filename) {
       kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
   }
 
+  if (kind === 'rugby') {
+    const start = combined.startedAtMs || (hcParseFilenameMs(filename) ? hcParseFilenameMs(filename) - (combined.durationS || 0) * 1000 : null);
+    const durMs = Math.round((combined.durationS || 0) * 1000);
+    if (!start || !durMs) return { error: 'Heure de début de la séance introuvable' };
+    const hr = hcHrBlock(combined, start);
+    const vals = hr ? hr.bpm.filter(b => b > 0) : [];
+    const notes = [
+      vals.length ? `FC moyenne ${Math.round(vals.reduce((a,b)=>a+b,0)/vals.length)} bpm, max ${Math.max(...vals)} bpm` : null,
+      `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
+    ].filter(Boolean).join('\n');
+    return { v: 1, kind: 'rugby', id: String(start), start, end: start + durMs,
+      title: `Rugby ${Math.round(durMs/60000)} min`, notes, segments: [], hr,
+      kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
+  }
+
   const log = combined.phaseLog || [];
   if (!log.length) return { error: 'Pas de déroulé de séance' };
   const t0 = log[0].atMs != null ? log[0].atMs - log[0].tElapsedStart*1000 : hcParseSensorUtc(combined.acc && combined.acc.startTimeStr);
@@ -3079,6 +3109,161 @@ function hcCloseModal(btn) {
   hcMarkSent(payload.id);
   log(`Health Connect : envoi ${payload.kind} ${new Date(payload.start).toISOString()} (${payload.segments.length} segments)`);
   hcOpenBridge(payload);
+}
+
+// ======= Rugby : séance libre, FC seule enregistrée hors-ligne dans le capteur =======
+// Même mécanique que la natation (connexion → enregistrement interne → déconnexion →
+// reconnexion et récupération à l'arrêt), mais HR uniquement : 2 h d'ACC/GYRO/MAG à
+// haute fréquence n'apporteraient rien ici et chargeraient inutilement le capteur.
+// L'état est persisté : si Android tue l'onglet pendant l'entraînement, l'app rouvre
+// en « rugby en cours » et ARRÊTER retrouve le capteur (un choix dans la liste
+// Bluetooth si getDevices() est indisponible).
+const RUGBY_TYPES = REC_TYPES.filter(t => t.name === 'HR');
+const RUGBY_LS = 'hiitRugbyPending';
+const RUGBY_MIN_S = 20 * 60; // en dessous, la séance n'entre pas dans le suivi
+let rugbyTimerInterval = null;
+
+function rugbyPending() { try { return JSON.parse(localStorage.getItem(RUGBY_LS) || 'null'); } catch (e) { return null; } }
+
+function rugbyResetButton() {
+  const btn = document.getElementById('rugby-btn');
+  if (!btn) return;
+  clearInterval(rugbyTimerInterval);
+  btn.textContent = 'DÉMARRER LE RUGBY';
+  btn.style.background = 'var(--accent)'; btn.style.color = '#111';
+  btn.disabled = false;
+  btn.onclick = () => rugbyPromptThenStart(btn);
+}
+
+function rugbyShowRunning(startedAtMs) {
+  const btn = document.getElementById('rugby-btn');
+  const statusEl = document.getElementById('rugby-status');
+  btn.textContent = 'ARRÊTER LE RUGBY';
+  btn.style.background = '#c0392b'; btn.style.color = '#fff';
+  btn.disabled = false;
+  btn.onclick = () => rugbyStop(btn);
+  clearInterval(rugbyTimerInterval);
+  const tick = () => {
+    const s = Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
+    const hh = Math.floor(s/3600), mm = String(Math.floor(s/60)%60).padStart(2,'0'), ss = String(s%60).padStart(2,'0');
+    statusEl.textContent = `Enregistrement FC en cours... ${hh}:${mm}:${ss}`;
+  };
+  tick();
+  rugbyTimerInterval = setInterval(tick, 1000);
+}
+
+function rugbyRestoreUi() {
+  const p = rugbyPending();
+  if (p && p.startedAtMs) rugbyShowRunning(p.startedAtMs);
+}
+
+function rugbyPromptThenStart(btn) {
+  sensorPendingAction = rugbyActuallyStart;
+  sensorPromptThenStart(btn);
+}
+
+async function rugbyActuallyStart() {
+  sensorPendingAction = null;
+  const statusEl = document.getElementById('rugby-status');
+  if (!sensorActive) {
+    statusEl.textContent = 'Capteur non connecté — rugby non démarré.';
+    rugbyResetButton();
+    return;
+  }
+  const btn = document.getElementById('rugby-btn');
+  btn.disabled = true; btn.textContent = 'DÉMARRAGE...';
+  try {
+    statusEl.textContent = 'Démarrage de l\'enregistrement FC...';
+    await pftpEnsureReady();
+    const baseline = Array.from(new Set((await listAllRecordings()).map(r => r.path)));
+    await startAllRecordings(RUGBY_TYPES);
+    const startedAtMs = Date.now();
+    localStorage.setItem(RUGBY_LS, JSON.stringify({ deviceId: device.id, baseline, startedAtMs }));
+    device.gatt.disconnect();
+    log('Rugby : enregistrement FC démarré, capteur déconnecté.');
+    rugbyShowRunning(startedAtMs);
+    showToast('🏉 Enregistrement lancé — bon entraînement !');
+  } catch (err) {
+    logError('Échec démarrage rugby', err);
+    statusEl.textContent = 'Échec du démarrage — réessaie.';
+    rugbyResetButton();
+  }
+}
+
+async function rugbyStop(btn) {
+  const p = rugbyPending();
+  if (!p) { rugbyResetButton(); return; }
+  const statusEl = document.getElementById('rugby-status');
+  btn.disabled = true;
+  try {
+    if (!device) {
+      // Onglet rechargé pendant l'entraînement : on retrouve le capteur. requestDevice doit
+      // être le premier await après le tap (geste utilisateur exigé par Chrome).
+      let found = null;
+      if (typeof navigator.bluetooth?.getDevices === 'function') {
+        const known = await navigator.bluetooth.getDevices().catch(() => []);
+        found = known.find(d => d.id === p.deviceId) || known[0] || null;
+      }
+      device = found || await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'Polar' }],
+        optionalServices: [PMD_SERVICE, PFTP_SERVICE]
+      });
+    }
+  } catch (err) {
+    logError('Rugby : capteur non retrouvé', err);
+    statusEl.textContent = 'Capteur non sélectionné — réessaie (l\'enregistrement continue).';
+    btn.disabled = false;
+    return;
+  }
+  clearInterval(rugbyTimerInterval);
+  const endedAtMs = Date.now();
+  const durationS = (endedAtMs - p.startedAtMs) / 1000;
+  btn.textContent = 'RÉCUPÉRATION...';
+  statusEl.textContent = 'Récupération des données FC...';
+  const { ok, combined } = await retrieveAllSensorData(new Set(p.baseline), 5, RUGBY_TYPES);
+  if (!ok) {
+    showToast('⚠️ Récupération échouée — les données restent sur le capteur, réessaie');
+    rugbyShowRunning(p.startedAtMs);
+    statusEl.textContent = 'Récupération échouée — rapproche le capteur et réappuie sur ARRÊTER.';
+    return;
+  }
+  combined.activity = 'rugby';
+  combined.startedAtMs = p.startedAtMs;
+  combined.endedAtMs = endedAtMs;
+  combined.durationS = durationS;
+  localStorage.removeItem(RUGBY_LS);
+  rugbyResetButton();
+  statusEl.textContent = '';
+  showRugbyResultsModal(combined);
+  if (durationS >= RUGBY_MIN_S) {
+    const t = todayStr(), cur = getEntry(t);
+    if (cur && cur.type === 'R') { cur.type = 'I'; S.set(KEYS.workouts, workouts); renderDashboard(); }
+    else logWorkout('I', true);
+    showToast('🏉 Rugby enregistré en Intense');
+  } else {
+    log(`Rugby de ${Math.round(durationS/60)} min — sous les 20 min, non compté dans le suivi.`);
+  }
+  await saveSessionData(combined, 'rugby_');
+}
+
+function showRugbyResultsModal(combined, filename) {
+  const modal = document.createElement('div');
+  modal.className = 'sensor-modal-backdrop';
+  modal.style.display = 'flex';
+  const box = document.createElement('div');
+  box.className = 'sensor-modal';
+  box.style.cssText = 'max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;';
+  const dur = combined.durationS ? fmtMinSec(combined.durationS) : '?';
+  const zonesHtml = renderHrZonesHtml(combined, null, { focus: 'high', scope: 'de la séance' });
+  box.innerHTML = `
+    <h3 style="text-align:center;">RÉSULTATS RUGBY</h3>
+    <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:14px;">Durée ${dur}</p>
+    ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
+    <div style="margin-bottom:16px;">${renderHrChartSvg(combined.hr ? combined.hr.samples : null)}</div>
+    <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+  box._hc = { combined, kind: 'rugby', filename };
+  modal.appendChild(box);
+  document.body.appendChild(modal);
 }
 
 loadProgram().then(init);
