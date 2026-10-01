@@ -62,10 +62,11 @@ object HealthWriter {
         val version = System.currentTimeMillis()
         val sensor = Device(type = Device.TYPE_FITNESS_BAND, manufacturer = "Polar", model = "Verity Sense")
 
-        val exerciseType = if (p.kind == "swim")
-            ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL
-        else
-            ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING
+        val exerciseType = when (p.kind) {
+            "swim" -> ExerciseSessionRecord.EXERCISE_TYPE_SWIMMING_POOL
+            "rugby" -> ExerciseSessionRecord.EXERCISE_TYPE_RUGBY
+            else -> ExerciseSessionRecord.EXERCISE_TYPE_HIGH_INTENSITY_INTERVAL_TRAINING
+        }
 
         // Segments : triés, sans chevauchement, bornés à la séance.
         var fallback = 0
