@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T04:48:51Z';</script>
+<script>const APP_BUILD = '2026-10-01T05:00:16Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2337,11 +2337,13 @@ async function swimRetrieveAndFinish(baseline, durationS, mode = 'free', level =
 
 // ======= Zones FC et KPI contre-courant =======
 const HR_ZONES = [
-  { name: 'Z1', lo: 0.50, hi: 0.60, color: '#95a5a6' },
-  { name: 'Z2', lo: 0.60, hi: 0.70, color: '#3498db' },
-  { name: 'Z3', lo: 0.70, hi: 0.80, color: '#2ecc71' },
-  { name: 'Z4', lo: 0.80, hi: 0.90, color: '#f39c12' },
-  { name: 'Z5', lo: 0.90, hi: 1.01, color: '#e74c3c' },
+  // Une seule teinte, du foncé (faible intensité) au clair (forte intensité) :
+  // les zones informent, elles ne jugent pas (pas de vert/rouge ici).
+  { name: 'Z1', lo: 0.50, hi: 0.60, color: '#2e4a63' },
+  { name: 'Z2', lo: 0.60, hi: 0.70, color: '#3d6a8f' },
+  { name: 'Z3', lo: 0.70, hi: 0.80, color: '#5a8fbb' },
+  { name: 'Z4', lo: 0.80, hi: 0.90, color: '#8bb8dc' },
+  { name: 'Z5', lo: 0.90, hi: 1.01, color: '#c9e2f5' },
 ];
 const CC_WARMUP_S = 300;   // FC ignorée les 5 premières minutes de nage
 const CC_MIN_WINDOW_S = 300;
@@ -2403,7 +2405,7 @@ function renderHrZonesHtml(combined, segments, opts = {}) {
   const total = pts.length;
   const pct = n => Math.round(100*n/total);
   let bar = '<div style="display:flex;height:14px;border-radius:7px;overflow:hidden;margin:8px 0 10px;">';
-  if (below) bar += `<div style="width:${100*below/total}%;background:#555;"></div>`;
+  if (below) bar += `<div style="width:${100*below/total}%;background:#24313d;"></div>`;
   HR_ZONES.forEach((z,i) => { if (counts[i]) bar += `<div style="width:${100*counts[i]/total}%;background:${z.color};"></div>`; });
   bar += '</div>';
   let rows = '<table style="width:100%;border-collapse:collapse;font-size:12px;">';
@@ -2414,7 +2416,7 @@ function renderHrZonesHtml(combined, segments, opts = {}) {
     const strong = focused ? 'font-weight:bold;color:var(--text);' : 'color:var(--muted);';
     rows += `<tr style="${strong}"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${z.color};margin-right:6px;"></span>${z.name}</td><td>${lo}-${hi} bpm</td><td style="text-align:right;">${fmtMinSec(counts[i]*dt)}</td><td style="text-align:right;width:44px;">${pct(counts[i])} %</td></tr>`;
   });
-  if (below) rows += `<tr style="color:var(--muted);"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#555;margin-right:6px;"></span>&lt; Z1</td><td>&lt; ${Math.round(0.5*hrMax)} bpm</td><td style="text-align:right;">${fmtMinSec(below*dt)}</td><td style="text-align:right;">${pct(below)} %</td></tr>`;
+  if (below) rows += `<tr style="color:var(--muted);"><td style="padding:2px 0;"><span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#24313d;margin-right:6px;"></span>&lt; Z1</td><td>&lt; ${Math.round(0.5*hrMax)} bpm</td><td style="text-align:right;">${fmtMinSec(below*dt)}</td><td style="text-align:right;">${pct(below)} %</td></tr>`;
   rows += '</table>';
   const scope = opts.scope || (w ? 'du temps de nage' : 'de l\'enregistrement');
   const headline = opts.focus === 'high'
