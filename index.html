@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T10:37:07Z';</script>
+<script>const APP_BUILD = '2026-10-01T12:06:10Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2224,7 +2224,7 @@ function showSessionResultsModal(combined, filename) {
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
       ${hcButtonHtml()}
-      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
   box._hc = { combined, kind: 'hiit', filename };
 
@@ -2706,7 +2706,7 @@ function showSwimResultsModal(combined, filename) {
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <div style="margin-bottom:16px;">${swimHtml}</div>
       ${hcButtonHtml()}
-      <button onclick="this.closest('.sensor-modal-backdrop').remove()" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
   box._hc = { combined, kind: 'swim', filename };
 
@@ -2851,9 +2851,20 @@ function hcOpenBridge(payload) {
   location.href = `intent://write${q}#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
 }
 
-function hcSendFromModal(btn) {
-  const ctx = btn.closest('.sensor-modal')._hc;
+// « Fermer » sur les résultats d'une séance qui vient de se terminer = envoi automatique vers
+// Health Connect (Chrome exige un geste utilisateur pour ouvrir le pont : ce tap en sert).
+// Depuis l'historique (filename connu), Fermer ferme seulement ; le bouton ❤️ reste là pour ça.
+function hcCloseModal(btn) {
+  const modal = btn.closest('.sensor-modal');
+  const ctx = modal && modal._hc;
+  btn.closest('.sensor-modal-backdrop').remove();
+  if (ctx && !ctx.filename && !ctx.sent) hcSendFromModal(null, ctx);
+}
+
+function hcSendFromModal(btn, ctxArg) {
+  const ctx = ctxArg || btn.closest('.sensor-modal')._hc;
   if (!ctx) return;
+  ctx.sent = true;
   const payload = buildHcPayload(ctx.combined, ctx.kind, ctx.filename);
   if (payload.error) { showToast('Health Connect : ' + payload.error); return; }
   log(`Health Connect : envoi ${payload.kind} ${new Date(payload.start).toISOString()} (${payload.segments.length} segments)`);
