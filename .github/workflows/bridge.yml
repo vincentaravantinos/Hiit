@@ -1,0 +1,41 @@
+name: HIIT Bridge APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['android-bridge/**', '.github/workflows/bridge.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bridge-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: android-bridge
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build release APK
+        working-directory: android-bridge
+        run: gradle assembleRelease --no-daemon --stacktrace
+      - run: cp android-bridge/app/build/outputs/apk/release/app-release.apk hiit-bridge.apk
+      - name: Publish to release "bridge-latest"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: bridge-latest
+          name: HIIT Bridge (dernière version)
+          body: "APK du pont Health Connect, reconstruit automatiquement à chaque modification de android-bridge/. Build #${{ github.run_number }}."
+          files: hiit-bridge.apk
+          make_latest: false
