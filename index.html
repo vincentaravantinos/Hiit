@@ -143,7 +143,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T12:11:10Z';</script>
+<script>const APP_BUILD = '2026-10-01T12:29:45Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -174,6 +174,7 @@ body {
       <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak actuel</div></div>
       <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total séances</div></div>
     </div>
+    <div id="health-card" style="display:none;margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface2);"></div>
     <div class="log-btn-row">
       <button class="log-btn active" id="log-btn-intense" onclick="logWorkout('I')">✓ HIIT / Rugby</button>
       <button class="log-btn recup-active" id="log-btn-recup" onclick="logWorkout('R')">✓ Récup (vélo / natation)</button>
@@ -267,9 +268,19 @@ body {
       </div>
     </div>
     <div class="settings-section">
+      <div class="settings-label">Chiffrement des données</div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div class="setting-sub">Séances et données santé sont chiffrées avant d'aller sur GitHub. La clé ne vit que sur ce téléphone (et dans HIIT Bridge) : <b>sans elle, l'historique est illisible</b>. Garde-en une copie dans ton gestionnaire de mots de passe.</div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="copyDataKey()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Copier la clé</button>
+          <button onclick="importDataKey()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Importer une clé</button>
+        </div>
+      </div>
+    </div>
+    <div class="settings-section">
       <div class="settings-label">Health Connect</div>
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
-        <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Envoi automatique en fermant l'écran de résultats d'une séance (une seule fois par séance).</div>
+        <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Envoi automatique en fermant l'écran de résultats d'une séance (une seule fois par séance). En retour, sommeil, HRV, FC de repos et poids alimentent la « Forme du jour » de l'accueil.</div>
         <div style="display:flex;gap:8px;">
           <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
           <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Autoriser / tester</button>
@@ -541,7 +552,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);setTimeout(async()=>{await prefillLoadsFromLastSession();backfillHiitSummaries();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)checkForUpdate();});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();tryResumePendingSensorSession();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -1597,7 +1608,7 @@ async function fetchSessionFile(filename, token) {
   } else {
     throw new Error('Réponse GitHub sans contenu ni URL de téléchargement');
   }
-  return combined;
+  return await decryptMaybe(combined);
 }
 
 async function openHistoryEntry(entry) {
@@ -1713,7 +1724,7 @@ async function saveSessionData(combined, prefix = 'seance_') {
   }
   try {
     const path = 'data/sessions/' + filename;
-    const contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(combined, null, 2))));
+    const contentB64 = btoa(await encryptJson(combined));
     const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
       method: 'PUT',
       headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
@@ -2185,7 +2196,7 @@ async function updateExistingSessionFile(filename, combined) {
     const metaResp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, { headers: { 'Authorization': 'token ' + token } });
     if (!metaResp.ok) throw new Error('lecture SHA a répondu ' + metaResp.status);
     const meta = await metaResp.json();
-    const contentB64 = btoa(unescape(encodeURIComponent(JSON.stringify(combined))));
+    const contentB64 = btoa(await encryptJson(combined));
     const putResp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
       method: 'PUT',
       headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
@@ -2725,6 +2736,199 @@ function showSwimResultsModal(combined, filename) {
   }, 30);
 }
 
+// ======= Chiffrement des données (gzip + AES-256-GCM) =======
+// Tout ce qui part sur GitHub (repo public) est chiffré : séances et données santé.
+// Enveloppe : {"enc":"aes-256-gcm+gzip","v":1,"iv":b64,"ct":b64} — même format côté
+// HIIT Bridge (Kotlin) et analysis/decrypt.py. Les anciens fichiers en clair restent lisibles.
+const DATA_KEY_LS = 'hiitDataKey';
+const ENC_TAG = 'aes-256-gcm+gzip';
+function b64Encode(bytes) {
+  let s = ''; const CH = 0x8000;
+  for (let i = 0; i < bytes.length; i += CH) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CH));
+  return btoa(s);
+}
+function b64Decode(str) {
+  const bin = atob(str); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function getDataKeyB64() {
+  let k = localStorage.getItem(DATA_KEY_LS);
+  if (!k) { k = b64Encode(crypto.getRandomValues(new Uint8Array(32))); localStorage.setItem(DATA_KEY_LS, k); }
+  return k;
+}
+let _dataKeyCache = null;
+async function dataCryptoKey() {
+  const b = getDataKeyB64();
+  if (_dataKeyCache && _dataKeyCache.b === b) return _dataKeyCache.k;
+  const k = await crypto.subtle.importKey('raw', b64Decode(b), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  _dataKeyCache = { b, k };
+  return k;
+}
+async function gzipBytes(bytes) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+}
+async function gunzipBytes(bytes) {
+  return new Uint8Array(await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+}
+async function encryptJson(obj) {
+  const plain = await gzipBytes(new TextEncoder().encode(JSON.stringify(obj)));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await dataCryptoKey(), plain));
+  return JSON.stringify({ enc: ENC_TAG, v: 1, iv: b64Encode(iv), ct: b64Encode(ct) });
+}
+async function decryptMaybe(obj) {
+  if (!obj || obj.enc !== ENC_TAG) return obj;
+  let pt;
+  try {
+    pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64Decode(obj.iv) }, await dataCryptoKey(), b64Decode(obj.ct));
+  } catch (e) {
+    throw new Error('Clé de chiffrement incorrecte (Réglages → Importer une clé)');
+  }
+  return JSON.parse(new TextDecoder('utf-8').decode(await gunzipBytes(new Uint8Array(pt))));
+}
+async function copyDataKey() {
+  const k = getDataKeyB64();
+  try { await navigator.clipboard.writeText(k); showToast('🔑 Clé copiée — colle-la dans ton gestionnaire de mots de passe'); }
+  catch (e) { prompt('Clé de chiffrement (à conserver) :', k); }
+}
+function importDataKey() {
+  const k = (prompt('Colle la clé de chiffrement :') || '').trim();
+  if (!k) return;
+  try { if (b64Decode(k).length !== 32) throw 0; } catch (e) { showToast('⚠️ Clé invalide'); return; }
+  if (!confirm('Remplacer la clé actuelle ? Les données chiffrées avec l\'ancienne clé deviendront illisibles sur cet appareil.')) return;
+  localStorage.setItem(DATA_KEY_LS, k); _dataKeyCache = null;
+  showToast('🔑 Clé importée'); refreshHealthData(true);
+}
+
+// Chiffre en place les anciennes séances encore en clair sur GitHub (une fois pour toutes).
+let encMigrationRunning = false;
+async function encryptExistingSessions() {
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token || encMigrationRunning || localStorage.getItem('hiitEncMigrated') === '1') return;
+  encMigrationRunning = true;
+  let done = 0, failed = 0;
+  try {
+    const resp = await fetch('https://api.github.com/repos/vincentaravantinos/Hiit/contents/data/sessions', { headers: { 'Authorization': 'token ' + token } });
+    if (!resp.ok) throw new Error('liste a répondu ' + resp.status);
+    for (const f of await resp.json()) {
+      if (!f.name.endsWith('.json')) continue;
+      try {
+        let obj;
+        if (f.download_url) {
+          const r = await fetch(f.download_url + (f.download_url.includes('?') ? '&' : '?') + 't=' + Date.now(), { cache: 'no-store' });
+          if (!r.ok) throw new Error('téléchargement ' + r.status);
+          obj = await r.json();
+        } else { obj = await fetchSessionFile(f.name, token); }
+        if (obj && obj.enc === ENC_TAG) continue;
+        const put = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${f.path}`, {
+          method: 'PUT',
+          headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'Séance chiffrée: ' + f.name, content: btoa(await encryptJson(obj)), sha: f.sha })
+        });
+        if (!put.ok) throw new Error('écriture ' + put.status);
+        done++; log('Séance chiffrée: ' + f.name);
+      } catch (err) { failed++; logError('Échec chiffrement ' + f.name, err); }
+    }
+    if (!failed) localStorage.setItem('hiitEncMigrated', '1');
+    if (done) showToast(`🔒 ${done} séance(s) chiffrée(s) sur GitHub`);
+  } catch (err) {
+    logError('Échec migration chiffrement', err);
+  } finally { encMigrationRunning = false; }
+}
+
+// ======= Forme du jour (sommeil / HRV / FC de repos lus dans Health Connect par HIIT Bridge) =======
+const HEALTH_PATH = 'data/health/health.json';
+const HEALTH_CACHE_LS = 'hiitHealthCache';
+let healthLastFetch = 0;
+function healthData() { try { return JSON.parse(localStorage.getItem(HEALTH_CACHE_LS) || 'null'); } catch (e) { return null; } }
+async function refreshHealthData(force = false) {
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token || (!force && Date.now() - healthLastFetch < 10 * 60 * 1000)) return;
+  healthLastFetch = Date.now();
+  try {
+    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${HEALTH_PATH}?t=${Date.now()}`, { headers: { 'Authorization': 'token ' + token }, cache: 'no-store' });
+    if (resp.status === 404) { renderHealthCard(); return; }
+    if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
+    const meta = await resp.json();
+    const env = JSON.parse(new TextDecoder('utf-8').decode(b64Decode(meta.content.replace(/\s/g, ''))));
+    const h = await decryptMaybe(env);
+    localStorage.setItem(HEALTH_CACHE_LS, JSON.stringify(h));
+    renderHealthCard();
+  } catch (err) { logError('Lecture forme du jour', err); }
+}
+function hcCurrentWeight() {
+  const h = healthData();
+  if (h && h.days) {
+    const limit = ds(new Date(Date.now() - 30 * 864e5));
+    const k = Object.keys(h.days).filter(d => d >= limit && h.days[d].weightKg).sort().pop();
+    if (k) return h.days[k].weightKg;
+  }
+  return HC_PROFILE.weightKg;
+}
+function healthStats(vals) {
+  if (vals.length < 5) return null;
+  const m = vals.reduce((a, b) => a + b, 0) / vals.length;
+  const sd = Math.sqrt(vals.reduce((a, b) => a + (b - m) ** 2, 0) / vals.length);
+  return { m, sd };
+}
+function healthAssessment(h) {
+  const days = (h && h.days) || {};
+  const today = todayStr();
+  const d = days[today];
+  const prior = Object.keys(days).filter(k => k < today).sort().slice(-14).map(k => days[k]);
+  const hrvOf = x => x.hrv ?? x.hrvDay ?? null;
+  const rhrOf = x => x.rhr ?? x.nightHrMin ?? null;
+  const out = { metrics: [], points: 0, hasToday: !!(d && (d.sleep || hrvOf(d) != null || rhrOf(d) != null)) };
+  if (!out.hasToday) return out;
+  const pick = (f) => healthStats(prior.map(f).filter(v => v != null));
+  const fmtH = m => `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, '0')}`;
+
+  if (d.sleep) {
+    const v = d.sleep.totalMin, b = pick(x => x.sleep ? x.sleep.totalMin : null);
+    let st = 'ok';
+    if (v < 360) st = 'bad'; else if (v < 405 || (b && v < b.m - 60)) st = 'meh';
+    out.metrics.push({ label: 'Sommeil', val: fmtH(v), base: b ? fmtH(b.m) : null, st });
+  }
+  const hv = hrvOf(d);
+  if (hv != null) {
+    const b = pick(hrvOf); let st = 'ok';
+    if (b) { const gap = b.m - hv; if (gap > Math.max(b.sd, 0.1 * b.m)) st = 'bad'; else if (gap > Math.max(b.sd / 2, 0.05 * b.m)) st = 'meh'; }
+    out.metrics.push({ label: 'HRV', val: `${Math.round(hv)} ms`, base: b ? `${Math.round(b.m)}` : null, st });
+  }
+  const rv = rhrOf(d);
+  if (rv != null) {
+    const b = pick(rhrOf); let st = 'ok';
+    if (b) { const gap = rv - b.m; if (gap >= Math.max(b.sd, 3)) st = 'bad'; else if (gap >= Math.max(b.sd / 2, 1.5)) st = 'meh'; }
+    out.metrics.push({ label: d.rhr != null ? 'FC repos' : 'FC nuit (min)', val: `${Math.round(rv)} bpm`, base: b ? `${Math.round(b.m)}` : null, st });
+  }
+  out.points = out.metrics.reduce((a, m) => a + (m.st === 'bad' ? 2 : m.st === 'meh' ? 1 : 0), 0);
+  return out;
+}
+function renderHealthCard() {
+  const el = document.getElementById('health-card');
+  if (!el) return;
+  const h = healthData();
+  if (!h || !h.days) { el.style.display = 'none'; return; }
+  el.style.display = 'block';
+  const a = healthAssessment(h);
+  const color = { ok: 'var(--green)', meh: '#d9b45a', bad: '#d77a6b' };
+  let reco;
+  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore remontée (Oura → Health Connect → HIIT Bridge, toutes les 3 h environ).</div>`;
+  else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">Récup conseillée</div><div style="font-size:13px;color:var(--muted);">Vélo ou natation tranquille aujourd'hui.</div>`;
+  else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">Intense possible, sans forcer</div><div style="font-size:13px;color:var(--muted);">Un signal en retrait : écoute tes sensations à l'échauffement.</div>`;
+  else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">Feu vert pour l'Intense</div>`;
+  const chips = a.metrics.map(m => `<div style="flex:1;min-width:30%;padding:6px 8px;border-radius:8px;border:1px solid var(--border2);">
+      <div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">${m.label}</div>
+      <div style="font-size:15px;font-weight:700;color:${color[m.st]};">${m.val}</div>
+      ${m.base ? `<div style="font-size:11px;color:var(--muted);">moy. 14 j : ${m.base}</div>` : ''}</div>`).join('');
+  const upd = h.updatedAt ? new Date(h.updatedAt).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  el.innerHTML = `<div style="font-size:12px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px;">Forme du jour</div>
+    ${reco}
+    ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${chips}</div>` : ''}
+    <div style="font-size:11px;color:var(--muted);margin-top:8px;">Données santé du ${upd}</div>`;
+}
+
 // ======= Health Connect (via l'app Android « HIIT Bridge », android-bridge/ dans le repo) =======
 // Une PWA n'a pas accès à Health Connect : on passe la séance résumée (~10 ko) à l'app native
 // par un lien intent://. Le pont écrit séance + segments (reps) + FC + calories, puis se ferme.
@@ -2761,7 +2965,8 @@ function hcSegType(name, type) {
 
 function hcActiveKcal(bpmList, dtS) {
   // Keytel et al. 2005 (homme), moins le métabolisme de base (Mifflin) : estimation, pas une mesure.
-  const { weightKg: w, ageY: a, heightCm: h } = HC_PROFILE;
+  const { ageY: a, heightCm: h } = HC_PROFILE;
+  const w = hcCurrentWeight();
   const bmrPerMin = (10*w + 6.25*h - 5*a + 5) / 1440;
   let kcal = 0;
   for (const hr of bpmList) {
@@ -2837,6 +3042,9 @@ function buildHcPayload(combined, kind, filename) {
 
 function hcOpenBridge(payload) {
   let q = '';
+  payload = payload || { v: 1, kind: 'setup' };
+  const token = localStorage.getItem('hiitGithubToken');
+  if (token) payload.cfg = { key: getDataKeyB64(), token, repo: 'vincentaravantinos/Hiit', path: HEALTH_PATH };
   if (payload) {
     const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))))
       .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
