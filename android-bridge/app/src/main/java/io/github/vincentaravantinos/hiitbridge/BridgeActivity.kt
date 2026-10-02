@@ -109,7 +109,7 @@ class BridgeActivity : ComponentActivity() {
                     try {
                         val n = HealthSync.run(this@BridgeActivity)
                         if (setupOnly) msgs += "✓ Forme du jour : $n nuit(s) synchronisée(s)" +
-                            (if (canReadInBackground) ", mise à jour auto toutes les 3 h" else "")
+                            (if (canReadInBackground) ", mise à jour auto à 6h, 7h, 8h, 9h et 10h" else "")
                     } catch (e: Exception) {
                         msgs += "Synchro santé impossible : ${e.message ?: e.javaClass.simpleName}"
                     }

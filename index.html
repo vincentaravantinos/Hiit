@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-01T19:45:32Z';</script>
+<script>const APP_BUILD = '2026-10-02T04:18:31Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2968,7 +2968,7 @@ function renderHealthCard() {
   const a = healthAssessment(h);
   const color = { ok: 'var(--green)', meh: '#d9b45a', bad: '#d77a6b' };
   let reco;
-  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore remontée (Oura → Health Connect → HIIT Bridge, toutes les 3 h environ).</div>`;
+  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore remontée (relevés à 6h, 7h, 8h, 9h et 10h).</div>`;
   else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">Récup conseillée</div><div style="font-size:13px;color:var(--muted);">Vélo ou natation tranquille aujourd'hui.</div>`;
   else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">Intense possible, sans forcer</div><div style="font-size:13px;color:var(--muted);">Un signal en retrait : écoute tes sensations à l'échauffement.</div>`;
   else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">Feu vert pour l'Intense</div>`;
