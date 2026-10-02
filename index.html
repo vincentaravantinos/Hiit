@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-02T04:28:51Z';</script>
+<script>const APP_BUILD = '2026-10-02T05:19:31Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2942,7 +2942,7 @@ function healthAssessment(h) {
     const v = d.sleep.totalMin, b = pick(x => x.sleep ? x.sleep.totalMin : null);
     let st = 'ok';
     if (v < 360) st = 'bad'; else if (v < 405 || (b && v < b.m - 60)) st = 'meh';
-    out.metrics.push({ label: 'Sommeil', val: fmtH(v) + (d.napMin ? ` +${fmtH(d.napMin)}` : ''), base: b ? fmtH(b.m) : null, st });
+    out.metrics.push({ label: 'Sommeil', val: fmtH(v), base: b ? fmtH(b.m) : null, st });
   }
   const hv = hrvOf(d);
   if (hv != null) {

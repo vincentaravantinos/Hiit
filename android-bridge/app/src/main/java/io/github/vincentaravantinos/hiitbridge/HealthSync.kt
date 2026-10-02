@@ -76,15 +76,9 @@ object HealthSync {
         fun day(d: LocalDate) = days.getOrPut(d) { JSONObject() }
 
         // Sommeil : nuit principale = la plus longue session qui se termine ce jour-là.
-        val sleepsByDay = readAll(client, SleepSessionRecord::class, from, to)
+        val sleeps = readAll(client, SleepSessionRecord::class, from, to)
             .groupBy { it.endTime.atZone(zone).toLocalDate() }
-        val sleeps = sleepsByDay.mapValues { (_, l) -> l.maxBy { Duration.between(it.startTime, it.endTime) } }
-        // Siestes = les autres sessions de sommeil du jour (la nuit reste la plus longue).
-        for ((d, l) in sleepsByDay) {
-            val main = sleeps[d]
-            val nap = l.filter { it !== main }.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
-            if (nap >= 10) day(d).put("napMin", nap)
-        }
+            .mapValues { (_, l) -> l.maxBy { Duration.between(it.startTime, it.endTime) } }
         val hrvs = readAll(client, HeartRateVariabilityRmssdRecord::class, from, to)
         for ((d, s) in sleeps) {
             val o = day(d)
