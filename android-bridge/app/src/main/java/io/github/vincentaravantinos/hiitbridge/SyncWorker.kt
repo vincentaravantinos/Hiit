@@ -13,9 +13,10 @@ import java.time.ZoneId
 import java.time.ZonedDateTime
 
 /**
- * Synchro santé en tâche de fond (permission « lecture en arrière-plan ») à heures fixes :
- * 6h, 7h, 8h, 9h et 10h, puis rien jusqu'au lendemain 6h. Chaque passage programme le suivant.
- * Android peut décaler un réveil de quelques minutes (économie d'énergie).
+ * Synchro santé en tâche de fond (permission « lecture en arrière-plan ») : à 6h, puis toutes
+ * les heures jusqu'à ce que la nuit du jour soit captée (Oura l'écrit dans Health Connect à
+ * son propre rythme), au plus tard midi ; ensuite rien jusqu'au lendemain 6h.
+ * Chaque passage programme le suivant. Android peut décaler un réveil de quelques minutes.
  */
 class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
@@ -33,11 +34,11 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
     companion object {
         private const val KEY_SLOT = "slot"
         private const val SLOT_WORK = "health-sync-slot"
-        val SLOT_HOURS = listOf(6, 7, 8, 9, 10)
+        val SLOT_HOURS = (6..12).toList()
         private val net = Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build()
 
-        fun nextSlot(now: ZonedDateTime): ZonedDateTime {
-            for (h in SLOT_HOURS) {
+        fun nextSlot(now: ZonedDateTime, gotToday: Boolean): ZonedDateTime {
+            if (!gotToday) for (h in SLOT_HOURS) {
                 val t = now.toLocalDate().atTime(h, 0).atZone(now.zone)
                 if (t.isAfter(now.plusMinutes(2))) return t
             }
@@ -46,7 +47,7 @@ class SyncWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, 
 
         private fun scheduleNextSlot(ctx: Context, policy: ExistingWorkPolicy) {
             val now = ZonedDateTime.now(ZoneId.systemDefault())
-            val delay = Duration.between(now, nextSlot(now))
+            val delay = Duration.between(now, nextSlot(now, HealthSync.hasTodaySleep(ctx)))
             WorkManager.getInstance(ctx).enqueueUniqueWork(
                 SLOT_WORK, policy,
                 OneTimeWorkRequestBuilder<SyncWorker>()

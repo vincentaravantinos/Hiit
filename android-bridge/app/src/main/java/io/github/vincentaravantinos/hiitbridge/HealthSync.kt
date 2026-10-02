@@ -51,6 +51,13 @@ object HealthSync {
         return SyncConfig(key, token, p.getString("repo", "vincentaravantinos/Hiit")!!, p.getString("path", "data/health/health.json")!!)
     }
 
+    /** La nuit du jour (date de réveil = aujourd'hui) est-elle déjà captée ? */
+    fun hasTodaySleep(ctx: Context): Boolean {
+        val cache = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("cache", null) ?: return false
+        val today = LocalDate.now(ZoneId.systemDefault()).toString()
+        return JSONObject(cache).optJSONObject(today)?.has("sleep") == true
+    }
+
     /** Renvoie le nombre de nuits présentes dans le fichier publié. */
     suspend fun run(ctx: Context): Int = withContext(Dispatchers.IO) {
         val cfg = config(ctx) ?: throw IllegalStateException("Pas encore configuré par l'app HIIT")
@@ -69,9 +76,15 @@ object HealthSync {
         fun day(d: LocalDate) = days.getOrPut(d) { JSONObject() }
 
         // Sommeil : nuit principale = la plus longue session qui se termine ce jour-là.
-        val sleeps = readAll(client, SleepSessionRecord::class, from, to)
+        val sleepsByDay = readAll(client, SleepSessionRecord::class, from, to)
             .groupBy { it.endTime.atZone(zone).toLocalDate() }
-            .mapValues { (_, l) -> l.maxBy { Duration.between(it.startTime, it.endTime) } }
+        val sleeps = sleepsByDay.mapValues { (_, l) -> l.maxBy { Duration.between(it.startTime, it.endTime) } }
+        // Siestes = les autres sessions de sommeil du jour (la nuit reste la plus longue).
+        for ((d, l) in sleepsByDay) {
+            val main = sleeps[d]
+            val nap = l.filter { it !== main }.sumOf { Duration.between(it.startTime, it.endTime).toMinutes() }
+            if (nap >= 10) day(d).put("napMin", nap)
+        }
         val hrvs = readAll(client, HeartRateVariabilityRmssdRecord::class, from, to)
         for ((d, s) in sleeps) {
             val o = day(d)

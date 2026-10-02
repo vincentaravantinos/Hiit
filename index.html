@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-02T04:18:31Z';</script>
+<script>const APP_BUILD = '2026-10-02T04:28:51Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -309,7 +309,7 @@ body {
         <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Envoi automatique en fermant l'écran de résultats d'une séance (une seule fois par séance). En retour, sommeil, HRV, FC de repos et poids alimentent la « Forme du jour » de l'accueil.</div>
         <div style="display:flex;gap:8px;">
           <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
-          <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Autoriser / tester</button>
+          <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Synchroniser maintenant</button>
         </div>
       </div>
     </div>
@@ -2942,7 +2942,7 @@ function healthAssessment(h) {
     const v = d.sleep.totalMin, b = pick(x => x.sleep ? x.sleep.totalMin : null);
     let st = 'ok';
     if (v < 360) st = 'bad'; else if (v < 405 || (b && v < b.m - 60)) st = 'meh';
-    out.metrics.push({ label: 'Sommeil', val: fmtH(v), base: b ? fmtH(b.m) : null, st });
+    out.metrics.push({ label: 'Sommeil', val: fmtH(v) + (d.napMin ? ` +${fmtH(d.napMin)}` : ''), base: b ? fmtH(b.m) : null, st });
   }
   const hv = hrvOf(d);
   if (hv != null) {
@@ -2968,7 +2968,7 @@ function renderHealthCard() {
   const a = healthAssessment(h);
   const color = { ok: 'var(--green)', meh: '#d9b45a', bad: '#d77a6b' };
   let reco;
-  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore remontée (relevés à 6h, 7h, 8h, 9h et 10h).</div>`;
+  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore remontée par Oura — relevé toutes les heures dès 6h jusqu'à son arrivée (au plus tard midi), ou Réglages → Synchroniser maintenant.</div>`;
   else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">Récup conseillée</div><div style="font-size:13px;color:var(--muted);">Vélo ou natation tranquille aujourd'hui.</div>`;
   else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">Intense possible, sans forcer</div><div style="font-size:13px;color:var(--muted);">Un signal en retrait : écoute tes sensations à l'échauffement.</div>`;
   else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">Feu vert pour l'Intense</div>`;
@@ -3113,6 +3113,7 @@ function buildHcPayload(combined, kind, filename) {
 
 function hcOpenBridge(payload) {
   let q = '';
+  healthLastFetch = 0; // au retour dans l'app, relire tout de suite les données santé
   payload = payload || { v: 1, kind: 'setup' };
   const token = localStorage.getItem('hiitGithubToken');
   if (token) payload.cfg = { key: getDataKeyB64(), token, repo: 'vincentaravantinos/Hiit', path: HEALTH_PATH };
