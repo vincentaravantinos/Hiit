@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-06T09:17:26Z';</script>
+<script>const APP_BUILD = '2026-10-06T10:13:46Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2423,7 +2423,11 @@ function computeHiitRecovery(combined) {
   // Pic : FC max autour de la fin de l'effort (le capteur optique a quelques s de retard).
   const peakVals = tl.filter(p => p.t >= t0 - 5 && p.t <= t0 + 10).map(p => p.hr);
   const endVals = tl.filter(p => p.t >= t0 + RECOVERY_S - 8 && p.t <= t0 + RECOVERY_S).map(p => p.hr);
-  if (peakVals.length < 3 || endVals.length < 3) return { drop: null, error: 'Pas assez de données FC sur la minute de récupération' };
+  if (peakVals.length < 3 || endVals.length < 3) {
+    const nHr = combined.hr && combined.hr.samples ? combined.hr.samples.length : 0;
+    const accMin = combined.acc && combined.acc.samples ? Math.round(combined.acc.samples.length / FS_ALGO / 60) : 0;
+    return { drop: null, error: `Pas assez de données FC sur la minute de récupération (FC : ${Math.round(nHr/60)} min dont ${tl.length} mesures valides, mouvement : ${accMin} min, récup à ${Math.round(t0/60)} min, ${peakVals.length}+${endVals.length} mesures dans les fenêtres)` };
+  }
   const peak = Math.max(...peakVals);
   const end = endVals.reduce((a,b) => a+b, 0) / endVals.length;
   return { peak, end: Math.round(end), drop: Math.round(peak - end) };
@@ -2498,6 +2502,20 @@ function showSessionResultsModal(combined, filename) {
   const cacheValid = combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION;
   // Récupération : calcul léger, ajouté sans relancer le recomptage des reps.
   if (cacheValid && !('recovery' in combined.analysis)) combined.analysis.recovery = computeHiitRecovery(combined);
+  // Récupération en erreur dans une séance déjà sauvegardée : on retente (calcul corrigé
+  // depuis) et, si elle aboutit, on met à jour le fichier et le résumé d'historique.
+  else if (cacheValid && filename && combined.analysis.recovery && combined.analysis.recovery.drop == null) {
+    const rec2 = computeHiitRecovery(combined);
+    if (rec2) combined.analysis.recovery = rec2;
+    if (rec2 && rec2.drop != null) {
+      try {
+        const idx = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]');
+        const e = idx.find(x => x.filename === filename);
+        if (e && e.summary) { e.summary.hrRecovery = rec2.drop; localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(idx)); }
+      } catch (err) {}
+      updateExistingSessionFile(filename, combined);
+    }
+  }
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
@@ -2775,9 +2793,19 @@ function hrTimeline(combined) {
   // HR hors-ligne ~1 Hz ; recalé sur la durée ACC (52 Hz) quand elle est connue.
   const samples = combined.hr && combined.hr.samples ? combined.hr.samples : [];
   if (!samples.length) return [];
-  const accDur = combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0;
-  const dt = accDur > 0 ? accDur / samples.length : 1;
+  const dt = hrSampleDt(combined);
   return samples.map((x, i) => ({ t: i * dt, hr: x.hr })).filter(p => p.hr > 0);
+}
+// Pas d'échantillonnage FC. Le recalage sur la durée ACC ne sert qu'à corriger une
+// petite dérive d'horloge (±10 %). Au-delà, c'est que les deux enregistrements n'ont
+// pas été arrêtés en même temps (arrêt partiel, récupération tardive) : étirer la FC
+// sur la durée ACC la décalerait complètement, on garde alors 1 Hz.
+function hrSampleDt(combined) {
+  const n = combined.hr && combined.hr.samples ? combined.hr.samples.length : 0;
+  const accDur = combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0;
+  if (!n || accDur <= 0) return 1;
+  const ratio = accDur / n;
+  return (ratio >= 0.9 && ratio <= 1.1) ? ratio : 1;
 }
 
 function swimWindow(segments) {
@@ -3267,8 +3295,7 @@ function hcActiveKcal(bpmList, dtS) {
 function hcHrBlock(combined, t0) {
   const samples = combined.hr && combined.hr.samples ? combined.hr.samples : [];
   if (!samples.length || t0 == null) return null;
-  const accDur = combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0;
-  const dt = accDur > 0 ? accDur / samples.length : 1; // même recalage que hrTimeline()
+  const dt = hrSampleDt(combined); // même recalage que hrTimeline()
   return { t0, dtMs: Math.round(dt * 1000), bpm: samples.map(x => x.hr || 0) };
 }
 
