@@ -48,9 +48,9 @@ class ProbeActivity : Activity() {
     // ---------- UI ----------
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 48, 24, 24) }
+        val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(24, 120, 24, 24) }
         root.addView(TextView(this).apply {
-            text = "Maxxus Probe — allume la console, ferme les autres apps, puis « Chercher »."
+            text = "Maxxus Probe — tout est automatique : console allumée, puis pédale quand « Interrogation » apparaît. Ensuite « Copier log »."
             textSize = 15f
         })
         val row1 = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
@@ -68,6 +68,16 @@ class ProbeActivity : Activity() {
         logView = TextView(this).apply { typeface = Typeface.MONOSPACE; textSize = 11f; setTextIsSelectable(true) }
         scroll = ScrollView(this).apply { addView(logView) }
         root.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        root.setOnApplyWindowInsetsListener { v, ins ->
+            val top: Int; val bottom: Int
+            if (Build.VERSION.SDK_INT >= 30) {
+                val b = ins.getInsets(android.view.WindowInsets.Type.systemBars())
+                top = b.top; bottom = b.bottom
+            } else {
+                @Suppress("DEPRECATION") run { top = ins.systemWindowInsetTop; bottom = ins.systemWindowInsetBottom }
+            }
+            v.setPadding(24, top + 24, 24, bottom + 24); ins
+        }
         setContentView(root)
 
         registerReceiver(receiver, IntentFilter().apply {
@@ -115,6 +125,7 @@ class ProbeActivity : Activity() {
         super.onRequestPermissionsResult(rc, p, r)
         p.forEachIndexed { i, n -> log("Permission ${n.substringAfterLast('.')}: ${if (r.getOrNull(i) == 0) "OK" else "REFUSÉE"}") }
         listBonded()
+        startDiscovery()
     }
 
     // ---------- Discovery ----------
@@ -127,7 +138,6 @@ class ProbeActivity : Activity() {
 
     private fun listBonded() {
         val b = adapter?.bondedDevices ?: return
-        log("${b.size} appareil(s) déjà appairé(s)")
         b.forEach { addDevice(it, "appairé") }
     }
 
@@ -143,13 +153,16 @@ class ProbeActivity : Activity() {
         val name = d.name ?: "(sans nom)"
         if (found.containsKey(d.address)) return
         found[d.address] = d
-        log("Trouvé [$why]: $name  ${d.address}  type=${typeName(d)}")
+        if (name.uppercase().startsWith("FAL")) log("Trouvé [$why]: $name  ${d.address}  type=${typeName(d)}")
         val isFal = name.uppercase().startsWith("FAL")
-        if (isFal && target == null) { target = d; log(">>> Cible sélectionnée : $name") }
+        if (!isFal) return
         ui.post {
-            deviceList.addView(btn("${if (isFal) "★ " else ""}$name  (${typeName(d)})") {
-                target = d; log("Cible : $name ${d.address}")
-            })
+            deviceList.addView(btn("★ $name  (${typeName(d)})") { target = d; connect() })
+        }
+        if (target == null) {
+            target = d
+            log(">>> Console trouvée : $name — connexion automatique")
+            connect()
         }
     }
 
@@ -157,7 +170,7 @@ class ProbeActivity : Activity() {
         override fun onReceive(c: Context, i: Intent) {
             when (i.action) {
                 BluetoothDevice.ACTION_FOUND -> dev(i)?.let { addDevice(it, "scan") }
-                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> log("Recherche terminée")
+                BluetoothAdapter.ACTION_DISCOVERY_FINISHED -> log("Recherche terminée (${found.size} appareils vus" + if (target == null) ", aucun FAL — relance « Chercher »)" else ")")
                 BluetoothDevice.ACTION_PAIRING_REQUEST -> {
                     val d = dev(i)
                     val variant = i.getIntExtra(BluetoothDevice.EXTRA_PAIRING_VARIANT, -1)
@@ -211,6 +224,7 @@ class ProbeActivity : Activity() {
                     socket = s; out = s.outputStream
                     log(">>> CONNECTÉ via $label")
                     startReader(s.inputStream)
+                    ui.postDelayed({ runIConsole() }, 800)
                     return@Thread
                 } catch (e: Exception) {
                     log("   échec : ${e.javaClass.simpleName}: ${e.message}")
