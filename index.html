@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-02T05:19:31Z';</script>
+<script>const APP_BUILD = '2026-10-06T08:47:25Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -913,7 +913,7 @@ async function pftpWriteAndRead(payload) {
   pftpResponseWaiters = [];
   const frames = buildRfc76Frames(payload);
   for (const frame of frames) {
-    await pftpMtuChar.writeValueWithoutResponse(frame);
+    await withTimeout(pftpMtuChar.writeValueWithoutResponse(frame), 10000, 'écriture PFTP');
   }
   const chunks = [];
   let expectedSequence = 0, expectedNext = 0;
@@ -1159,8 +1159,8 @@ async function connectPmd() {
 async function startAllRecordings(types = REC_TYPES) {
   for (const t of types) {
     const cmd = new Uint8Array([0x02, t.typeByte, ...t.settings]);
-    const respPromise = waitForControlResponse();
-    await controlChar.writeValue(cmd);
+    const respPromise = waitForControlResponse(); respPromise.catch(() => {});
+    await withTimeout(controlChar.writeValue(cmd), 10000, 'écriture CONTROL');
     const resp = await respPromise;
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} au demarrage`);
     log(`  ${t.name}: enregistrement demarre (erreur=0)`);
@@ -1169,8 +1169,8 @@ async function startAllRecordings(types = REC_TYPES) {
 async function stopAllRecordings(types = REC_TYPES) {
   for (const t of types) {
     const cmd = new Uint8Array([0x03, t.typeByte & 0x7F]);
-    const respPromise = waitForControlResponse();
-    await controlChar.writeValue(cmd);
+    const respPromise = waitForControlResponse(); respPromise.catch(() => {});
+    await withTimeout(controlChar.writeValue(cmd), 10000, 'écriture CONTROL');
     const resp = await respPromise;
     if (resp[3] === 6) {
       // ERROR_ALREADY_IN_STATE (PMD response code 6): the device is already
@@ -1229,6 +1229,10 @@ async function waitForAdvertisementThenConnect(maxAttempts = 3) {
       logError('Recherche tentative ' + attempt + ' échouée', err);
     }
   }
+  try {
+    log('Connexion directe au capteur...');
+    return await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (direct)');
+  } catch (err) { logError('Connexion directe échouée', err); }
   throw new Error('Recherche de la montre Polar : ' + (lastErr ? lastErr.message : 'échec'));
 }
 
@@ -1414,7 +1418,11 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
     } catch (err) {
       lastError = err;
       logError('Tentative ' + attempt + ' échouée', err);
-      if (attempt < maxAttempts) await sleep(3000);
+      // Lien possiblement « zombie » (connecté côté Android, muet côté capteur) : on le
+      // coupe pour que la tentative suivante reparte d'une vraie reconnexion.
+      try { if (device.gatt.connected) device.gatt.disconnect(); } catch (e) {}
+      pftpMtuChar = null;
+      if (attempt < maxAttempts) { log(`Récupération : nouvel essai (${attempt + 1}/${maxAttempts})...`); await sleep(3000); }
     }
   }
 
@@ -1486,10 +1494,57 @@ function sensorOnSessionEnd() {
   const phaseLog = sensorPhaseLog;
   const rewindEvents = sensorRewindEvents;
   const endedAtMs = Date.now();
+  try {
+    const p = JSON.parse(localStorage.getItem(SENSOR_STORAGE_KEY) || 'null');
+    if (p) { p.endedAtMs = endedAtMs; localStorage.setItem(SENSOR_STORAGE_KEY, JSON.stringify(p)); }
+  } catch (e) {}
   (async () => {
-    const ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 5, endedAtMs);
+    let ok = false;
+    try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 5, endedAtMs); }
+    catch (err) { logError('Récupération fin de séance', err); }
     if (ok) localStorage.removeItem(SENSOR_STORAGE_KEY);
+    else showSensorRecoverButton();
   })();
+}
+
+// Récupération manuelle d'une séance HIIT restée sur le capteur (récupération auto
+// échouée, ou onglet rechargé sans getDevices()). Le tap fournit le geste utilisateur
+// qu'exige requestDevice().
+function showSensorRecoverButton() {
+  if (!localStorage.getItem(SENSOR_STORAGE_KEY) || document.getElementById('sensor-recover-btn')) return;
+  const st = document.getElementById('sensor-status');
+  if (!st) return;
+  const btn = document.createElement('button');
+  btn.id = 'sensor-recover-btn';
+  btn.textContent = 'RÉCUPÉRER LA SÉANCE DU CAPTEUR';
+  btn.style.cssText = 'display:block;width:100%;margin-top:10px;padding:14px;border:none;border-radius:10px;background:var(--accent);color:#111;font-family:var(--font);font-size:14px;font-weight:700;letter-spacing:1px;cursor:pointer';
+  btn.onclick = () => sensorManualRecover(btn);
+  st.insertAdjacentElement('afterend', btn);
+}
+async function sensorManualRecover(btn) {
+  let pending = null;
+  try { pending = JSON.parse(localStorage.getItem(SENSOR_STORAGE_KEY) || 'null'); } catch (e) {}
+  if (!pending) { btn.remove(); return; }
+  btn.disabled = true;
+  try {
+    if (!device) {
+      device = await navigator.bluetooth.requestDevice({
+        filters: [{ namePrefix: 'Polar' }],
+        optionalServices: [PMD_SERVICE, PFTP_SERVICE]
+      });
+    }
+  } catch (err) {
+    logError('Récupération manuelle : capteur non sélectionné', err);
+    btn.disabled = false;
+    return;
+  }
+  btn.textContent = 'RÉCUPÉRATION...';
+  let ok = false;
+  try {
+    ok = await sensorRetrieveAndFinish(new Set(pending.baseline || []), pending.phaseLog || [], pending.rewindEvents || [], 5, pending.endedAtMs || null);
+  } catch (err) { logError('Récupération manuelle', err); }
+  if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); btn.remove(); }
+  else { btn.disabled = false; btn.textContent = 'RÉESSAYER LA RÉCUPÉRATION'; }
 }
 
 async function tryResumePendingSensorSession() {
@@ -1505,10 +1560,13 @@ async function tryResumePendingSensorSession() {
     device = known.find(d => d.id === pending.deviceId);
     if (!device) throw new Error('Capteur non retrouvé.');
     const baseline = new Set(pending.baseline);
-    const ok = await sensorRetrieveAndFinish(baseline, pending.phaseLog || [], pending.rewindEvents || []);
+    const ok = await sensorRetrieveAndFinish(baseline, pending.phaseLog || [], pending.rewindEvents || [], 5, pending.endedAtMs || null);
     if (ok) localStorage.removeItem(SENSOR_STORAGE_KEY);
+    else showSensorRecoverButton();
   } catch (err) {
     logError('Échec reprise automatique', err);
+    log('Séance en attente sur le capteur.');
+    showSensorRecoverButton();
   }
 }
 
