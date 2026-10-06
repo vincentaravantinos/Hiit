@@ -5,6 +5,12 @@ import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothGatt
+import android.bluetooth.BluetoothGattCallback
+import android.bluetooth.BluetoothGattCharacteristic
+import android.bluetooth.BluetoothGattDescriptor
+import android.bluetooth.BluetoothProfile
+import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.BluetoothManager
 import android.bluetooth.BluetoothSocket
 import android.content.BroadcastReceiver
@@ -202,6 +208,7 @@ class ProbeActivity : Activity() {
     private fun connect() {
         val d = target ?: run { log("Pas de cible — lance « Chercher » d'abord"); return }
         adapter?.cancelDiscovery()
+        if (d.type == BluetoothDevice.DEVICE_TYPE_LE) { bleConnect(d); return }
         Thread {
             disconnectQuiet()
             try { d.fetchUuidsWithSdp() } catch (_: Exception) {}
@@ -257,6 +264,7 @@ class ProbeActivity : Activity() {
     }
 
     private fun runIConsole() {
+        if (gatt != null && bleWrite != null) { runIConsoleBle(); return }
         if (socket == null) { log("Pas connecté"); return }
         Thread {
             log("--- Séquence d'initialisation iConsole ---")
@@ -284,7 +292,151 @@ class ProbeActivity : Activity() {
         socket = null; out = null
     }
 
-    private fun disconnect() { if (socket != null) log("Déconnexion"); disconnectQuiet() }
+    private fun disconnect() {
+        if (socket != null || gatt != null) log("Déconnexion")
+        disconnectQuiet()
+        try { gatt?.disconnect(); gatt?.close() } catch (_: Exception) {}
+        gatt = null
+    }
+
+    // ---------- BLE (GATT) ----------
+    private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
+    private val STD = setOf("1800", "1801", "180a", "180f", "180d", "1826", "1816", "1818")
+    private var gatt: BluetoothGatt? = null
+    private var bleWrite: BluetoothGattCharacteristic? = null
+    private var hasFtms = false
+    private val ops = ArrayDeque<() -> Boolean>()
+    private val notifCount = HashMap<UUID, Int>()
+
+    private fun short(u: UUID): String {
+        val str = u.toString()
+        return if (str.endsWith("-0000-1000-8000-00805f9b34fb")) str.substring(4, 8) else str
+    }
+
+    private fun props(c: BluetoothGattCharacteristic): String {
+        val p = c.properties; val l = mutableListOf<String>()
+        if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) l += "read"
+        if (p and BluetoothGattCharacteristic.PROPERTY_WRITE != 0) l += "write"
+        if (p and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0) l += "writeNoResp"
+        if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0) l += "notify"
+        if (p and BluetoothGattCharacteristic.PROPERTY_INDICATE != 0) l += "indicate"
+        return l.joinToString(",")
+    }
+
+    private fun bleConnect(d: BluetoothDevice) {
+        log("Connexion BLE (GATT) à ${d.name}…")
+        try { gatt?.close() } catch (_: Exception) {}
+        bleWrite = null; hasFtms = false; ops.clear(); notifCount.clear()
+        gatt = d.connectGatt(this, false, gattCb, BluetoothDevice.TRANSPORT_LE)
+    }
+
+    private fun next() {
+        while (ops.isNotEmpty()) {
+            val ok = try { ops.removeFirst()() } catch (e: Exception) { log("   op erreur : ${e.message}"); false }
+            if (ok) return
+        }
+    }
+
+    private fun logValue(prefix: String, c: BluetoothGattCharacteristic, v: ByteArray) {
+        val txt = String(v.map { if (it in 32..126) it.toInt().toChar() else '.' }.toCharArray())
+        log("$prefix ${short(c.uuid)}: ${hex(v, v.size)}   \"$txt\"")
+    }
+
+    private fun onNotif(c: BluetoothGattCharacteristic, v: ByteArray) {
+        val n = (notifCount[c.uuid] ?: 0) + 1
+        notifCount[c.uuid] = n
+        if (n <= 20 || n % 10 == 0) log("NOTIF ${short(c.uuid)} #$n: ${hex(v, v.size)}")
+    }
+
+    private val gattCb = object : BluetoothGattCallback() {
+        override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                log(">>> BLE CONNECTÉ (status=$status) — découverte des services…")
+                ui.postDelayed({ g.discoverServices() }, 600)
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                log("BLE déconnecté (status=$status)")
+            }
+        }
+
+        override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
+            log("${g.services.size} service(s) :")
+            for (svc in g.services) {
+                val sid = short(svc.uuid)
+                if (sid == "1826") hasFtms = true
+                log("SERVICE $sid")
+                for (c in svc.characteristics) {
+                    log("  CHAR ${short(c.uuid)} [${props(c)}]")
+                    val p = c.properties
+                    if (p and BluetoothGattCharacteristic.PROPERTY_READ != 0) ops.add { g.readCharacteristic(c) }
+                    if (p and (BluetoothGattCharacteristic.PROPERTY_NOTIFY or BluetoothGattCharacteristic.PROPERTY_INDICATE) != 0) {
+                        ops.add {
+                            g.setCharacteristicNotification(c, true)
+                            val d = c.getDescriptor(CCCD)
+                            if (d == null) { log("   pas de CCCD sur ${short(c.uuid)}"); false } else {
+                                val v = if (p and BluetoothGattCharacteristic.PROPERTY_NOTIFY != 0)
+                                    BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE else BluetoothGattDescriptor.ENABLE_INDICATION_VALUE
+                                if (Build.VERSION.SDK_INT >= 33) g.writeDescriptor(d, v) == BluetoothStatusCodes.SUCCESS
+                                else @Suppress("DEPRECATION") run { d.value = v; g.writeDescriptor(d) }
+                            }
+                        }
+                    }
+                    if (sid !in STD && bleWrite == null &&
+                        p and (BluetoothGattCharacteristic.PROPERTY_WRITE or BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) bleWrite = c
+                }
+            }
+            ops.add {
+                log(if (hasFtms) ">>> FTMS présent (protocole standard)." else ">>> Pas de FTMS.")
+                log("--- Pédale maintenant ~30 s ---")
+                if (!hasFtms && bleWrite != null) ui.postDelayed({ runIConsoleBle() }, 3000)
+                false
+            }
+            next()
+        }
+
+        override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray, status: Int) {
+            logValue("READ", c, value); next()
+        }
+        @Deprecated("API < 33")
+        override fun onCharacteristicRead(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
+            if (Build.VERSION.SDK_INT < 33) { @Suppress("DEPRECATION") logValue("READ", c, c.value ?: ByteArray(0)); next() }
+        }
+        override fun onDescriptorWrite(g: BluetoothGatt, d: BluetoothGattDescriptor, status: Int) {
+            log("   abonné à ${short(d.characteristic.uuid)} (status=$status)"); next()
+        }
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic, value: ByteArray) {
+            onNotif(c, value)
+        }
+        @Deprecated("API < 33")
+        override fun onCharacteristicChanged(g: BluetoothGatt, c: BluetoothGattCharacteristic) {
+            if (Build.VERSION.SDK_INT < 33) @Suppress("DEPRECATION") onNotif(c, c.value ?: ByteArray(0))
+        }
+    }
+
+    private fun bleSend(bytes: ByteArray) {
+        val g = gatt ?: return; val c = bleWrite ?: return
+        val type = if (c.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE != 0)
+            BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE else BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+        val ok = if (Build.VERSION.SDK_INT >= 33) g.writeCharacteristic(c, bytes, type) == BluetoothStatusCodes.SUCCESS
+        else @Suppress("DEPRECATION") run { c.writeType = type; c.value = bytes; g.writeCharacteristic(c) }
+        log("TX ${short(c.uuid)} ${hex(bytes, bytes.size)}${if (ok) "" else "  (refusé)"}")
+    }
+
+    private fun runIConsoleBle() {
+        Thread {
+            log("--- Protocole iConsole via BLE ---")
+            val init = listOf(
+                frame(0xA0, 0x01, 0x01), frame(0xA5, 0x01, 0x01, 0x02),
+                frame(0xA0, 0x01, 0x01), frame(0xA1, 0x01, 0x01),
+                frame(0xA0, 0x01, 0x01), frame(0xA3, 0x01, 0x01, 0x01),
+                frame(0xA4, 0x01, 0x01, 0x01),
+            )
+            for (f in init) { bleSend(f); Thread.sleep(400) }
+            polling = true
+            var n = 0
+            while (polling && gatt != null && n < 80) { bleSend(frame(0xA2, 0x01, 0x01)); n++; Thread.sleep(500) }
+            log("--- Fin de l'interrogation ---")
+        }.start()
+    }
 
     private fun hex(b: ByteArray, n: Int) = (0 until n).joinToString(" ") { "%02x".format(b[it]) }
 }
