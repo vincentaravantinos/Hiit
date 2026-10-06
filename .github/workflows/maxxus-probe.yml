@@ -1,0 +1,41 @@
+name: Maxxus Probe APK
+
+on:
+  push:
+    branches: [main]
+    paths: ['maxxus-probe/**', '.github/workflows/maxxus-probe.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: maxxus-probe-apk
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: maxxus-probe
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Build release APK
+        working-directory: maxxus-probe
+        run: gradle assembleRelease --no-daemon --stacktrace
+      - run: cp maxxus-probe/app/build/outputs/apk/release/app-release.apk maxxus-probe.apk
+      - name: Publish to release "maxxus-probe-latest"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: maxxus-probe-latest
+          name: Maxxus Probe (diagnostic)
+          body: "APK de diagnostic Bluetooth pour le crosstrainer Maxxus CX 4.3f. Build #${{ github.run_number }}."
+          files: maxxus-probe.apk
+          make_latest: false
