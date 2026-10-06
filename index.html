@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-06T08:57:15Z';</script>
+<script>const APP_BUILD = '2026-10-06T09:17:26Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -543,7 +543,7 @@ function tRenderControls(){const ctrl=document.getElementById('t-controls'),col=
 const iconBtn=(icon,fn)=>`<button onclick="${fn}" style="padding:15px 18px;font-size:20px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer;line-height:1">${icon}</button>`;
 const bs=`font-family:'Courier New',monospace;font-weight:700;letter-spacing:2px;text-transform:uppercase;border-radius:50px;cursor:pointer;border:none;transition:opacity .2s`;
 const fs=iconBtn('⛶','toggleFS()');
-if(tState==='idle'){ctrl.innerHTML=`<button onclick="sensorPromptThenStart(this)" style="${bs};flex:1;background:${col};color:#111111;padding:16px;font-size:16px">DÉMARRER</button>${fs}`;}
+if(tState==='idle'){const blk=sensorStartBlocked();ctrl.innerHTML=`<button onclick="sensorPromptThenStart(this)" style="${bs};flex:1;background:${col};color:#111111;padding:16px;font-size:${blk?13:16}px;${blk?'opacity:.35':''}">${blk?'SÉANCE À RÉCUPÉRER D\'ABORD':'DÉMARRER'}</button>${fs}`;}
 else if(tState==='running'||tState==='countdown'){ctrl.innerHTML=iconBtn('⏮','tRewind()')+`<button onclick="tPause()" style="${bs};flex:1;background:rgba(255,255,255,.10);color:var(--text);border:1px solid rgba(255,255,255,.20)!important;padding:16px;font-size:15px">PAUSE</button>`+iconBtn('⏭','tForward()')+fs;}
 else if(tState==='paused'){ctrl.innerHTML=iconBtn('⏮','tRewind()')+`<button onclick="tResume()" style="${bs};flex:1;background:${col};color:#111111;padding:16px;font-size:16px">REPRENDRE</button>`+iconBtn('⏭','tForward()')+fs;}}
 const SILENT_WAV='data:audio/wav;base64,UklGRmQfAABXQVZFZm10IBAAAAABAAEAoA8AAEAfAAACABAAZGF0YUAfAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==';
@@ -645,12 +645,21 @@ function logAppend(msg) {
     try { localStorage.setItem(SENSOR_LOG_KEY, JSON.stringify(sensorLogHistory)); } catch (e2) {}
   }
 }
+function sensorDisplay(msg) {
+  const el = document.getElementById('sensor-status');
+  if (el) el.textContent = msg;
+  const d = document.getElementById('sensor-banner-detail');
+  if (d) d.textContent = msg;
+  if (sensorProgressExtraEl) sensorProgressExtraEl.textContent = msg;
+}
+let sensorProgressExtraEl = null; // statut natation / activité libre pendant une récupération
 function log(msg) {
   console.log('[capteur]', msg);
   logAppend(msg);
-  const el = document.getElementById('sensor-status');
-  if (el) el.textContent = msg;
+  sensorDisplay(msg);
 }
+// Affichage seul, sans écriture au journal (progression fréquente).
+function sensorProgress(msg) { sensorDisplay(msg); }
 function logError(msg, err) {
   console.log('[capteur]', msg, err);
   logAppend(msg + ': ' + (err && err.message ? err.message : String(err)));
@@ -737,22 +746,37 @@ function parseDeltaFramesAll(data, channels, resolution) {
 
 // ---- Connect ----
 
-let pendingControlResolvers = [];
+let pendingControlResolvers = []; // {resolve, reject, timer}
+function dropPendingControl(reason) {
+  const old = pendingControlResolvers; pendingControlResolvers = [];
+  old.forEach(w => { clearTimeout(w.timer); if (reason) w.reject(new Error(reason)); });
+}
 function onControlResponse(dv) {
   const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-  log('CONTROL rx: ' + toHex(bytes));
-  const resolver = pendingControlResolvers.shift();
-  if (resolver) resolver(bytes);
+  logAppend('CONTROL rx: ' + toHex(bytes));
+  const w = pendingControlResolvers.shift();
+  if (w) { clearTimeout(w.timer); w.resolve(bytes); }
 }
 function waitForControlResponse(timeoutMs = 10000) {
-  // Same defensive discard as pftpWriteAndRead — CONTROL commands are sent one at
-  // a time and always fully awaited before the next, so a leftover resolver here
-  // can only be stale (from a request we already gave up on), never legitimate.
-  pendingControlResolvers = [];
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timeout attente réponse CONTROL')), timeoutMs);
-    pendingControlResolvers.push((bytes) => { clearTimeout(timer); resolve(bytes); });
+  // CONTROL commands are sent one at a time and always fully awaited before the
+  // next, so a leftover waiter here can only be stale, never legitimate.
+  dropPendingControl(null);
+  const p = new Promise((resolve, reject) => {
+    const w = { resolve, reject, timer: null };
+    w.timer = setTimeout(() => {
+      pendingControlResolvers = pendingControlResolvers.filter(x => x !== w);
+      reject(new Error('Timeout attente réponse CONTROL'));
+    }, timeoutMs);
+    pendingControlResolvers.push(w);
   });
+  p.catch(() => {}); // l'appelant l'attend plus tard ; évite un rejet « non géré » si l'écriture échoue avant
+  return p;
+}
+async function controlRequest(cmd) {
+  if (!controlChar) throw new Error('Capteur non connecté');
+  const respPromise = waitForControlResponse();
+  await withTimeout(controlChar.writeValue(cmd), 10000, 'écriture CONTROL');
+  return await respPromise;
 }
 
 // ---- PMD offline recording start/stop: same command structure as live streaming,
@@ -878,30 +902,40 @@ function makeCompleteMessage(header, data, queryId) {
 }
 
 let pftpResponseQueue = [];
-let pftpResponseWaiters = [];
+let pftpResponseWaiters = []; // {resolve, reject, timer}
+function dropPendingPftp(reason) {
+  const old = pftpResponseWaiters; pftpResponseWaiters = []; pftpResponseQueue = [];
+  old.forEach(w => { clearTimeout(w.timer); if (reason) w.reject(new Error(reason)); });
+}
 function onPftpMtuNotification(dv) {
   const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-  const waiter = pftpResponseWaiters.shift();
-  if (waiter) waiter(bytes); else pftpResponseQueue.push(bytes);
+  const w = pftpResponseWaiters.shift();
+  if (w) { clearTimeout(w.timer); w.resolve(bytes); } else pftpResponseQueue.push(bytes);
 }
 function nextPftpPacket(timeoutMs = 20000) {
   if (pftpResponseQueue.length > 0) return Promise.resolve(pftpResponseQueue.shift());
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Timeout réponse PFTP')), timeoutMs);
-    pftpResponseWaiters.push((bytes) => { clearTimeout(timer); resolve(bytes); });
+    const w = { resolve, reject, timer: null };
+    w.timer = setTimeout(() => {
+      pftpResponseWaiters = pftpResponseWaiters.filter(x => x !== w);
+      reject(new Error('Timeout réponse PFTP'));
+    }, timeoutMs);
+    pftpResponseWaiters.push(w);
   });
 }
 
 async function pftpEnsureReady() {
   if (pftpMtuChar) return;
+  if (!server || !device || !device.gatt.connected) throw new Error('Capteur non connecté');
   const pftpService = await withTimeout(server.getPrimaryService(PFTP_SERVICE), 15000, 'getPrimaryService(PFTP)');
-  pftpMtuChar = await withTimeout(pftpService.getCharacteristic(PFTP_MTU), 15000, 'getCharacteristic(PFTP_MTU)');
-  await withTimeout(pftpMtuChar.startNotifications(), 15000, 'startNotifications(PFTP_MTU)');
-  pftpMtuChar.addEventListener('characteristicvaluechanged', (e) => onPftpMtuNotification(e.target.value));
-  log('PFTP prêt.');
+  const ch = await withTimeout(pftpService.getCharacteristic(PFTP_MTU), 15000, 'getCharacteristic(PFTP_MTU)');
+  await withTimeout(ch.startNotifications(), 15000, 'startNotifications(PFTP_MTU)');
+  ch.oncharacteristicvaluechanged = (e) => onPftpMtuNotification(e.target.value); // affectation : jamais d'écouteur en double
+  pftpMtuChar = ch;
+  logAppend('PFTP prêt.');
 }
 
-async function pftpWriteAndRead(payload) {
+async function pftpWriteAndRead(payload, onProgress) {
   // Defensive: discard anything left over from a previous request (e.g. a late
   // notification that arrived after we'd already given up on a prior timed-out
   // or interrupted operation). PFTP is strictly request/response — there should
@@ -909,8 +943,9 @@ async function pftpWriteAndRead(payload) {
   // leftover state here can only be stale contamination, never something we're
   // meant to consume. Left unclosed, it silently corrupts the next transfer's
   // byte count rather than causing an obvious error.
-  pftpResponseQueue = [];
-  pftpResponseWaiters = [];
+  dropPendingPftp(null);
+  if (!pftpMtuChar) throw new Error('Capteur non connecté');
+  let received = 0;
   const frames = buildRfc76Frames(payload);
   for (const frame of frames) {
     await withTimeout(pftpMtuChar.writeValueWithoutResponse(frame), 10000, 'écriture PFTP');
@@ -929,6 +964,7 @@ async function pftpWriteAndRead(payload) {
       throw new Error('PFTP: erreur code ' + frame.error);
     }
     chunks.push(frame.payload);
+    if (onProgress) { received += frame.payload.length; onProgress(received); }
     if (frame.status === RFC76_STATUS_LAST) return concatBytes(...chunks);
   }
 }
@@ -956,36 +992,43 @@ async function pftpListDirectory(path) {
   const response = await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(0, path)));
   return decodePftpDirectory(response);
 }
-async function pftpGetFile(path) {
+async function pftpGetFile(path, onProgress) {
   await pftpEnsureReady();
-  return await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(0, path)));
+  return await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(0, path)), onProgress);
 }
 
 // ---- Walk the device's recording directory tree to find .REC files ----
+// Erreur « protocole » renvoyée par le capteur (dossier absent…) : on l'ignore.
+// Toute autre erreur (timeout, lien coupé) remonte : une liste tronquée fausserait
+// la ligne de base ou ferait oublier des fichiers.
+async function pftpListOrNull(path) {
+  try { return await pftpListDirectory(path); }
+  catch (e) { if (/^PFTP: erreur code/.test(e && e.message || '')) return null; throw e; }
+}
 async function listAllRecordings() {
   const recordings = [];
-  let userDirs;
-  try { userDirs = await pftpListDirectory('/U/'); } catch (e) { log('Pas de dossier /U/: ' + e); return recordings; }
+  const userDirs = await pftpListOrNull('/U/');
+  if (!userDirs) { logAppend('Pas de dossier /U/ sur le capteur.'); return recordings; }
   for (const user of userDirs) {
     if (!/^\d+\/?$/.test(user.name)) continue;
     const userPath = `/U/${user.name.replace(/\/$/,'')}/`;
-    let dayDirs;
-    try { dayDirs = await pftpListDirectory(userPath); } catch { continue; }
+    const dayDirs = await pftpListOrNull(userPath);
+    if (!dayDirs) continue;
     for (const day of dayDirs) {
       if (!/^\d{8}\/?$/.test(day.name)) continue;
       const dayPath = `${userPath}${day.name.replace(/\/$/,'')}/`;
-      let rDirs;
-      try { rDirs = await pftpListDirectory(dayPath); } catch { continue; }
+      const rDirs = await pftpListOrNull(dayPath);
+      if (!rDirs) continue;
       const rEntry = rDirs.find(e => e.name.replace(/\/$/,'').toUpperCase() === 'R');
       if (!rEntry) continue;
       const rPath = `${dayPath}R/`;
-      let timeDirs;
-      try { timeDirs = await pftpListDirectory(rPath); } catch { continue; }
+      const timeDirs = await pftpListOrNull(rPath);
+      if (!timeDirs) continue;
       for (const timeDir of timeDirs) {
         if (!/^\d{6}\/?$/.test(timeDir.name)) continue;
         const timePath = `${rPath}${timeDir.name.replace(/\/$/,'')}/`;
-        let files;
-        try { files = await pftpListDirectory(timePath); } catch { continue; }
+        const files = await pftpListOrNull(timePath);
+        if (!files) continue;
         for (const f of files) {
           if (f.name.toUpperCase().endsWith('.REC')) {
             recordings.push({ path: `${timePath}${f.name}`, size: f.size });
@@ -1147,93 +1190,161 @@ const REC_TYPES = [
 ];
 
 async function connectPmd() {
-  pendingControlResolvers = []; // discard anything left over from a previous connection/session
+  dropPendingControl(null); // discard anything left over from a previous connection/session
+  pftpMtuChar = null;       // toute nouvelle connexion invalide l'ancienne caractéristique PFTP
   const pmdService = await withTimeout(server.getPrimaryService(PMD_SERVICE), 15000, 'getPrimaryService(PMD)');
-  controlChar = await withTimeout(pmdService.getCharacteristic(PMD_CONTROL), 15000, 'getCharacteristic(CONTROL)');
-  dataChar = await withTimeout(pmdService.getCharacteristic(PMD_DATA), 15000, 'getCharacteristic(DATA)');
-  await withTimeout(controlChar.startNotifications(), 15000, 'startNotifications(CONTROL)');
-  controlChar.addEventListener('characteristicvaluechanged', (e) => onControlResponse(e.target.value));
-  await withTimeout(dataChar.startNotifications(), 15000, 'startNotifications(DATA)');
+  const cc = await withTimeout(pmdService.getCharacteristic(PMD_CONTROL), 15000, 'getCharacteristic(CONTROL)');
+  const dc = await withTimeout(pmdService.getCharacteristic(PMD_DATA), 15000, 'getCharacteristic(DATA)');
+  await withTimeout(cc.startNotifications(), 15000, 'startNotifications(CONTROL)');
+  cc.oncharacteristicvaluechanged = (e) => onControlResponse(e.target.value);
+  await withTimeout(dc.startNotifications(), 15000, 'startNotifications(DATA)');
+  controlChar = cc; dataChar = dc;
 }
 
 async function startAllRecordings(types = REC_TYPES) {
   for (const t of types) {
-    const cmd = new Uint8Array([0x02, t.typeByte, ...t.settings]);
-    const respPromise = waitForControlResponse(); respPromise.catch(() => {});
-    await withTimeout(controlChar.writeValue(cmd), 10000, 'écriture CONTROL');
-    const resp = await respPromise;
+    const resp = await controlRequest(new Uint8Array([0x02, t.typeByte, ...t.settings]));
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} au demarrage`);
-    log(`  ${t.name}: enregistrement demarre (erreur=0)`);
+    logAppend(`  ${t.name}: enregistrement demarre (erreur=0)`);
   }
 }
 async function stopAllRecordings(types = REC_TYPES) {
   for (const t of types) {
-    const cmd = new Uint8Array([0x03, t.typeByte & 0x7F]);
-    const respPromise = waitForControlResponse(); respPromise.catch(() => {});
-    await withTimeout(controlChar.writeValue(cmd), 10000, 'écriture CONTROL');
-    const resp = await respPromise;
+    const resp = await controlRequest(new Uint8Array([0x03, t.typeByte & 0x7F]));
     if (resp[3] === 6) {
       // ERROR_ALREADY_IN_STATE (PMD response code 6): the device is already
       // stopped — almost always because a prior attempt in the same retry cycle
-      // already stopped it successfully, and only a later step (e.g. the file
-      // transfer) failed and triggered a retry. The device correctly refuses to
-      // "stop" something already stopped; treat that refusal as the success it
-      // actually represents rather than a real error, or every retry after the
-      // first would fail here forever regardless of what actually went wrong.
-      log(`  ${t.name}: déjà arrêté (pas d'action nécessaire).`);
+      // already stopped it successfully. Treat that refusal as the success it
+      // actually represents rather than a real error.
+      logAppend(`  ${t.name}: déjà arrêté (pas d'action nécessaire).`);
       continue;
     }
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} a l'arret`);
-    log(`  ${t.name}: enregistrement arrete (erreur=0)`);
+    logAppend(`  ${t.name}: enregistrement arrete (erreur=0)`);
   }
 }
 
 // Un enregistrement resté actif (séance interrompue, onglet perdu…) ferait échouer le
 // démarrage suivant. On arrête tout, type par type, AVANT de lister la ligne de base :
 // le fichier orphelin ainsi clôturé reste hors de la séance qui commence.
+// Seuls les refus du capteur (« code erreur ») sont ignorés ; un timeout ou un lien
+// coupé remonte pour déclencher une reconnexion.
 async function stopStrayRecordings() {
   for (const t of REC_TYPES) {
-    try { await stopAllRecordings([t]); } catch (err) { log(`  ${t.name}: arrêt préventif ignoré (${err.message || err})`); }
+    try { await stopAllRecordings([t]); }
+    catch (err) {
+      if (!/code erreur/.test(err && err.message || '')) throw err;
+      logAppend(`  ${t.name}: arrêt préventif ignoré (${err.message || err})`);
+    }
   }
+}
+
+// ---- Couche de connexion unique : toutes les activités passent par ici ----
+let bleBusy = 0; // > 0 : une opération capteur est en cours (connexion, démarrage, récupération)
+const bleHooked = new WeakSet();
+function onLinkDown(reason) {
+  controlChar = null; dataChar = null; pftpMtuChar = null;
+  dropPendingControl(reason); dropPendingPftp(reason); // échec immédiat plutôt qu'attendre les timeouts
+}
+function hookDisconnect(dev) {
+  if (bleHooked.has(dev)) return;
+  bleHooked.add(dev);
+  dev.addEventListener('gattserverdisconnected', () => {
+    if (dev !== device || dev.gatt.connected) return; // événement tardif d'une ancienne connexion
+    logAppend('Lien Bluetooth coupé.');
+    onLinkDown('Lien Bluetooth coupé');
+  });
+}
+function safeDisconnect() {
+  try { if (device && device.gatt) device.gatt.disconnect(); } catch (e) {}
+  onLinkDown('Lien Bluetooth coupé');
 }
 
 async function waitForOneAdvertisement(timeoutMs) {
-  if (typeof device.watchAdvertisements !== 'function') {
-    throw new Error('watchAdvertisements() indisponible — active aussi chrome://flags/#enable-experimental-web-platform-features');
-  }
+  if (typeof device.watchAdvertisements !== 'function') throw new Error('watchAdvertisements() indisponible');
   const abortController = new AbortController();
+  let onAdv = null, timer = null;
   const advertisementPromise = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      abortController.abort();
-      reject(new Error('délai dépassé (' + (timeoutMs/1000) + 's)'));
-    }, timeoutMs);
-    device.addEventListener('advertisementreceived', () => {
-      clearTimeout(timer);
-      resolve();
-    }, { once: true });
+    timer = setTimeout(() => reject(new Error('aucune annonce en ' + (timeoutMs/1000) + 's')), timeoutMs);
+    onAdv = () => resolve();
+    device.addEventListener('advertisementreceived', onAdv, { once: true });
   });
-  await device.watchAdvertisements({ signal: abortController.signal });
-  await advertisementPromise;
+  advertisementPromise.catch(() => {});
+  try {
+    await withTimeout(device.watchAdvertisements({ signal: abortController.signal }), 5000, 'watchAdvertisements');
+    await advertisementPromise;
+  } finally {
+    clearTimeout(timer);
+    device.removeEventListener('advertisementreceived', onAdv);
+    try { abortController.abort(); } catch (e) {}
+  }
 }
 
-async function waitForAdvertisementThenConnect(maxAttempts = 3) {
+// Garantit un lien utilisable (GATT connecté + service PMD prêt). Chaque essai repart
+// d'un état propre, tente d'abord l'écoute d'annonce puis, à défaut, une connexion
+// directe. Tous les appels sont bornés par un timeout.
+async function ensureConnected(maxAttempts = 4) {
+  if (!device) throw new Error('Aucun capteur sélectionné');
+  hookDisconnect(device);
+  if (device.gatt.connected && controlChar) return;
   let lastErr = null;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    log(`Recherche de la montre Polar... (tentative ${attempt}/${maxAttempts})`);
     try {
-      await waitForOneAdvertisement(10000);
-      log('Montre Polar trouvée, connexion...');
-      return await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (auto)');
+      safeDisconnect();
+      log(`Recherche du capteur Polar... (essai ${attempt}/${maxAttempts})`);
+      let seen = false;
+      try { await waitForOneAdvertisement(8000); seen = true; }
+      catch (e) { logError('Annonce non reçue', e); }
+      log(seen ? `Capteur trouvé, connexion... (essai ${attempt}/${maxAttempts})` : `Capteur non vu, connexion directe... (essai ${attempt}/${maxAttempts})`);
+      server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
+      log('Connecté, préparation des services...');
+      await connectPmd();
+      return;
     } catch (err) {
       lastErr = err;
-      logError('Recherche tentative ' + attempt + ' échouée', err);
+      logError('Connexion essai ' + attempt + ' échouée', err);
+      safeDisconnect(); // annule aussi une tentative de connexion restée en suspens
+      if (attempt < maxAttempts) await sleep(1000 * attempt);
     }
   }
+  throw new Error('Capteur injoignable (' + (lastErr ? lastErr.message : 'échec') + ')');
+}
+// Compatibilité avec les anciens appels.
+async function waitForAdvertisementThenConnect() { await ensureConnected(); return server; }
+
+// Exécute une opération capteur avec reconnexion automatique : à chaque échec le lien
+// est coupé puis rétabli avant de rejouer l'opération entière (qui doit être rejouable).
+async function withSensorRetry(label, fn, maxAttempts = 3) {
+  bleBusy++;
   try {
-    log('Connexion directe au capteur...');
-    return await withTimeout(device.gatt.connect(), 15000, 'gatt.connect (direct)');
-  } catch (err) { logError('Connexion directe échouée', err); }
-  throw new Error('Recherche de la montre Polar : ' + (lastErr ? lastErr.message : 'échec'));
+    let lastErr = null;
+    for (let a = 1; a <= maxAttempts; a++) {
+      try {
+        await ensureConnected(a === 1 ? 3 : 2);
+        return await fn(a);
+      } catch (err) {
+        lastErr = err;
+        logError(`${label} — essai ${a}/${maxAttempts} échoué`, err);
+        safeDisconnect();
+        if (a < maxAttempts) { log(`${label} : reconnexion et nouvel essai (${a + 1}/${maxAttempts})...`); await sleep(2000); }
+      }
+    }
+    throw lastErr;
+  } finally { bleBusy--; }
+}
+
+// Démarrage d'un enregistrement interne, commun aux trois activités. Rejouable :
+// chaque essai arrête d'abord tout enregistrement actif puis relit la ligne de base.
+async function sensorStartRecording(types = REC_TYPES) {
+  return await withSensorRetry('Démarrage', async () => {
+    log('Préparation du capteur...');
+    await pftpEnsureReady();
+    await stopStrayRecordings();
+    const baseline = (await listAllRecordings()).map(r => r.path);
+    log('Démarrage de l\'enregistrement...');
+    await startAllRecordings(types);
+    return baseline;
+  }, 2);
 }
 
 // ======= HIIT app integration: sensor session lifecycle =======
@@ -1259,16 +1370,30 @@ function sensorSavePending() {
 }
 
 async function sensorPrewarmConnect() {
-  if (sensorPrewarmPromise || sensorActive) return; // already warming up or already connected
-  const known = (typeof navigator.bluetooth?.getDevices === 'function')
-    ? await navigator.bluetooth.getDevices().catch(() => [])
-    : [];
-  if (known.length === 0) return; // never paired — nothing to prewarm, DÉMARRER will handle it
+  if (sensorPrewarmPromise || bleBusy || sensorRecoverBusy || sensorStartBlocked()) return;
+  if (sensorActive && device && device.gatt.connected && controlChar) return; // déjà connecté
+  const known = await knownDevices();
+  if (known.length === 0 || sensorPrewarmPromise || bleBusy) return; // never paired — nothing to prewarm, DÉMARRER will handle it
   device = known[0];
   sensorPrewarmPromise = sensorSilentConnect();
 }
 
+async function knownDevices() {
+  if (typeof navigator.bluetooth?.getDevices !== 'function') return [];
+  try { return await withTimeout(navigator.bluetooth.getDevices(), 5000, 'getDevices'); }
+  catch (e) { logError('getDevices', e); return []; }
+}
+// Tant qu'une séance HIIT attend sur le capteur (ou est en cours de récupération),
+// aucun nouvel enregistrement ne peut être lancé : il se mélangerait à l'ancien.
+function sensorStartBlocked() {
+  return sensorRecoverBusy || (tState === 'idle' && !!localStorage.getItem(SENSOR_STORAGE_KEY));
+}
 async function sensorPromptThenStart(btn) {
+  if (sensorStartBlocked() || (tState === 'done' && localStorage.getItem(SENSOR_STORAGE_KEY))) {
+    showToast('Récupère d\'abord la séance en attente (bandeau en haut)');
+    return;
+  }
+  if (bleBusy && !sensorPrewarmPromise) { showToast('Capteur occupé — patiente quelques secondes'); return; }
   const originalText = btn ? btn.textContent : null;
   if (btn) { btn.disabled = true; btn.textContent = 'CONNEXION...'; }
 
@@ -1288,10 +1413,15 @@ async function sensorPromptThenStart(btn) {
     return;
   }
 
-  const known = (typeof navigator.bluetooth?.getDevices === 'function')
-    ? await navigator.bluetooth.getDevices().catch(() => [])
-    : [];
+  const known = await knownDevices();
 
+  if (known.length === 0 && device) {
+    // getDevices() indisponible mais capteur déjà choisi dans cet onglet : on le réutilise.
+    sensorNeedsPicker = false;
+    if (await sensorSilentConnect()) (sensorPendingAction || tStartCountdown)();
+    else showPopupAndResetButton();
+    return;
+  }
   if (known.length === 0) {
     // Never paired before (or persistent permissions unavailable) — the only way
     // to get a device at all is the picker, which needs an explicit tap, so show
@@ -1315,9 +1445,9 @@ async function sensorPromptThenStart(btn) {
   }
 }
 async function sensorSilentConnect() {
+  bleBusy++;
   try {
-    server = await waitForAdvertisementThenConnect();
-    await connectPmd();
+    await ensureConnected(3);
     sensorActive = true;
     log('Capteur connecté.');
     return true;
@@ -1326,7 +1456,7 @@ async function sensorSilentConnect() {
     sensorLastError = (err && err.message) ? err.message : String(err);
     sensorActive = false;
     return false;
-  }
+  } finally { bleBusy--; }
 }
 
 async function sensorModalRetry() {
@@ -1337,8 +1467,8 @@ async function sensorModalRetry() {
         filters: [{ namePrefix: 'Polar' }],
         optionalServices: [PMD_SERVICE, PFTP_SERVICE]
       });
-      server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
-      await connectPmd();
+      bleBusy++;
+      try { await ensureConnected(3); } finally { bleBusy--; }
       sensorActive = true;
       log('Capteur connecté (premier appairage).');
     } catch (err) {
@@ -1367,14 +1497,11 @@ function sensorModalSkip() {
 async function sensorOnSessionStart() {
   if (!sensorActive) return;
   try {
-    await pftpEnsureReady();
-    await stopStrayRecordings();
-    sensorBaseline = new Set((await listAllRecordings()).map(r => r.path));
-    await startAllRecordings();
+    sensorBaseline = new Set(await sensorStartRecording());
     sensorPhaseLog = [];
     sensorRewindEvents = [];
     sensorSavePending();
-    device.gatt.disconnect();
+    safeDisconnect();
     log('Enregistrement démarré, capteur déconnecté (enregistre seul).');
   } catch (err) {
     logError('Échec démarrage enregistrement', err);
@@ -1394,84 +1521,80 @@ function sensorOnPhaseChange() {
 }
 
 async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES) {
-  // Shared by the Timer and Swim flows: reconnect (with retries), stop recording,
+  // Shared by the Timer, Swim and Free flows: reconnect (with retries), stop recording,
   // list, diff against the baseline, download and decode every new file. Returns
-  // {ok, combined} — combined.phaseLog is left null; callers fill in what's specific
-  // to their flow (Timer's phase log, or nothing for a free-form swim session).
-  let lastError = null;
-  let newRecordings = [];
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+  // {ok, combined} and never throws. Chaque étape passe par withSensorRetry : un lien
+  // qui tombe en plein transfert est rétabli et le fichier en cours est repris.
+  bleBusy++;
+  try {
+    let newRecordings = [];
     try {
-      if (!device.gatt.connected) {
-        server = await waitForAdvertisementThenConnect();
-        await connectPmd();
-        pftpMtuChar = null;
-      }
-      await stopAllRecordings(types);
-      await pftpEnsureReady();
-      const current = await listAllRecordings();
-      newRecordings = current.filter(r => !baseline.has(r.path));
-      if (newRecordings.length === 0) throw new Error('Aucun nouvel enregistrement listé.');
-      log(`${newRecordings.length} fichier(s) trouvé(s), téléchargement...`);
-      lastError = null;
-      break;
+      newRecordings = await withSensorRetry('Récupération', async () => {
+        log('Arrêt de l\'enregistrement sur le capteur...');
+        await stopAllRecordings(types);
+        await pftpEnsureReady();
+        log('Lecture de la liste des fichiers...');
+        const current = await listAllRecordings();
+        const fresh = current.filter(r => !baseline.has(r.path));
+        if (fresh.length === 0) throw new Error('Aucun nouvel enregistrement listé.');
+        return fresh;
+      }, maxAttempts);
     } catch (err) {
-      lastError = err;
-      logError('Tentative ' + attempt + ' échouée', err);
-      // Lien possiblement « zombie » (connecté côté Android, muet côté capteur) : on le
-      // coupe pour que la tentative suivante reparte d'une vraie reconnexion.
-      try { if (device.gatt.connected) device.gatt.disconnect(); } catch (e) {}
-      pftpMtuChar = null;
-      if (attempt < maxAttempts) { log(`Récupération : nouvel essai (${attempt + 1}/${maxAttempts})...`); await sleep(3000); }
+      sensorLastError = (err && err.message) ? err.message : String(err);
+      log('Récupération capteur reportée (' + sensorLastError + ')');
+      return { ok: false, combined: null };
     }
-  }
 
-  if (lastError) {
-    log('Récupération capteur reportée (' + lastError + ')');
-    return { ok: false, combined: null };
-  }
-
-  const combined = { position: sensorPosition, phaseLog: null, acc: null, gyro: null, mag: null, hr: null };
-  let fileNum = 0;
-  for (const r of newRecordings) {
-    fileNum++;
-    const upperPath = r.path.toUpperCase();
-    const kind = upperPath.includes('ACC') ? 'accéléromètre' : upperPath.includes('GYRO') ? 'gyroscope' : upperPath.includes('HR') ? 'fréquence cardiaque' : 'magnétomètre';
-    log(`Téléchargement ${fileNum}/${newRecordings.length} (${kind})...`);
-    let bytes = null;
-    for (let fileAttempt = 1; fileAttempt <= 3; fileAttempt++) {
-      try {
-        const got = await pftpGetFile(r.path);
-        if (r.size && got.length !== r.size) {
-          // The transfer completed without error but returned fewer (or more) bytes
-          // than the directory listing said this file actually is — a silent partial
-          // transfer. Don't accept it; retry rather than saving truncated data.
-          logError('Taille inattendue pour ' + r.path + ' (reçu ' + got.length + ', attendu ' + r.size + ')', '');
-          if (fileAttempt < 3) { log(`Transfert incomplet (${kind}), nouvel essai...`); await sleep(1500); continue; }
-          throw new Error(`taille reçue (${got.length}) ≠ taille attendue (${r.size}) après 3 essais`);
-        }
-        bytes = got;
-        break;
-      } catch (err) {
-        if (fileAttempt >= 3) throw err;
-        logError('Échec transfert ' + r.path + ' tentative ' + fileAttempt, err);
-        await sleep(1500);
-      }
-    }
-    try {
+    const totalBytes = newRecordings.reduce((a, r) => a + (r.size || 0), 0);
+    log(`${newRecordings.length} fichier(s) trouvé(s)` + (totalBytes ? ` — ${(totalBytes/1024).toFixed(0)} ko au total` : ''));
+    const combined = { position: sensorPosition, phaseLog: null, acc: null, gyro: null, mag: null, hr: null };
+    let fileNum = 0;
+    for (const r of newRecordings) {
+      fileNum++;
       const upper = r.path.toUpperCase();
-      if (upper.includes('ACC')) combined.acc = decodeRecFile(bytes, 3, 16, 1);
-      else if (upper.includes('GYRO')) combined.gyro = decodeRecFile(bytes, 3, 16, 0);
-      else if (upper.includes('HR')) combined.hr = decodeHrRecFile(bytes);
-      else if (upper.includes('MAG')) combined.mag = decodeRecFile(bytes, 3, 16, 0);
-      log(`${kind} récupéré (${fileNum}/${newRecordings.length}).`);
-    } catch (err) {
-      logError('Échec récupération/décodage ' + r.path, err);
-      log(`Échec sur ${kind} (${fileNum}/${newRecordings.length}), poursuite...`);
+      const kind = upper.includes('ACC') ? 'accéléromètre' : upper.includes('GYRO') ? 'gyroscope' : upper.includes('HR') ? 'fréquence cardiaque' : 'magnétomètre';
+      const head = `Téléchargement ${fileNum}/${newRecordings.length} — ${kind}`;
+      log(head + '...');
+      let bytes = null;
+      try {
+        bytes = await withSensorRetry(head, async () => {
+          let lastShown = 0;
+          const got = await pftpGetFile(r.path, (n) => {
+            const now = Date.now();
+            if (now - lastShown < 400) return;
+            lastShown = now;
+            sensorProgress(r.size
+              ? `${head} : ${Math.min(100, Math.round(100 * n / r.size))} % (${(n/1024).toFixed(0)} / ${(r.size/1024).toFixed(0)} ko)`
+              : `${head} : ${(n/1024).toFixed(0)} ko`);
+          });
+          if (r.size && got.length !== r.size) {
+            // Transfert terminé sans erreur mais taille différente de celle du répertoire :
+            // transfert partiel silencieux, on ne l'accepte pas.
+            throw new Error(`taille reçue (${got.length}) ≠ taille attendue (${r.size})`);
+          }
+          return got;
+        }, 4);
+      } catch (err) {
+        sensorLastError = `${kind} : ` + ((err && err.message) ? err.message : String(err));
+        log('Récupération interrompue (' + sensorLastError + ')');
+        return { ok: false, combined: null };
+      }
+      try {
+        if (upper.includes('ACC')) combined.acc = decodeRecFile(bytes, 3, 16, 1);
+        else if (upper.includes('GYRO')) combined.gyro = decodeRecFile(bytes, 3, 16, 0);
+        else if (upper.includes('HR')) combined.hr = decodeHrRecFile(bytes);
+        else if (upper.includes('MAG')) combined.mag = decodeRecFile(bytes, 3, 16, 0);
+        log(`${kind} récupéré (${fileNum}/${newRecordings.length}).`);
+      } catch (err) {
+        logError('Échec décodage ' + r.path, err);
+        log(`Échec du décodage ${kind} (${fileNum}/${newRecordings.length}), poursuite...`);
+      }
     }
-  }
-  log('Données du capteur récupérées ✓');
-  return { ok: true, combined };
+    log('Données du capteur récupérées ✓');
+    safeDisconnect(); // lien inutile désormais : on libère le capteur
+    sensorActive = false;
+    return { ok: true, combined };
+  } finally { bleBusy--; }
 }
 
 async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5, endedAtMs = null) {
@@ -1481,11 +1604,82 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], ma
   if (endedAtMs) combined.endedAtMs = endedAtMs;
   combined.rewindEvents = rewindEvents;
   combined.loads = getLoads();
+  sensorProgress('Analyse de la séance...');
   await new Promise(r => setTimeout(r, 30));
   combined.analysis = buildHiitAnalysis(combined);
   showSessionResultsModal(combined);
+  sensorProgress('Sauvegarde de la séance...');
   await saveSessionData(combined);
   return true;
+}
+
+// ---- Bandeau « séance en attente » : visible sur tous les onglets, il détaille
+// chaque étape de la récupération et bloque tout nouveau démarrage d'ici là. ----
+let sensorRecoverBusy = false;
+let sensorBannerTimer = null;
+function sensorBannerShow(state) {
+  let box = document.getElementById('sensor-banner');
+  if (!box) {
+    const anchor = document.getElementById('update-banner');
+    if (!anchor) return;
+    box = document.createElement('div');
+    box.id = 'sensor-banner';
+    box.style.cssText = 'position:sticky;top:0;z-index:999;background:#1d2a23;border-bottom:2px solid var(--accent);padding:12px 14px;font-family:var(--font);text-align:center';
+    box.innerHTML = '<div id="sensor-banner-title" style="font-size:13px;font-weight:700;letter-spacing:1px;color:var(--accent)"></div>'
+      + '<div id="sensor-banner-detail" style="font-size:13px;color:#fff;margin-top:6px;min-height:17px;line-height:1.35"></div>'
+      + '<div id="sensor-banner-sub" style="font-size:11px;color:#a8b5ad;margin-top:4px;line-height:1.35"></div>'
+      + '<button id="sensor-recover-btn" style="display:none;width:100%;margin-top:10px;padding:14px;border:none;border-radius:10px;background:var(--accent);color:#111;font-family:var(--font);font-size:14px;font-weight:700;letter-spacing:1px;cursor:pointer"></button>'
+      + '<button id="sensor-abandon-btn" style="display:none;margin-top:8px;padding:6px;border:none;background:none;color:#a8b5ad;font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Abandonner cette séance</button>';
+    anchor.insertAdjacentElement('afterend', box);
+    document.getElementById('sensor-recover-btn').onclick = () => sensorManualRecover();
+    document.getElementById('sensor-abandon-btn').onclick = () => sensorAbandonPending();
+  }
+  const title = document.getElementById('sensor-banner-title');
+  const detail = document.getElementById('sensor-banner-detail');
+  const sub = document.getElementById('sensor-banner-sub');
+  const btn = document.getElementById('sensor-recover-btn');
+  const ab = document.getElementById('sensor-abandon-btn');
+  clearInterval(sensorBannerTimer); sensorBannerTimer = null;
+  if (state === 'busy') {
+    title.textContent = 'RÉCUPÉRATION DE LA SÉANCE EN COURS';
+    detail.textContent = 'Démarrage...';
+    btn.style.display = 'none'; ab.style.display = 'none';
+    const t0 = Date.now();
+    const tick = () => {
+      const sec = Math.floor((Date.now() - t0) / 1000);
+      sub.textContent = `Depuis ${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')} — garde l'app ouverte et le capteur près du téléphone. Démarrage d'activité bloqué d'ici là.`;
+    };
+    tick(); sensorBannerTimer = setInterval(tick, 1000);
+  } else {
+    const failed = state === 'failed';
+    title.textContent = failed ? 'RÉCUPÉRATION ÉCHOUÉE' : 'SÉANCE EN ATTENTE SUR LE CAPTEUR';
+    detail.textContent = failed ? ('Dernière erreur : ' + (sensorLastError || 'inconnue')) : 'Les données de ta dernière séance HIIT sont encore sur le capteur.';
+    sub.textContent = failed
+      ? 'Les données restent sur le capteur. Vérifie qu\'il est allumé et proche, puis réessaie (tu devras le choisir dans la liste).'
+      : 'Aucune nouvelle activité ne peut démarrer tant qu\'elle n\'est pas récupérée.';
+    btn.textContent = failed ? 'RÉESSAYER LA RÉCUPÉRATION' : 'RÉCUPÉRER LA SÉANCE DU CAPTEUR';
+    btn.disabled = false; btn.style.display = 'block'; ab.style.display = 'inline-block';
+  }
+}
+function sensorBannerHide() {
+  clearInterval(sensorBannerTimer); sensorBannerTimer = null;
+  const box = document.getElementById('sensor-banner');
+  if (box) box.remove();
+}
+function sensorRefreshStartButtons() { try { if (tState === 'idle') tRenderControls(); } catch (e) {} }
+
+async function sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs) {
+  if (sensorRecoverBusy) return;
+  sensorRecoverBusy = true;
+  sensorBannerShow('busy');
+  sensorRefreshStartButtons();
+  let ok = false;
+  try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 3, endedAtMs); }
+  catch (err) { logError('Récupération', err); sensorLastError = (err && err.message) ? err.message : String(err); }
+  sensorRecoverBusy = false;
+  if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); sensorBannerHide(); }
+  else { safeDisconnect(); device = null; sensorActive = false; sensorBannerShow('failed'); } // device remis à zéro : le prochain essai repasse par le sélecteur, donc par un objet neuf
+  sensorRefreshStartButtons();
 }
 
 function sensorOnSessionEnd() {
@@ -1498,36 +1692,18 @@ function sensorOnSessionEnd() {
     const p = JSON.parse(localStorage.getItem(SENSOR_STORAGE_KEY) || 'null');
     if (p) { p.endedAtMs = endedAtMs; localStorage.setItem(SENSOR_STORAGE_KEY, JSON.stringify(p)); }
   } catch (e) {}
-  (async () => {
-    let ok = false;
-    try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 5, endedAtMs); }
-    catch (err) { logError('Récupération fin de séance', err); }
-    if (ok) localStorage.removeItem(SENSOR_STORAGE_KEY);
-    else showSensorRecoverButton();
-  })();
+  sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs);
 }
 
-// Récupération manuelle d'une séance HIIT restée sur le capteur (récupération auto
-// échouée, ou onglet rechargé sans getDevices()). Le tap fournit le geste utilisateur
-// qu'exige requestDevice().
-function showSensorRecoverButton() {
-  if (!localStorage.getItem(SENSOR_STORAGE_KEY) || document.getElementById('sensor-recover-btn')) return;
-  const st = document.getElementById('update-banner');
-  if (!st) return;
-  const btn = document.createElement('button');
-  btn.id = 'sensor-recover-btn';
-  btn.textContent = 'RÉCUPÉRER LA SÉANCE DU CAPTEUR';
-  btn.style.cssText = 'display:block;position:sticky;top:0;z-index:999;width:100%;padding:16px;border:none;border-radius:0;background:var(--accent);color:#111;font-family:var(--font);font-size:14px;font-weight:700;letter-spacing:1px;cursor:pointer';
-  btn.onclick = () => sensorManualRecover(btn);
-  st.insertAdjacentElement('afterend', btn);
-}
-let sensorRecoverBusy = false;
-async function sensorManualRecover(btn) {
+// Récupération manuelle (récupération auto échouée, ou onglet rechargé). Le tap fournit
+// le geste utilisateur qu'exige requestDevice(), qui doit rester le premier await.
+async function sensorManualRecover() {
   if (sensorRecoverBusy) return;
   let pending = null;
   try { pending = JSON.parse(localStorage.getItem(SENSOR_STORAGE_KEY) || 'null'); } catch (e) {}
-  if (!pending) { btn.remove(); return; }
-  btn.disabled = true;
+  if (!pending) { sensorBannerHide(); sensorRefreshStartButtons(); return; }
+  const btn = document.getElementById('sensor-recover-btn');
+  if (btn) btn.disabled = true;
   try {
     if (!device) {
       device = await navigator.bluetooth.requestDevice({
@@ -1537,18 +1713,18 @@ async function sensorManualRecover(btn) {
     }
   } catch (err) {
     logError('Récupération manuelle : capteur non sélectionné', err);
-    btn.disabled = false;
+    if (btn) btn.disabled = false;
     return;
   }
-  btn.textContent = 'RÉCUPÉRATION EN COURS...';
-  sensorRecoverBusy = true;
-  let ok = false;
-  try {
-    ok = await sensorRetrieveAndFinish(new Set(pending.baseline || []), pending.phaseLog || [], pending.rewindEvents || [], 3, pending.endedAtMs || null);
-  } catch (err) { logError('Récupération manuelle', err); }
-  sensorRecoverBusy = false;
-  if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); btn.remove(); }
-  else { try { if (device && device.gatt.connected) device.gatt.disconnect(); } catch (e) {} device = null; btn.disabled = false; btn.textContent = 'RÉESSAYER LA RÉCUPÉRATION'; }
+  await sensorRunRecovery(new Set(pending.baseline || []), pending.phaseLog || [], pending.rewindEvents || [], pending.endedAtMs || null);
+}
+function sensorAbandonPending() {
+  if (sensorRecoverBusy) return;
+  if (!confirm('Abandonner la séance en attente ?\n\nSes données ne seront pas importées dans l\'app. Cette action est définitive.')) return;
+  localStorage.removeItem(SENSOR_STORAGE_KEY);
+  logAppend('Séance en attente abandonnée par l\'utilisateur.');
+  sensorBannerHide();
+  sensorRefreshStartButtons();
 }
 
 async function tryResumePendingSensorSession() {
@@ -1557,20 +1733,15 @@ async function tryResumePendingSensorSession() {
   let pending;
   try { pending = JSON.parse(raw); } catch (e) { return; }
   log('Séance capteur en attente détectée.');
-  // Le bouton est affiché tout de suite, sur tous les onglets ; si le navigateur
-  // connaît déjà le capteur, on lance la même récupération sans attendre de tap.
-  showSensorRecoverButton();
-  try {
-    if (typeof navigator.bluetooth?.getDevices !== 'function') return;
-    const known = await navigator.bluetooth.getDevices();
-    const found = known.find(d => d.id === pending.deviceId);
-    if (!found || sensorRecoverBusy) return;
-    device = found;
-    const btn = document.getElementById('sensor-recover-btn');
-    if (btn) sensorManualRecover(btn);
-  } catch (err) {
-    logError('Échec reprise automatique', err);
-  }
+  // Bandeau affiché tout de suite ; si le navigateur connaît déjà le capteur, la même
+  // récupération est lancée sans attendre de tap.
+  sensorBannerShow('idle');
+  sensorRefreshStartButtons();
+  const known = await knownDevices();
+  const found = known.find(d => d.id === pending.deviceId);
+  if (!found || sensorRecoverBusy || device) return;
+  device = found;
+  sensorManualRecover();
 }
 
 let sensorPosition = localStorage.getItem('hiitSensorPosition') || 'Avant-bras';
@@ -1841,7 +2012,8 @@ async function saveSessionData(combined, prefix = 'seance_') {
     const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
       method: 'PUT',
       headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: contentB64 })
+      body: JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: contentB64 }),
+      signal: AbortSignal.timeout ? AbortSignal.timeout(120000) : undefined
     });
     if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
     log('Séance sauvegardée sur GitHub: ' + filename);
@@ -2523,11 +2695,8 @@ async function swimActuallyStart() {
   }
   try {
     statusEl.textContent = 'Démarrage de l\'enregistrement...';
-    await pftpEnsureReady();
-    await stopStrayRecordings();
-    swimBaseline = new Set((await listAllRecordings()).map(r => r.path));
-    await startAllRecordings();
-    device.gatt.disconnect();
+    swimBaseline = new Set(await sensorStartRecording());
+    safeDisconnect();
     swimStartWallMs = performance.now();
     swimStartEpochMs = Date.now();
     btn.textContent = swimMode === 'countercurrent' ? 'ARRÊTER LE CONTRE-COURANT' : 'ARRÊTER LA NATATION';
@@ -2554,7 +2723,10 @@ async function swimStop(btn) {
   btn.disabled = true;
   btn.textContent = 'ANALYSE EN COURS...';
   document.getElementById('swim-status').textContent = 'Récupération des données...';
-  await swimRetrieveAndFinish(swimBaseline, durationS, swimMode, getCcLevel(), swimStartEpochMs);
+  sensorProgressExtraEl = document.getElementById('swim-status');
+  try { await swimRetrieveAndFinish(swimBaseline, durationS, swimMode, getCcLevel(), swimStartEpochMs); }
+  catch (err) { logError('Fin de natation', err); showToast('⚠️ Erreur pendant l\'analyse — voir le journal'); }
+  sensorProgressExtraEl = null;
   swimResetButton(btn);
   document.getElementById('swim-status').textContent = '';
 }
@@ -3232,12 +3404,14 @@ let freeActivity = localStorage.getItem(FREE_LAST_LS) || 'Escalade';
 if (freeActivity === 'Rugby') freeActivity = 'Escalade'; // pas de capteur en sport de contact
 
 async function sensorStopEverything(btn) {
+  if (bleBusy || sensorRecoverBusy) { showToast('Capteur occupé — réessaie dans un instant'); return; }
   const label = btn.textContent;
   btn.disabled = true; btn.textContent = 'Recherche du capteur...';
   try {
     if (!device) {
       let found = null;
       if (typeof navigator.bluetooth?.getDevices === 'function') {
+        // pas de timeout ici : getDevices doit rester le seul await avant requestDevice (geste utilisateur)
         const known = await navigator.bluetooth.getDevices().catch(() => []);
         found = known[0] || null;
       }
@@ -3245,10 +3419,9 @@ async function sensorStopEverything(btn) {
         filters: [{ namePrefix: 'Polar' }], optionalServices: [PMD_SERVICE, PFTP_SERVICE]
       });
     }
-    if (!device.gatt.connected) { server = await waitForAdvertisementThenConnect(); await connectPmd(); pftpMtuChar = null; }
     btn.textContent = 'Arrêt...';
-    await stopStrayRecordings();
-    device.gatt.disconnect();
+    await withSensorRetry('Arrêt manuel', async () => { await stopStrayRecordings(); });
+    safeDisconnect();
     sensorActive = false;
     if (freePending()) { localStorage.removeItem(FREE_LS); freeResetButton(); document.getElementById('free-status').textContent = ''; }
     log('Arrêt manuel de tous les enregistrements.');
@@ -3348,13 +3521,10 @@ async function freeActuallyStart() {
   btn.disabled = true; btn.textContent = 'DÉMARRAGE...';
   try {
     statusEl.textContent = 'Démarrage de l\'enregistrement FC...';
-    await pftpEnsureReady();
-    await stopStrayRecordings();
-    const baseline = Array.from(new Set((await listAllRecordings()).map(r => r.path)));
-    await startAllRecordings(FREE_TYPES);
+    const baseline = await sensorStartRecording(FREE_TYPES);
     const p = { deviceId: device.id, baseline, startedAtMs: Date.now(), activity: freeCurrentName() };
     localStorage.setItem(FREE_LS, JSON.stringify(p));
-    device.gatt.disconnect();
+    safeDisconnect();
     log(`Activité libre (${p.activity}) : enregistrement FC démarré, capteur déconnecté.`);
     freeShowRunning(p);
     showToast('Enregistrement lancé — bonne séance !');
@@ -3376,7 +3546,7 @@ async function freeStop(btn) {
       // rester le premier await après le tap (geste utilisateur exigé par Chrome).
       let found = null;
       if (typeof navigator.bluetooth?.getDevices === 'function') {
-        const known = await navigator.bluetooth.getDevices().catch(() => []);
+        const known = await knownDevices();
         found = known.find(d => d.id === p.deviceId) || known[0] || null;
       }
       device = found || await navigator.bluetooth.requestDevice({
@@ -3395,8 +3565,11 @@ async function freeStop(btn) {
   const durationS = (endedAtMs - p.startedAtMs) / 1000;
   btn.textContent = 'RÉCUPÉRATION...';
   statusEl.textContent = 'Récupération des données FC...';
+  sensorProgressExtraEl = statusEl;
   const { ok, combined } = await retrieveAllSensorData(new Set(p.baseline), 5, FREE_TYPES);
+  sensorProgressExtraEl = null;
   if (!ok) {
+    safeDisconnect(); device = null; // prochain essai : objet capteur neuf
     showToast('⚠️ Récupération échouée — les données restent sur le capteur');
     freeShowRunning(p);
     statusEl.textContent = 'Récupération échouée — rapproche le capteur et réappuie sur ARRÊTER.';
