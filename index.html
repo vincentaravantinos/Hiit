@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-06T10:23:09Z';</script>
+<script>const APP_BUILD = '2026-10-07T14:04:03Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -339,10 +339,11 @@ body {
 <div class="toast" id="toast"></div>
 <div class="sensor-modal-backdrop" id="sensor-modal" style="display:none;">
   <div class="sensor-modal">
-    <h3>CAPTEUR NON TROUVÉ</h3>
-    <p>Impossible de se connecter au bracelet Polar. Continuer sans capteur, ou réessayer ?</p>
+    <h3 id="sensor-modal-title">CAPTEUR NON TROUVÉ</h3>
+    <p id="sensor-modal-text">Impossible de se connecter au bracelet Polar. Continuer sans capteur, ou réessayer ?</p>
     <p id="sensor-error-detail" style="font-size:11px;color:var(--muted);opacity:0.7;margin-top:-10px;margin-bottom:18px;word-break:break-word;"></p>
-    <button class="btn-connect" onclick="sensorModalRetry()">Réessayer</button>
+    <button class="btn-connect" id="sensor-modal-retry" onclick="sensorModalRetry()">Réessayer</button>
+    <button class="btn-skip" id="sensor-modal-pick" onclick="sensorModalRetry(true)" style="display:none">Choisir un autre capteur</button>
     <button class="btn-skip" onclick="sensorModalSkip()">Continuer sans capteur</button>
   </div>
 </div>
@@ -1244,6 +1245,37 @@ async function stopStrayRecordings() {
   }
 }
 
+// ---- Identité du capteur. Le filtre « Polar » seul acceptait aussi une montre Polar,
+// et getDevices() renvoie tout appareil autorisé sur ce site (y compris via les pages
+// de test) : on ne retient donc que les noms du bracelet optique. ----
+const SENSOR_NAME_PREFIXES = ['Polar Sense', 'Polar OH1'];
+const SENSOR_ID_LS = 'hiitSensorDeviceId';
+function sensorRequestOpts() {
+  return { filters: SENSOR_NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices: [PMD_SERVICE, PFTP_SERVICE] };
+}
+function isSensorName(name) { return !!name && SENSOR_NAME_PREFIXES.some(p => name.startsWith(p)); }
+function sensorLabel() { return device && device.name ? `« ${device.name} »` : 'le capteur'; }
+function pickKnownSensor(known, preferredId) {
+  const c = (known || []).filter(d => isSensorName(d.name));
+  let last = null; try { last = localStorage.getItem(SENSOR_ID_LS); } catch (e) {}
+  return c.find(d => d.id === preferredId) || c.find(d => d.id === last) || c[0] || null;
+}
+// Appareil retenu dans cet onglet mais qui n'est pas le capteur : on l'oublie.
+function dropWrongDevice() {
+  if (device && device.name && !isSensorName(device.name)) { safeDisconnect(); device = null; }
+}
+// Erreur définitive : réessayer ne changerait rien (mauvais appareil, aucun capteur choisi).
+function fatalError(msg) { const e = new Error(msg); e.fatal = true; return e; }
+function bleErrText(err) {
+  if (!err) return 'échec';
+  const m = err.message || String(err);
+  if (err.name === 'NetworkError') return 'le capteur ne répond pas';
+  if (err.name === 'NotFoundError') return 'service introuvable sur cet appareil';
+  if (err.name === 'SecurityError') return 'accès au service refusé';
+  if (err.name === 'NotSupportedError') return 'opération refusée par le capteur';
+  return m;
+}
+
 // ---- Couche de connexion unique : toutes les activités passent par ici ----
 let bleBusy = 0; // > 0 : une opération capteur est en cours (connexion, démarrage, récupération)
 const bleHooked = new WeakSet();
@@ -1289,30 +1321,46 @@ async function waitForOneAdvertisement(timeoutMs) {
 // d'un état propre, tente d'abord l'écoute d'annonce puis, à défaut, une connexion
 // directe. Tous les appels sont bornés par un timeout.
 async function ensureConnected(maxAttempts = 4) {
-  if (!device) throw new Error('Aucun capteur sélectionné');
+  if (!device) throw fatalError('Aucun capteur sélectionné');
+  if (device.name && !isSensorName(device.name)) {
+    const n = device.name; safeDisconnect(); device = null;
+    throw fatalError(`« ${n} » n'est pas le capteur Polar Sense`);
+  }
   hookDisconnect(device);
   if (device.gatt.connected && controlChar) return;
-  let lastErr = null;
+  let lastErr = null, step = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const n = `(essai ${attempt}/${maxAttempts})`;
     try {
       safeDisconnect();
-      log(`Recherche du capteur Polar... (essai ${attempt}/${maxAttempts})`);
+      step = 'recherche';
+      log(`Recherche de ${sensorLabel()}... ${n}`);
       let seen = false;
       try { await waitForOneAdvertisement(8000); seen = true; }
       catch (e) { logError('Annonce non reçue', e); }
-      log(seen ? `Capteur trouvé, connexion... (essai ${attempt}/${maxAttempts})` : `Capteur non vu, connexion directe... (essai ${attempt}/${maxAttempts})`);
-      server = await withTimeout(device.gatt.connect(), 15000, 'gatt.connect');
-      log('Connecté, préparation des services...');
+      step = 'connexion';
+      log(seen ? `Capteur détecté, connexion... ${n}` : `Capteur non détecté (éteint ou trop loin ?), connexion directe... ${n}`);
+      server = await withTimeout(device.gatt.connect(), 15000, 'connexion Bluetooth');
+      step = 'lecture des services';
+      log(`Connecté, lecture des services... ${n}`);
       await connectPmd();
+      try { localStorage.setItem(SENSOR_ID_LS, device.id); } catch (e) {}
       return;
     } catch (err) {
       lastErr = err;
-      logError('Connexion essai ' + attempt + ' échouée', err);
+      logError(`Connexion essai ${attempt}/${maxAttempts} échouée (${step}) [${(err && err.name) || '?'}]`, err);
+      // Connecté mais sans les services du capteur, sur un appareil sans nom reconnu :
+      // ce n'est pas le bon appareil, inutile d'insister.
+      const wrong = step === 'lecture des services' && err && (err.name === 'NotFoundError' || err.name === 'SecurityError') && !isSensorName(device.name);
       safeDisconnect(); // annule aussi une tentative de connexion restée en suspens
-      if (attempt < maxAttempts) await sleep(1000 * attempt);
+      if (wrong) { device = null; throw fatalError('Cet appareil n\'est pas le capteur Polar Sense'); }
+      if (attempt < maxAttempts) {
+        log(`Échec ${n} — ${step} : ${bleErrText(err)}. Nouvel essai...`);
+        await sleep(1500 * attempt);
+      }
     }
   }
-  throw new Error('Capteur injoignable (' + (lastErr ? lastErr.message : 'échec') + ')');
+  throw new Error(`Capteur injoignable après ${maxAttempts} essais — ${step} : ${bleErrText(lastErr)}`);
 }
 // Compatibilité avec les anciens appels.
 async function waitForAdvertisementThenConnect() { await ensureConnected(); return server; }
@@ -1329,9 +1377,10 @@ async function withSensorRetry(label, fn, maxAttempts = 3) {
         return await fn(a);
       } catch (err) {
         lastErr = err;
-        logError(`${label} — essai ${a}/${maxAttempts} échoué`, err);
+        logError(`${label} — passe ${a}/${maxAttempts} échouée`, err);
         safeDisconnect();
-        if (a < maxAttempts) { log(`${label} : reconnexion et nouvel essai (${a + 1}/${maxAttempts})...`); await sleep(2000); }
+        if (err && err.fatal) throw err;
+        if (a < maxAttempts) { log(`${label} interrompu (${bleErrText(err)}) — reconnexion...`); await sleep(2000); }
       }
     }
     throw lastErr;
@@ -1354,7 +1403,6 @@ async function sensorStartRecording(types = REC_TYPES) {
 
 // ======= HIIT app integration: sensor session lifecycle =======
 let sensorActive = false;
-let sensorNeedsPicker = false;
 let sensorPendingAction = null; // callback invoked once connect resolves (success or skip) — defaults to the Timer flow
 let sensorPrewarmPromise = null;
 let sensorLastError = null;
@@ -1378,8 +1426,10 @@ async function sensorPrewarmConnect() {
   if (sensorPrewarmPromise || bleBusy || sensorRecoverBusy || sensorStartBlocked()) return;
   if (sensorActive && device && device.gatt.connected && controlChar) return; // déjà connecté
   const known = await knownDevices();
-  if (known.length === 0 || sensorPrewarmPromise || bleBusy) return; // never paired — nothing to prewarm, DÉMARRER will handle it
-  device = known[0];
+  if (sensorPrewarmPromise || bleBusy) return;
+  dropWrongDevice();
+  if (!device) device = pickKnownSensor(known);
+  if (!device) return; // aucun capteur connu — DÉMARRER proposera la liste
   sensorPrewarmPromise = sensorSilentConnect();
 }
 
@@ -1403,14 +1453,12 @@ async function sensorPromptThenStart(btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'CONNEXION...'; }
 
   function showPopupAndResetButton() {
-    document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
-    document.getElementById('sensor-modal').style.display = 'flex';
+    sensorModalOpen();
     if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
 
   try {
   if (sensorPrewarmPromise) {
-    sensorNeedsPicker = false;
     const connected = await sensorPrewarmPromise;
     sensorPrewarmPromise = null;
     if (connected) { (sensorPendingAction || tStartCountdown)(); return; }
@@ -1418,43 +1466,42 @@ async function sensorPromptThenStart(btn) {
     return;
   }
 
-  const known = await knownDevices();
-
-  if (known.length === 0 && device) {
-    // getDevices() indisponible mais capteur déjà choisi dans cet onglet : on le réutilise.
-    sensorNeedsPicker = false;
-    if (await sensorSilentConnect()) (sensorPendingAction || tStartCountdown)();
-    else showPopupAndResetButton();
-    return;
-  }
-  if (known.length === 0) {
-    // Never paired before (or persistent permissions unavailable) — the only way
-    // to get a device at all is the picker, which needs an explicit tap, so show
-    // the modal with that as the "retry" action rather than attempting anything silent.
-    sensorNeedsPicker = true;
+  dropWrongDevice();
+  if (!device) device = pickKnownSensor(await knownDevices());
+  if (!device) {
+    // Aucun capteur connu : seule la liste Bluetooth peut en fournir un, et elle exige
+    // un tap — la modale le propose.
+    sensorLastError = null;
     showPopupAndResetButton();
     return;
   }
-
-  sensorNeedsPicker = false;
-  device = known[0];
-  const connected = await sensorSilentConnect();
-  if (connected) {
-    (sensorPendingAction || tStartCountdown)();
-  } else {
-    showPopupAndResetButton();
-  }
+  if (await sensorSilentConnect()) (sensorPendingAction || tStartCountdown)();
+  else showPopupAndResetButton();
   } catch (err) {
     logError('Erreur inattendue dans sensorPromptThenStart', err);
     showPopupAndResetButton();
   }
+}
+// Modale de connexion : propose la liste Bluetooth s'il n'y a pas de capteur retenu,
+// sinon de réessayer, et toujours de changer de capteur ou de continuer sans.
+function sensorModalOpen() {
+  const has = !!device;
+  document.getElementById('sensor-modal-title').textContent = has ? 'CAPTEUR INJOIGNABLE' : 'CHOISIR LE CAPTEUR';
+  document.getElementById('sensor-modal-text').textContent = has
+    ? `Connexion à ${sensorLabel()} impossible. Vérifie qu'il est allumé et tout près du téléphone.`
+    : 'Allume le capteur, puis sélectionne « Polar Sense … » dans la liste.';
+  document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
+  document.getElementById('sensor-modal-retry').textContent = has ? 'Réessayer' : 'Choisir le capteur';
+  document.getElementById('sensor-modal-pick').style.display = has ? '' : 'none';
+  document.getElementById('sensor-modal').style.display = 'flex';
 }
 async function sensorSilentConnect() {
   bleBusy++;
   try {
     await ensureConnected(3);
     sensorActive = true;
-    log('Capteur connecté.');
+    sensorLastError = null;
+    log(`Capteur connecté : ${sensorLabel()}.`);
     return true;
   } catch (err) {
     logError('Connexion silencieuse échouée', err);
@@ -1464,33 +1511,25 @@ async function sensorSilentConnect() {
   } finally { bleBusy--; }
 }
 
-async function sensorModalRetry() {
+async function sensorModalRetry(forcePick) {
   document.getElementById('sensor-modal').style.display = 'none';
-  if (sensorNeedsPicker) {
-    try {
-      device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'Polar' }],
-        optionalServices: [PMD_SERVICE, PFTP_SERVICE]
-      });
-      bleBusy++;
-      try { await ensureConnected(3); } finally { bleBusy--; }
-      sensorActive = true;
-      log('Capteur connecté (premier appairage).');
-    } catch (err) {
-      logError('Appairage annulé ou échoué', err);
-      sensorActive = false;
-      showToast('Capteur non connecté — séance sans capteur');
+  if (bleBusy) { showToast('Capteur occupé — patiente quelques secondes'); return; }
+  if (forcePick) { safeDisconnect(); device = null; sensorActive = false; }
+  dropWrongDevice();
+  if (!device) {
+    // requestDevice doit rester le premier await après le tap (geste utilisateur).
+    try { device = await navigator.bluetooth.requestDevice(sensorRequestOpts()); }
+    catch (err) {
+      logError('Sélection du capteur annulée', err);
+      sensorLastError = 'Aucun capteur sélectionné';
+      sensorModalOpen();
+      return;
     }
-    (sensorPendingAction || tStartCountdown)();
-    return;
   }
-  const connected = await sensorSilentConnect();
-  if (connected) {
-    (sensorPendingAction || tStartCountdown)();
-  } else {
-    document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
-    document.getElementById('sensor-modal').style.display = 'flex';
-  }
+  // Un échec ne lance plus la séance d'office : la modale revient avec le motif, et
+  // « Continuer sans capteur » reste un choix explicite.
+  if (await sensorSilentConnect()) (sensorPendingAction || tStartCountdown)();
+  else sensorModalOpen();
 }
 
 function sensorModalSkip() {
@@ -1710,12 +1749,8 @@ async function sensorManualRecover() {
   const btn = document.getElementById('sensor-recover-btn');
   if (btn) btn.disabled = true;
   try {
-    if (!device) {
-      device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'Polar' }],
-        optionalServices: [PMD_SERVICE, PFTP_SERVICE]
-      });
-    }
+    dropWrongDevice();
+    if (!device) device = await navigator.bluetooth.requestDevice(sensorRequestOpts());
   } catch (err) {
     logError('Récupération manuelle : capteur non sélectionné', err);
     if (btn) btn.disabled = false;
@@ -3445,11 +3480,9 @@ async function sensorStopEverything(btn) {
       if (typeof navigator.bluetooth?.getDevices === 'function') {
         // pas de timeout ici : getDevices doit rester le seul await avant requestDevice (geste utilisateur)
         const known = await navigator.bluetooth.getDevices().catch(() => []);
-        found = known[0] || null;
+        found = pickKnownSensor(known);
       }
-      device = found || await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'Polar' }], optionalServices: [PMD_SERVICE, PFTP_SERVICE]
-      });
+      device = found || await navigator.bluetooth.requestDevice(sensorRequestOpts());
     }
     btn.textContent = 'Arrêt...';
     await withSensorRetry('Arrêt manuel', async () => { await stopStrayRecordings(); });
@@ -3579,12 +3612,9 @@ async function freeStop(btn) {
       let found = null;
       if (typeof navigator.bluetooth?.getDevices === 'function') {
         const known = await knownDevices();
-        found = known.find(d => d.id === p.deviceId) || known[0] || null;
+        found = pickKnownSensor(known, p.deviceId);
       }
-      device = found || await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'Polar' }],
-        optionalServices: [PMD_SERVICE, PFTP_SERVICE]
-      });
+      device = found || await navigator.bluetooth.requestDevice(sensorRequestOpts());
     }
   } catch (err) {
     logError('Activité libre : capteur non retrouvé', err);
