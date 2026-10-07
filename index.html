@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-07T14:39:42Z';</script>
+<script>const APP_BUILD = '2026-10-07T14:48:35Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -289,6 +289,8 @@ body {
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;margin-top:10px;">
         <div class="setting-name">Sauvegarde automatique GitHub</div>
         <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
+        <button onclick="document.getElementById('session-import-input').click()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Importer une séance téléchargée (envoi GitHub échoué)</button>
+        <input type="file" id="session-import-input" accept=".json,application/json" multiple style="display:none" onchange="importSessionFiles(this)">
         <input type="password" id="github-token-input" placeholder="ghp_..." style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()">
         <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
       </div>
@@ -2105,6 +2107,76 @@ async function backfillHiitSummaries() {
   }
 }
 
+// Envoi chiffré d'une séance dans data/sessions. Jusqu'à 3 envois : un échec passager
+// (réseau, écriture concurrente du pont santé sur le dépôt → 409, erreur serveur) ne doit
+// pas faire sortir la séance de GitHub. Renvoie 'saved', ou 'exists' si le fichier y était déjà.
+async function githubPutSession(filename, combined, token) {
+  const url = `https://api.github.com/repos/vincentaravantinos/Hiit/contents/data/sessions/${filename}`;
+  const headers = { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' };
+  const body = JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: btoa(await encryptJson(combined)) });
+  const sig = (ms) => AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined;
+  let lastErr = null;
+  for (let a = 1; a <= 3; a++) {
+    try {
+      const resp = await fetch(url, { method: 'PUT', headers, body, signal: sig(120000) });
+      if (resp.ok) return 'saved';
+      if (resp.status === 422) {
+        // Fichier déjà présent (envoi précédent abouti sans que sa réponse arrive, ou import en double).
+        const chk = await fetch(url, { headers, signal: sig(30000) });
+        if (chk.ok) return 'exists';
+      }
+      lastErr = new Error('GitHub a répondu ' + resp.status);
+      if ([401, 403, 404].includes(resp.status)) break; // jeton ou dépôt : réessayer n'y changera rien
+    } catch (err) { lastErr = err; }
+    logError(`Sauvegarde GitHub — envoi ${a}/3 échoué`, lastErr);
+    if (a < 3) { sensorProgress(`Sauvegarde : nouvel envoi (${a + 1}/3)...`); await sleep(a === 1 ? 3000 : 8000); }
+  }
+  throw lastErr || new Error('échec');
+}
+
+// Import d'une séance restée en téléchargement local (envoi GitHub échoué) : le fichier
+// est relu, chiffré avec la clé de cet appareil, envoyé dans le dépôt et rattaché à
+// l'historique, comme s'il avait été sauvegardé normalement.
+async function importSessionFiles(input) {
+  const files = Array.from(input.files || []);
+  input.value = '';
+  if (!files.length) return;
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) { showToast('Configure ton token GitHub d\'abord.'); return; }
+  let ok = 0, already = 0, lastErr = null;
+  for (const file of files) {
+    try {
+      const m = /^(seance_|natation_|libre_|rugby_)(\d{4}-\d{2}-\d{2}[0-9TZ-]*)/.exec(file.name);
+      if (!m) throw new Error('nom de fichier non reconnu (attendu : seance_…, natation_… ou libre_…)');
+      const prefix = m[1], filename = m[1] + m[2] + '.json', fileDate = m[2].slice(0, 10);
+      const type = prefix === 'natation_' ? 'swim' : (prefix === 'libre_' || prefix === 'rugby_') ? 'free' : 'hiit';
+      showToast('Import de ' + filename + '…');
+      const text = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error || new Error('lecture impossible')); r.readAsText(file); });
+      const combined = await decryptMaybe(JSON.parse(text));
+      if (!combined || typeof combined !== 'object' || !(combined.acc || combined.hr)) throw new Error('ce fichier ne contient pas de données de séance');
+      if (type === 'hiit' && !(combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION)) combined.analysis = buildHiitAnalysis(combined);
+      const res = await githubPutSession(filename, combined, token);
+      let index = [];
+      try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { index = []; }
+      const old = index.find(e => e.filename === filename) || index.find(e => e.type === type && e.date === fileDate && !e.savedToGithub);
+      const date = old ? old.date : fileDate;
+      index = index.filter(e => e !== old);
+      index.push({ date, type, filename, savedToGithub: true, summary: buildSessionSummary(combined, type) || (old && old.summary) || null });
+      index.sort((x, y) => x.date < y.date ? -1 : x.date > y.date ? 1 : 0);
+      localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index));
+      if (type === 'hiit' && !hasEntry(date)) { workouts.unshift({ date, type: 'I' }); S.set(KEYS.workouts, workouts); }
+      logAppend(`Séance importée (${res === 'exists' ? 'déjà présente sur GitHub' : 'envoyée sur GitHub'}) : ${filename}`);
+      if (res === 'exists') already++; else ok++;
+    } catch (err) {
+      lastErr = err;
+      logError('Import de ' + file.name + ' échoué', err);
+    }
+  }
+  renderDashboard();
+  showToast(lastErr ? '⚠️ Import échoué : ' + (lastErr.message || lastErr)
+    : ok ? `✓ ${ok} séance(s) importée(s) sur GitHub` : `Déjà sur GitHub — historique rattaché (${already})`);
+}
+
 async function saveSessionData(combined, prefix = 'seance_') {
   const filename = prefix + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
   const token = localStorage.getItem('hiitGithubToken');
@@ -2115,30 +2187,7 @@ async function saveSessionData(combined, prefix = 'seance_') {
     return;
   }
   try {
-    const path = 'data/sessions/' + filename;
-    const url = `https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`;
-    const headers = { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' };
-    const body = JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: btoa(await encryptJson(combined)) });
-    const sig = (ms) => AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined;
-    // Jusqu'à 3 envois : un échec passager (réseau, écriture concurrente du pont santé
-    // sur le dépôt → 409, erreur serveur) ne doit pas faire sortir la séance de GitHub.
-    let saved = false, lastErr = null;
-    for (let a = 1; a <= 3 && !saved; a++) {
-      try {
-        const resp = await fetch(url, { method: 'PUT', headers, body, signal: sig(120000) });
-        if (resp.ok) { saved = true; break; }
-        if (resp.status === 422 && a > 1) {
-          // Un envoi précédent a pu aboutir sans que sa réponse arrive : on vérifie.
-          const chk = await fetch(url, { headers, signal: sig(30000) });
-          if (chk.ok) { saved = true; break; }
-        }
-        lastErr = new Error('GitHub a répondu ' + resp.status);
-        if ([401, 403, 404].includes(resp.status)) break; // jeton ou dépôt : réessayer n'y changera rien
-      } catch (err) { lastErr = err; }
-      logError(`Sauvegarde GitHub — envoi ${a}/3 échoué`, lastErr);
-      if (a < 3) { sensorProgress(`Sauvegarde : nouvel envoi (${a + 1}/3)...`); await sleep(a === 1 ? 3000 : 8000); }
-    }
-    if (!saved) throw lastErr || new Error('échec');
+    await githubPutSession(filename, combined, token);
     log('Séance sauvegardée sur GitHub: ' + filename);
     recordHistoryEntry(combined, prefix, filename, true);
     showToast('📡 Séance sauvegardée sur GitHub');
