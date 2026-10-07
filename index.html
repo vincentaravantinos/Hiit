@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-07T14:48:35Z';</script>
+<script>const APP_BUILD = '2026-10-07T14:55:06Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1721,9 +1721,12 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], ma
   sensorProgress('Analyse de la séance...');
   await new Promise(r => setTimeout(r, 30));
   combined.analysis = buildHiitAnalysis(combined);
-  showSessionResultsModal(combined);
+  const box = showSessionResultsModal(combined);
   sensorProgress('Sauvegarde de la séance...');
-  await saveSessionData(combined);
+  const savedAs = await saveSessionData(combined);
+  // La fenêtre de résultats connaît maintenant son fichier : la navigation entre séances
+  // peut revenir dessus sans la retélécharger.
+  if (savedAs && box && box._hc) { box._hc.filename = savedAs; hiitCachePut(savedAs, combined); }
   return true;
 }
 
@@ -2191,6 +2194,7 @@ async function saveSessionData(combined, prefix = 'seance_') {
     log('Séance sauvegardée sur GitHub: ' + filename);
     recordHistoryEntry(combined, prefix, filename, true);
     showToast('📡 Séance sauvegardée sur GitHub');
+    return filename;
   } catch (err) {
     logError('Échec sauvegarde GitHub, téléchargement local à la place', err);
     downloadSessionLocally(combined, filename);
@@ -2703,7 +2707,7 @@ function showSessionResultsModal(combined, filename) {
     const recHtml = renderRecoveryHtml(combined, filename);
     const zonesHtml = renderHrZonesHtml(combined, null, hiitZoneOpts(combined));
     box.innerHTML = `
-      <h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3>
+      ${hiitNavHeaderHtml(box._hc)}
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       <div style="margin-bottom:16px;">${repsHtml}</div>
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
@@ -2711,11 +2715,12 @@ function showSessionResultsModal(combined, filename) {
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
   }
-  box._hc = { combined, kind: 'hiit', filename };
+  box._hc = { combined, kind: 'hiit', filename, openedAt: Date.now() };
+  hiitAttachSwipe(modal, box);
 
   if (cacheValid) {
     renderInto(combined.analysis.reps);
-    return;
+    return box;
   }
 
   box.innerHTML = `<h3 style="text-align:center;">RÉSULTATS DE LA SÉANCE</h3><p style="text-align:center;color:var(--muted);padding:20px 0;">Recalcul des reps en cours sur la base du fichier brut${combined.analysis ? ' (algorithme mis à jour depuis le dernier calcul)' : ''}...</p>`;
@@ -2728,7 +2733,86 @@ function showSessionResultsModal(combined, filename) {
     renderInto(combined.analysis.reps);
     updateExistingSessionFile(filename, combined);
   }, 30);
+  return box;
 }
+
+// ---- Navigation entre séances HIIT depuis la fenêtre de résultats : glisser vers la
+// gauche (ou ‹) ouvre la séance HIIT précédente, vers la droite (ou ›) la suivante.
+// Seules les séances présentes sur GitHub sont parcourues. ----
+const hiitSessionCache = new Map(); // nom de fichier → séance, 3 au plus (elles sont lourdes)
+function hiitCachePut(filename, combined) {
+  if (!filename) return;
+  hiitSessionCache.delete(filename);
+  hiitSessionCache.set(filename, combined);
+  while (hiitSessionCache.size > 3) hiitSessionCache.delete(hiitSessionCache.keys().next().value);
+}
+function hiitNavList() {
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { index = []; }
+  return index.filter(e => e.type === 'hiit' && e.savedToGithub && e.filename).sort((a, b) => a.filename < b.filename ? -1 : 1);
+}
+// Une séance tout juste terminée n'a pas encore de fichier : elle se place après toutes
+// les autres, à l'heure d'ouverture de sa fenêtre.
+function hiitNavKey(ctx) {
+  return ctx.filename || ('seance_' + new Date(ctx.openedAt || Date.now()).toISOString().replace(/[:.]/g, '-') + '.json');
+}
+function hiitNavTarget(ctx, dir) {
+  const key = hiitNavKey(ctx), list = hiitNavList();
+  if (dir < 0) { const older = list.filter(e => e.filename < key); return older[older.length - 1] || null; }
+  return ctx.filename ? (list.find(e => e.filename > key) || null) : null;
+}
+function hiitNavDateLabel(ctx) {
+  let d = new Date(ctx.openedAt || Date.now());
+  const entry = ctx.filename ? hiitNavList().find(e => e.filename === ctx.filename) : null;
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec((entry && entry.date) || ctx.filename || '');
+  if (m) d = new Date(+m[1], +m[2] - 1, +m[3]);
+  return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+}
+function hiitNavHeaderHtml(ctx) {
+  const btn = (dir, on) => `<button onclick="hiitNavGo(this,${dir})" ${on ? '' : 'disabled'} aria-label="${dir < 0 ? 'Séance précédente' : 'Séance suivante'}" style="width:44px;margin:0;padding:8px 0;background:var(--surface2);color:var(--text);border:1px solid var(--border2);font-size:20px;line-height:1;opacity:${on ? 1 : .25};">${dir < 0 ? '‹' : '›'}</button>`;
+  return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+      ${btn(-1, !!hiitNavTarget(ctx, -1))}
+      <div style="text-align:center;flex:1;min-width:0;"><h3 style="margin:0 0 2px;">RÉSULTATS DE LA SÉANCE</h3><div class="hiit-nav-date" style="font-size:12px;color:var(--muted);">${hiitNavDateLabel(ctx)}</div></div>
+      ${btn(1, !!hiitNavTarget(ctx, 1))}
+    </div>`;
+}
+function hiitAttachSwipe(modal, box) {
+  let sx = 0, sy = 0, st = 0;
+  modal.addEventListener('touchstart', e => { const t = e.touches[0]; sx = t.clientX; sy = t.clientY; st = Date.now(); }, { passive: true });
+  modal.addEventListener('touchend', e => {
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    // Geste franc et horizontal seulement : le défilement vertical de la fenêtre reste libre.
+    if (Date.now() - st < 700 && Math.abs(dx) > 70 && Math.abs(dx) > 2 * Math.abs(dy)) hiitNavGo(box, dx < 0 ? -1 : 1);
+  }, { passive: true });
+}
+let hiitNavBusy = false;
+async function hiitNavGo(el, dir) {
+  const box = el.classList && el.classList.contains('sensor-modal') ? el : el.closest('.sensor-modal');
+  const ctx = box && box._hc;
+  if (!ctx || ctx.kind !== 'hiit' || hiitNavBusy) return;
+  const target = hiitNavTarget(ctx, dir);
+  if (!target) { showToast(dir < 0 ? 'Pas de séance HIIT plus ancienne' : 'C\'est la séance HIIT la plus récente'); return; }
+  const token = localStorage.getItem('hiitGithubToken');
+  if (!token) { showToast('Configure ton token GitHub pour parcourir les séances.'); return; }
+  hiitNavBusy = true;
+  const label = box.querySelector('.hiit-nav-date');
+  const prevText = label ? label.textContent : '';
+  if (label) label.textContent = 'Chargement de la séance…';
+  try {
+    let next = hiitSessionCache.get(target.filename);
+    if (!next) { next = await fetchSessionFile(target.filename, token); hiitCachePut(target.filename, next); }
+    if (!box.isConnected) return; // fenêtre fermée pendant le chargement
+    if (ctx.filename) hiitCachePut(ctx.filename, ctx.combined);
+    if (!hcDeferred) hcDeferred = ctx; // l'envoi Health Connect de la séance quittée reste dû au « Fermer »
+    box.closest('.sensor-modal-backdrop').remove();
+    showSessionResultsModal(next, target.filename);
+  } catch (err) {
+    logError('Navigation vers ' + target.filename, err);
+    if (label) label.textContent = prevText;
+    showToast('⚠️ Impossible de charger cette séance');
+  } finally { hiitNavBusy = false; }
+}
+
 
 // ======= Ported from analysis/swim_segmentation.py. Segmentation automatique
 // nage/pause + classification brasse/crawl. Exploratoire, validé sur 1 séance
@@ -3571,18 +3655,25 @@ function hcMarkSent(id) {
   try { localStorage.setItem(HC_SENT_KEY, JSON.stringify([...set])); } catch (e) {}
 }
 
+let hcDeferred = null; // séance quittée par navigation avant son envoi Health Connect
 function hcCloseModal(btn) {
   const modal = btn.closest('.sensor-modal');
   const ctx = modal && modal._hc;
   btn.closest('.sensor-modal-backdrop').remove();
-  if (!ctx) return;
-  let payload;
-  try { payload = buildHcPayload(ctx.combined, ctx.kind, ctx.filename); } catch (e) { log('Health Connect : ' + e.message); return; }
-  if (payload.error) { log('Health Connect : séance non envoyée — ' + payload.error); return; }
-  if (hcSentSet().has(payload.id)) return;
-  hcMarkSent(payload.id);
-  log(`Health Connect : envoi ${payload.kind} ${new Date(payload.start).toISOString()} (${payload.segments.length} segments)`);
-  hcOpenBridge(payload);
+  const deferred = hcDeferred; hcDeferred = null;
+  // Un seul envoi par tap (il ouvre l'app pont) : d'abord la séance quittée en naviguant
+  // (en général celle du jour, qui ne serait sinon jamais envoyée), sinon celle affichée.
+  for (const c of [deferred, ctx]) {
+    if (!c) continue;
+    let payload;
+    try { payload = buildHcPayload(c.combined, c.kind, c.filename); } catch (e) { log('Health Connect : ' + e.message); continue; }
+    if (payload.error) { log('Health Connect : séance non envoyée — ' + payload.error); continue; }
+    if (hcSentSet().has(payload.id)) continue;
+    hcMarkSent(payload.id);
+    log(`Health Connect : envoi ${payload.kind} ${new Date(payload.start).toISOString()} (${payload.segments.length} segments)`);
+    hcOpenBridge(payload);
+    return;
+  }
 }
 
 // ======= Activité libre (rugby, escalade…) : FC seule enregistrée hors-ligne =======
