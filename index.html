@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-07T14:04:03Z';</script>
+<script>const APP_BUILD = '2026-10-07T14:34:26Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1007,9 +1007,25 @@ async function pftpGetFile(path, onProgress) {
 // Erreur « protocole » renvoyée par le capteur (dossier absent…) : on l'ignore.
 // Toute autre erreur (timeout, lien coupé) remonte : une liste tronquée fausserait
 // la ligne de base ou ferait oublier des fichiers.
+// Codes PFTP « occupé » : le capteur finit une écriture (typiquement juste après l'arrêt
+// d'un enregistrement). 202 = SYSTEM_BUSY, observé en test ; 1, 2 et 208 = redémarrage,
+// réessayer, attente. On redemande sur place : les prendre pour « dossier absent »
+// donnerait une liste tronquée, donc une séance incomplète ou mêlée à d'anciens fichiers.
+const PFTP_BUSY_CODES = [1, 2, 202, 208];
+function pftpErrCode(e) { const m = /^PFTP: erreur code (\d+)/.exec((e && e.message) || ''); return m ? +m[1] : null; }
 async function pftpListOrNull(path) {
-  try { return await pftpListDirectory(path); }
-  catch (e) { if (/^PFTP: erreur code/.test(e && e.message || '')) return null; throw e; }
+  for (let i = 0; ; i++) {
+    try { return await pftpListDirectory(path); }
+    catch (e) {
+      const code = pftpErrCode(e);
+      if (code == null) throw e;                         // timeout, lien coupé…
+      if (!PFTP_BUSY_CODES.includes(code)) return null;  // dossier absent
+      if (i >= 5) throw e;                               // toujours occupé après 6 demandes
+      logAppend(`Capteur occupé (code ${code}) sur ${path} — nouvelle demande ${i + 2}/6`);
+      sensorProgress('Capteur occupé, nouvelle demande...');
+      await sleep(1000);
+    }
+  }
 }
 async function listAllRecordings() {
   const recordings = [];
@@ -1377,14 +1393,27 @@ async function withSensorRetry(label, fn, maxAttempts = 3) {
         return await fn(a);
       } catch (err) {
         lastErr = err;
-        logError(`${label} — passe ${a}/${maxAttempts} échouée`, err);
-        safeDisconnect();
+        // Le capteur a répondu (refus, occupé, liste encore vide) et le lien tient : on
+        // patiente et on rejoue sur la même connexion, comme avant le 06/10. Seule une
+        // panne de lien (timeout, coupure) justifie de couper puis de se reconnecter.
+        const soft = isSensorAnswer(err) && !!device && device.gatt.connected && !!controlChar;
+        logError(`${label} — passe ${a}/${maxAttempts} échouée (${soft ? 'réponse du capteur, lien conservé' : 'lien coupé'})`, err);
+        if (!soft) safeDisconnect();
         if (err && err.fatal) throw err;
-        if (a < maxAttempts) { log(`${label} interrompu (${bleErrText(err)}) — reconnexion...`); await sleep(2000); }
+        if (a < maxAttempts) {
+          log(soft ? `${label} : capteur pas encore prêt (${bleErrText(err)}) — nouvelle demande dans 3 s...`
+                   : `${label} : lien perdu (${bleErrText(err)}) — reconnexion...`);
+          await sleep(soft ? 3000 : 2000);
+        }
       }
     }
+    safeDisconnect();
     throw lastErr;
   } finally { bleBusy--; }
+}
+
+function isSensorAnswer(err) {
+  return !!err && !err.fatal && /code erreur|PFTP: erreur code|Aucun nouvel enregistrement|taille reçue/.test(err.message || '');
 }
 
 // Démarrage d'un enregistrement interne, commun aux trois activités. Rejouable :
@@ -2048,14 +2077,29 @@ async function saveSessionData(combined, prefix = 'seance_') {
   }
   try {
     const path = 'data/sessions/' + filename;
-    const contentB64 = btoa(await encryptJson(combined));
-    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`, {
-      method: 'PUT',
-      headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: contentB64 }),
-      signal: AbortSignal.timeout ? AbortSignal.timeout(120000) : undefined
-    });
-    if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
+    const url = `https://api.github.com/repos/vincentaravantinos/Hiit/contents/${path}`;
+    const headers = { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' };
+    const body = JSON.stringify({ message: 'Séance auto-sauvegardée: ' + filename, content: btoa(await encryptJson(combined)) });
+    const sig = (ms) => AbortSignal.timeout ? AbortSignal.timeout(ms) : undefined;
+    // Jusqu'à 3 envois : un échec passager (réseau, écriture concurrente du pont santé
+    // sur le dépôt → 409, erreur serveur) ne doit pas faire sortir la séance de GitHub.
+    let saved = false, lastErr = null;
+    for (let a = 1; a <= 3 && !saved; a++) {
+      try {
+        const resp = await fetch(url, { method: 'PUT', headers, body, signal: sig(120000) });
+        if (resp.ok) { saved = true; break; }
+        if (resp.status === 422 && a > 1) {
+          // Un envoi précédent a pu aboutir sans que sa réponse arrive : on vérifie.
+          const chk = await fetch(url, { headers, signal: sig(30000) });
+          if (chk.ok) { saved = true; break; }
+        }
+        lastErr = new Error('GitHub a répondu ' + resp.status);
+        if ([401, 403, 404].includes(resp.status)) break; // jeton ou dépôt : réessayer n'y changera rien
+      } catch (err) { lastErr = err; }
+      logError(`Sauvegarde GitHub — envoi ${a}/3 échoué`, lastErr);
+      if (a < 3) { sensorProgress(`Sauvegarde : nouvel envoi (${a + 1}/3)...`); await sleep(a === 1 ? 3000 : 8000); }
+    }
+    if (!saved) throw lastErr || new Error('échec');
     log('Séance sauvegardée sur GitHub: ' + filename);
     recordHistoryEntry(combined, prefix, filename, true);
     showToast('📡 Séance sauvegardée sur GitHub');
