@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-07T14:55:06Z';</script>
+<script>const APP_BUILD = '2026-10-07T15:09:43Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -264,6 +264,10 @@ body {
       <div class="setting-row" id="time-row" style="display:none"><div class="setting-name">Heure</div><input type="time" class="time-input" id="reminder-time" value="19:00" onchange="saveReminderTime()"></div>
       <button class="notif-btn" id="notif-perm-btn" onclick="requestNotifPermission()" style="margin-top:8px">Activer les notifications</button>
       <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">Fonctionne quand l'app est ouverte en fond de tâche.</div>
+    </div>
+    <div class="settings-section">
+      <div class="settings-label">Voix</div>
+      <div class="setting-row"><div><div class="setting-name">Tester la voix</div><div class="setting-sub" id="tts-status"></div></div><button onclick="testVoice()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Tester</button></div>
     </div>
     <div class="settings-section">
       <div class="settings-label">Musique</div>
@@ -524,7 +528,27 @@ async function acquireWakeLock(){if(!('wakeLock'in navigator)){setWakeStatus('un
 function getACtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});return audioCtx;}
 function beep(freq=1100,dur=0.18,vol=1.0,holdMs=null){duckStart();try{const ctx=getACtx(),o=ctx.createOscillator(),g=ctx.createGain(),c=ctx.createDynamicsCompressor();c.threshold.value=-6;c.knee.value=0;c.ratio.value=20;c.attack.value=0;c.release.value=0.1;o.connect(g);g.connect(c);c.connect(ctx.destination);o.frequency.value=freq;g.gain.setValueAtTime(vol,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);o.start();o.stop(ctx.currentTime+dur);}catch{}duckHold(holdMs!==null?holdMs:dur*1000+250);}
 speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('fr'))||null;};
-function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=o.rate||0.95;u.pitch=1.05;u.volume=1;if(frVoice)u.voice=frVoice;u.onend=()=>duckHold(hold);u.onerror=()=>duckHold(hold);speechSynthesis.speak(u);}catch{duckHold(hold);}}
+// Voix : jamais de cancel() collé à speak() (Android Chrome avale alors la nouvelle phrase),
+// échecs écrits au journal, et repli sur des bips si la voix ne démarre plus.
+let ttsFails=0,ttsKeep=null;
+function ttsVoice(){if(ttsFails>0)return null;if(!frVoice){try{frVoice=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('fr'))||null;}catch(e){}}return frVoice;}
+function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();let started=false,done=false;
+  const fail=why=>{if(done)return;done=true;ttsFails++;try{logAppend('Voix : échec « '+txt+' » ('+why+')');}catch(e){}duckHold(hold);if(o.onfail)o.onfail(why);};
+  const go=()=>{try{const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=o.rate||0.95;u.pitch=1.05;u.volume=1;const v=ttsVoice();if(v)u.voice=v;
+    u.onstart=()=>{started=true;ttsFails=0;if(o.onstart)o.onstart();};
+    u.onend=()=>{if(done)return;done=true;duckHold(hold);};
+    u.onerror=e=>{const err=e&&e.error;if(err==='interrupted'||err==='canceled'){done=true;duckHold(hold);return;}fail(err||'erreur');};
+    ttsKeep=u;try{speechSynthesis.resume();}catch(e){}speechSynthesis.speak(u);
+    setTimeout(()=>{if(!started&&!done)fail('pas de démarrage');},2000);
+  }catch(e){fail(e&&e.message?e.message:'exception');}};
+  let busy=false;try{busy=speechSynthesis.speaking||speechSynthesis.pending;}catch(e){}
+  if(busy&&!o.queue){try{speechSynthesis.cancel();}catch(e){}setTimeout(go,80);}else go();}
+// Décompte de fin de phase : voix, doublée d'un bip tant que la voix est en panne.
+function countSay(word,last){if(ttsFails>=1)beep(last?990:750,last?.18:.12,1.0,1300);speak(word,{rate:1.15,hold:last?600:1300,queue:word!=='Trois'});}
+function testVoice(){const el=document.getElementById('tts-status');let n=0,fr='aucune';try{n=speechSynthesis.getVoices().length;ttsFails=0;const v=ttsVoice();if(v)fr=v.name;}catch(e){}
+  const base='Version '+APP_BUILD+' · '+n+' voix, française : '+fr;el.textContent=base+' · test en cours…';getACtx();beep(825,.14,1.0);
+  setTimeout(()=>speak('Trois, deux, un. Test de la voix.',{onstart:()=>{el.textContent=base+' · voix démarrée ✔';},onfail:w=>{el.textContent=base+' · ÉCHEC : '+w;}}),300);}
+setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+APP_BUILD;},0);
 // Reps de la dernière séance, même exercice et même tour (historique local).
 let lastRepsIntroDone=false;
 function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
@@ -584,7 +608,7 @@ function duckHold(ms){
 }
 async function tStartCountdown(){launchSpotify();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
 function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
-function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+n.name),100);}}if(tLeft===3)speak('Trois',{rate:1.15,hold:1300});if(tLeft===2)speak('Deux',{rate:1.15,hold:1300});if(tLeft===1)speak('Un',{rate:1.15,hold:600});if(tLeft<=0){tGoNext();return;}tRender();}
+function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+n.name),100);}}if(tLeft===3)countSay('Trois');if(tLeft===2)countSay('Deux');if(tLeft===1)countSay('Un',true);if(tLeft<=0){tGoNext();return;}tRender();}
 function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
 function tPause(){tState='paused';clearInterval(ticker);tRenderControls();}
 function tResume(){tState='running';tStartTicker();tRenderControls();}
