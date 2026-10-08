@@ -225,7 +225,7 @@ body {
         <div id="t-loads" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:12px;font-size:13px;color:var(--muted)">
           <label style="display:flex;align-items:center;gap:6px">Rowing <input type="number" id="load-rowing" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
           <label style="display:flex;align-items:center;gap:6px">Squats <input type="number" id="load-squats" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
-          <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="32" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
+          <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="16" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
           <button id="ellip-btn" onclick="ellipPick(this)" style="padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">🚲 Connecter</button>
         </div>
         <div class="sensor-status" id="sensor-status"></div>
@@ -2665,7 +2665,7 @@ async function ellipConnect() {
 }
 
 function ellipOnDisconnect() {
-  ellipConnected = false; ellipCur = null;
+  ellipConnected = false; ellipCur = null; ellipGrade = null; ellipStopRegulation();
   log('Elliptique déconnecté');
   ellipRenderStatus(); ellipRenderLive();
   if (ellipWanted) setTimeout(() => { if (ellipWanted && !ellipConnected) ellipConnect(); }, 1500);
@@ -2674,7 +2674,7 @@ function ellipOnDisconnect() {
 function ellipDisconnect() {
   ellipWanted = false;
   try { if (ellipDev && ellipDev.gatt.connected) ellipDev.gatt.disconnect(); } catch (e) {}
-  ellipConnected = false; ellipCur = null;
+  ellipConnected = false; ellipCur = null; ellipGrade = null; ellipStopRegulation();
   ellipRenderStatus(); ellipRenderLive();
 }
 
@@ -2685,42 +2685,80 @@ function ellipTargetLevel() {
 }
 function ellipLevelNow() { return ellipCur && ellipCur.r != null ? ellipCur.r : ellipTargetLevel(); }
 
-// Réglage de la résistance. Testé le 08/10 : cette console répond « OK » à la commande
-// FTMS « Set Target Resistance Level » (0x04) mais l'ignore ; elle n'applique que la
-// simulation de pente (0x11), qu'elle convertit elle-même en niveau (8 % → niveau 16).
-// La correspondance exacte étant inconnue, la pente est ajustée jusqu'à lire le niveau
-// voulu dans les trames, et la pente qui marche est retenue pour la fois suivante.
+// Réglage de la résistance. Testé le 08/10 : la console (16 niveaux réels) répond « OK »
+// à la commande FTMS de niveau (0x04) mais l'ignore, même après « Démarrer ». Elle
+// n'applique que la simulation de pente (0x11), qu'elle convertit en niveau en tenant
+// compte de la vitesse (pentes négatives ignorées, 0 % → niv. 1, ~2 % → niv. 16).
+// L'app vise donc le niveau par la pente, puis le maintient : toutes les 3 s, si le
+// niveau lu s'écarte du niveau visé, la pente est corrigée par petits pas.
 var ELLIP_GRADE_LS = 'hiitEllipGradeForLevel';
-async function ellipApplyLevel() {
-  const lvl = ellipTargetLevel();
-  if (!lvl || !ellipConnected || !ellipCp || ellipLevelBusy) return;
-  ellipLevelBusy = true;
+var ELLIP_SWEEP = [[0, 1], [0.5, 4.5], [1, 9.5], [1.5, 11.5], [2, 16]]; // [pente %, niveau] mesurés ~15 km/h
+var ellipGrade = null, ellipRegTimer = null, ellipRegLastMs = 0;
+function ellipGradeGuess(lvl) {
   let known = {};
   try { known = JSON.parse(localStorage.getItem(ELLIP_GRADE_LS) || '{}'); } catch (e) {}
+  if (known[lvl] != null) return known[lvl];
+  for (let i = 1; i < ELLIP_SWEEP.length; i++) {
+    const [g0, l0] = ELLIP_SWEEP[i - 1], [g1, l1] = ELLIP_SWEEP[i];
+    if (lvl <= l1) return Math.max(0, g0 + (g1 - g0) * (lvl - l0) / (l1 - l0));
+  }
+  return 2.2;
+}
+function ellipRemember(lvl, g) {
+  let known = {};
+  try { known = JSON.parse(localStorage.getItem(ELLIP_GRADE_LS) || '{}'); } catch (e) {}
+  known[lvl] = g;
+  try { localStorage.setItem(ELLIP_GRADE_LS, JSON.stringify(known)); } catch (e) {}
+}
+async function ellipSendGrade(g) {
+  g = Math.max(0, Math.min(3, Math.round(g * 100) / 100));
+  const v = Math.round(g * 100);
+  const r = await ellipCpSend([0x11, 0, 0, v & 255, (v >> 8) & 255, 40, 51]);
+  ellipGrade = g; ellipRegLastMs = Date.now();
+  return r;
+}
+async function ellipApplyLevel() {
+  const lvl = ellipTargetLevel();
+  if (!ellipConnected || !ellipCp || ellipLevelBusy) return;
+  if (!lvl) { ellipStopRegulation(); return; }
+  ellipLevelBusy = true;
   try {
     const rc = await ellipCpSend([0x00]);
-    log(`Elliptique : prise de contrôle → ${rc}`);
-    let grade = known[lvl] != null ? known[lvl] : lvl / 2; // en %
-    for (let i = 0; i < 6 && ellipConnected; i++) {
-      const g = Math.max(-20, Math.min(40, Math.round(grade * 100) / 100));
-      const v = Math.round(g * 100);
-      const r = await ellipCpSend([0x11, 0, 0, v & 255, (v >> 8) & 255, 40, 51]);
-      await sleep(1500);
-      const rep = ellipCur ? ellipCur.r : null;
-      log(`Elliptique : niveau ${lvl} visé, pente ${g} % → réponse ${r}, niveau lu ${rep}`);
-      if (rep === lvl) {
-        known[lvl] = g;
-        try { localStorage.setItem(ELLIP_GRADE_LS, JSON.stringify(known)); } catch (e) {}
-        showToast(`🚲 Résistance réglée : niveau ${lvl}`);
-        return;
-      }
-      if (rep == null || r !== 1) break;
-      grade = g + (lvl - rep) / 2; // ~2 niveaux par % d'après le premier essai
-    }
-    showToast(`🚲 Niveau ${lvl} non atteint (lu : ${ellipCur && ellipCur.r != null ? ellipCur.r : '?'})`);
+    const g = ellipGradeGuess(lvl);
+    const r = await ellipSendGrade(g);
+    log(`Elliptique : niveau ${lvl} visé → contrôle ${rc}, pente ${ellipGrade} % (réponse ${r})`);
+    if (r !== 1) { showToast('🚲 La console refuse le réglage de résistance'); return; }
+    await sleep(2500);
+    const rep = ellipCur ? ellipCur.r : null;
+    log(`Elliptique : niveau lu ${rep}`);
+    showToast(rep === lvl ? `🚲 Résistance réglée : niveau ${lvl}` : `🚲 Réglage du niveau ${lvl} en cours (lu : ${rep ?? '?'})`);
+    if (rep === lvl) ellipRemember(lvl, ellipGrade);
+    ellipStartRegulation();
   } catch (e) {
     logError('Réglage de résistance elliptique', e);
   } finally { ellipLevelBusy = false; }
+}
+function ellipStartRegulation() {
+  if (ellipRegTimer) return;
+  ellipRegTimer = setInterval(ellipRegulate, 1000);
+}
+function ellipStopRegulation() { clearInterval(ellipRegTimer); ellipRegTimer = null; }
+async function ellipRegulate() {
+  const lvl = ellipTargetLevel();
+  if (!lvl || !ellipConnected || !ellipCp) { ellipStopRegulation(); return; }
+  if (ellipLevelBusy || ellipGrade == null || Date.now() - ellipRegLastMs < 3000) return;
+  if (!ellipCur || ellipCur.r == null || Date.now() - ellipCur.at > 3000) return;
+  const diff = lvl - ellipCur.r;
+  if (diff === 0) { ellipRemember(lvl, ellipGrade); return; }
+  const step = Math.max(0.03, Math.min(0.3, Math.abs(diff) * 0.08)) * Math.sign(diff);
+  if ((ellipGrade <= 0 && step < 0) || (ellipGrade >= 3 && step > 0)) return;
+  ellipLevelBusy = true;
+  try {
+    const before = ellipCur.r, prev = ellipGrade;
+    await ellipSendGrade(ellipGrade + step);
+    log(`Elliptique : niveau lu ${before} ≠ ${lvl} → pente ${prev} → ${ellipGrade} %`);
+  } catch (e) { logError('Régulation du niveau elliptique', e); }
+  finally { ellipLevelBusy = false; }
 }
 
 function ellipRenderStatus() {
