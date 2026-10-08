@@ -216,14 +216,17 @@ body {
           <text id="t-ex" x="125" y="155" text-anchor="middle" font-size="14" font-weight="700" font-family="Courier New" letter-spacing="2" style="fill:var(--accent);text-transform:uppercase"></text>
         </svg>
         <div id="t-next" style="margin-top:6px;font-size:13px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;min-height:16px"></div>
+        <div id="t-ellip" style="display:none;margin-top:8px;text-align:center"></div>
         <div id="t-wake" style="display:none;margin-top:8px;font-size:12px;line-height:1.35;color:#ffb454;background:rgba(255,180,84,.10);border:1px solid rgba(255,180,84,.35);border-radius:10px;padding:6px 10px;max-width:320px;margin-left:auto;margin-right:auto"></div>
       </div>
       <div style="width:100%;max-width:400px;z-index:1">
         <div id="t-list" style="background:rgba(255,255,255,.04);border-radius:14px;padding:11px 14px;border:1px solid var(--border);margin-bottom:16px"></div>
         <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
-        <div id="t-loads" style="display:flex;gap:10px;justify-content:center;margin-top:12px;font-size:13px;color:var(--muted)">
+        <div id="t-loads" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:12px;font-size:13px;color:var(--muted)">
           <label style="display:flex;align-items:center;gap:6px">Rowing <input type="number" id="load-rowing" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
           <label style="display:flex;align-items:center;gap:6px">Squats <input type="number" id="load-squats" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
+          <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="32" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
+          <button id="ellip-btn" onclick="ellipPick(this)" style="padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">🚲 Connecter</button>
         </div>
         <div class="sensor-status" id="sensor-status"></div>
       </div>
@@ -553,7 +556,7 @@ setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent
 let lastRepsIntroDone=false;
 function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
 // Annonce de début de phase : nom de l'exercice + reps de la dernière fois.
-function phaseSpeech(i){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}return t;}
+function phaseSpeech(i){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'&&p.name===ELLIP_EX){const s=ellipConnected?lastSprintFor(p.round||1,ellipLevelNow()):null;if(s){t+=' '+s.d+' mètres';if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}else if(p.type==='work'&&p.phase==='CIRCUIT'){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}return t;}
 const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
 const tCol=()=>SEQ[tIdx]&&SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)';
 function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':cur.phase==='RECOVERY'?'RÉCUPÉRATION':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=1+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
@@ -571,7 +574,7 @@ function tRewind(){
   else{tLeft=SEQ[tIdx].duration;tStartTicker();tRender();}
 }
 function tForward(){if(tIdx+1<SEQ.length)tGoNext();}
-function tRenderControls(){const ctrl=document.getElementById('t-controls'),col=tCol();const ld=document.getElementById('t-loads');if(ld)ld.style.display=tState==='idle'?'flex':'none';
+function tRenderControls(){ellipRenderLive();const ctrl=document.getElementById('t-controls'),col=tCol();const ld=document.getElementById('t-loads');if(ld)ld.style.display=tState==='idle'?'flex':'none';
 const iconBtn=(icon,fn)=>`<button onclick="${fn}" style="padding:15px 18px;font-size:20px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer;line-height:1">${icon}</button>`;
 const bs=`font-family:'Courier New',monospace;font-weight:700;letter-spacing:2px;text-transform:uppercase;border-radius:50px;cursor:pointer;border:none;transition:opacity .2s`;
 const fs=iconBtn('⛶','toggleFS()');
@@ -606,13 +609,13 @@ function duckHold(ms){
   clearTimeout(duckTimeout);
   duckTimeout=setTimeout(()=>{stopSilentAudio();duckReleaseAt=0;},Math.max(0,duckReleaseAt-Date.now()));
 }
-async function tStartCountdown(){launchSpotify();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
+async function tStartCountdown(){launchSpotify();ellipOnSessionStart();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
 function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
 function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+n.name),100);}}if(tLeft===3)countSay('Trois');if(tLeft===2)countSay('Deux');if(tLeft===1)countSay('Un',true);if(tLeft<=0){tGoNext();return;}tRender();}
-function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
+function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';ellipOnSessionEnd(sensorActive);sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
 function tPause(){tState='paused';clearInterval(ticker);tRenderControls();}
 function tResume(){tState='running';tStartTicker();tRenderControls();}
-function tReset(){clearInterval(ticker);setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
+function tReset(){clearInterval(ticker);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
 function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
@@ -1696,6 +1699,7 @@ async function sensorOnSessionStart() {
 }
 
 function sensorOnPhaseChange() {
+  ellipOnPhaseChange();
   if (!sensorActive || !SEQ[tIdx]) return;
   sensorPhaseLog.push({
     name: SEQ[tIdx].name, type: SEQ[tIdx].type,
@@ -1789,6 +1793,8 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], ma
   if (endedAtMs) combined.endedAtMs = endedAtMs;
   combined.rewindEvents = rewindEvents;
   combined.loads = getLoads();
+  const ell = ellipTakePending(phaseLog, endedAtMs);
+  if (ell) combined.elliptical = ell;
   sensorProgress('Analyse de la séance...');
   await new Promise(r => setTimeout(r, 30));
   combined.analysis = buildHiitAnalysis(combined);
@@ -1865,7 +1871,7 @@ async function sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs) {
   try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 3, endedAtMs); }
   catch (err) { logError('Récupération', err); sensorLastError = (err && err.message) ? err.message : String(err); }
   sensorRecoverBusy = false;
-  if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); sensorBannerHide(); }
+  if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); localStorage.removeItem(ELLIP_PENDING); sensorBannerHide(); }
   else { safeDisconnect(); device = null; sensorActive = false; sensorBannerShow('failed'); } // device remis à zéro : le prochain essai repasse par le sélecteur, donc par un objet neuf
   sensorRefreshStartButtons();
 }
@@ -1906,6 +1912,7 @@ function sensorAbandonPending() {
   if (sensorRecoverBusy) return;
   if (!confirm('Abandonner la séance en attente ?\n\nSes données ne seront pas importées dans l\'app. Cette action est définitive.')) return;
   localStorage.removeItem(SENSOR_STORAGE_KEY);
+  localStorage.removeItem(ELLIP_PENDING);
   logAppend('Séance en attente abandonnée par l\'utilisateur.');
   sensorBannerHide();
   sensorRefreshStartButtons();
@@ -1957,11 +1964,15 @@ function downloadSessionLocally(combined, filename) {
 
 function buildSessionSummary(combined, type) {
   if (type === 'hiit') {
-    if (!combined.analysis || !combined.analysis.reps || !combined.analysis.reps.length) return null;
-    const totalReps = combined.analysis.reps.reduce((a,r) => a + r.reps, 0);
+    const reps = (combined.analysis && combined.analysis.reps) || [];
+    const sprints = combined.elliptical && combined.elliptical.sprints;
+    const hasSprints = !!(sprints && Object.keys(sprints).length);
+    if (!reps.length && !hasSprints) return null;
+    const totalReps = reps.reduce((a,r) => a + r.reps, 0);
     const repsByEx = {};
-    combined.analysis.reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
-    const summary = { totalReps, exerciseCount: combined.analysis.reps.length, repsByEx };
+    reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
+    const summary = { totalReps, exerciseCount: reps.length, repsByEx };
+    if (hasSprints) summary.sprints = sprints;
     if (combined.loads) summary.loads = combined.loads;
     if (combined.analysis.recovery && combined.analysis.recovery.drop != null) summary.hrRecovery = combined.analysis.recovery.drop;
     return summary;
@@ -2526,7 +2537,333 @@ function renderHrChartSvg(hrSamples) {
 }
 
 // ======= Charges des exercices à élastique =======
-const LOAD_EXERCISES = { 'Rowing élastique': 'load-rowing', 'Squats élastique': 'load-squats' };
+const LOAD_EXERCISES = { 'Rowing élastique': 'load-rowing', 'Squats élastique': 'load-squats', 'Vélo elliptique Sprint': 'load-ellip' };
+
+// ======= Vélo elliptique (Maxxus CX 4.3f, console FTMS « FAL-SPORTS… ») =======
+// La console parle le protocole standard FTMS en BLE (trames « Indoor Bike Data » ~2 Hz).
+// Connexion indépendante du capteur Polar. Pendant la séance, chaque trame est gardée
+// (distance cumulée, résistance, FC des poignées, watts, cadence) ; la distance de chaque
+// sprint est calculée à la fin à partir du déroulé de séance. La console remet ses compteurs
+// à zéro à chaque connexion d'app : la distance est donc cumulée côté app (ellipOdo).
+// Variables en `var` : tRenderControls() peut appeler ellipRenderLive() avant que ce bloc
+// ne soit exécuté.
+var ELLIP_EX = 'Vélo elliptique Sprint';
+var ELLIP_PENDING = 'hiitEllipPending';
+var FTMS_SVC = 0x1826, FTMS_BIKE = 0x2ad2, FTMS_CP = 0x2ad9;
+var ellipDev = null, ellipDataChar = null, ellipCp = null;
+var ellipConnected = false, ellipConnecting = false, ellipWanted = false;
+var ellipCur = null;            // dernière trame décodée + distance cumulée (odo)
+var ellipOdo = 0, ellipLastD = null;
+var ellipSamples = [];          // [ms, odo, résistance, fc, watts, cadence]
+var ellipPhases = [];           // déroulé de séance, même format que le phaseLog du capteur
+var ellipRecording = false;
+var ellipPhaseOdo = null;       // distance cumulée au début de la phase en cours
+var ellipRef = null;            // distance du même sprint lors de la dernière séance (même niveau)
+var ellipCpWaiter = null, ellipLevelBusy = false;
+
+function ellipParseBike(dv) {
+  const f = dv.getUint16(0, true); let o = 2; const m = {};
+  const u16 = () => { const v = dv.getUint16(o, true); o += 2; return v; };
+  const s16 = () => { const v = dv.getInt16(o, true); o += 2; return v; };
+  const u8 = () => dv.getUint8(o++);
+  const u24 = () => { const v = dv.getUint16(o, true) | (dv.getUint8(o + 2) << 16); o += 3; return v; };
+  try {
+    if (!(f & 1)) m.v = u16() / 100;
+    if (f & 2) u16();
+    if (f & 4) m.c = u16() / 2;
+    if (f & 8) u16();
+    if (f & 16) m.d = u24();
+    if (f & 32) m.r = s16();
+    if (f & 64) m.w = s16();
+    if (f & 128) s16();
+    if (f & 256) { u16(); u16(); u8(); }
+    if (f & 512) m.hr = u8();
+    if (f & 1024) u8();
+    if (f & 2048) m.t = u16();
+  } catch (e) {}
+  return m;
+}
+
+function ellipOnData(ev) {
+  const m = ellipParseBike(ev.target.value);
+  if (m.d != null) {
+    if (ellipLastD == null) { /* première trame après connexion : référence */ }
+    else if (m.d >= ellipLastD) ellipOdo += m.d - ellipLastD;
+    else ellipOdo += m.d; // compteur remis à zéro par la console
+    ellipLastD = m.d;
+  }
+  ellipCur = Object.assign({}, m, { odo: ellipOdo, at: Date.now() });
+  if (ellipPhaseOdo == null) ellipPhaseOdo = ellipOdo;
+  if (ellipRecording) ellipSamples.push([Date.now(), ellipOdo, m.r != null ? m.r : null, m.hr != null ? m.hr : null, m.w != null ? m.w : null, m.c != null ? m.c : null]);
+  ellipRenderLive();
+}
+
+function ellipOnCp(ev) {
+  const v = new Uint8Array(ev.target.value.buffer, ev.target.value.byteOffset, ev.target.value.byteLength);
+  if (v[0] === 0x80 && ellipCpWaiter) { const w = ellipCpWaiter; ellipCpWaiter = null; w(v[2]); }
+}
+async function ellipCpSend(bytes) {
+  if (!ellipCp) return null;
+  const p = new Promise(res => {
+    ellipCpWaiter = res;
+    setTimeout(() => { if (ellipCpWaiter === res) { ellipCpWaiter = null; res(null); } }, 2500);
+  });
+  await withTimeout(ellipCp.writeValueWithResponse(new Uint8Array(bytes)), 4000, 'commande elliptique');
+  return await p;
+}
+
+function ellipSessionLive() { return typeof tState !== 'undefined' && (tState === 'running' || tState === 'paused' || tState === 'countdown'); }
+
+// Tap sur « 🚲 » : la liste Bluetooth n'est ouverte que la première fois (ou après un échec).
+async function ellipPick(btn) {
+  if (ellipConnected || ellipConnecting) { if (ellipConnected && confirm('Déconnecter l\'elliptique ?')) ellipDisconnect(); return; }
+  if (!navigator.bluetooth) { showToast('Bluetooth indisponible dans ce navigateur'); return; }
+  if (!ellipDev) {
+    try {
+      ellipDev = await navigator.bluetooth.requestDevice({ filters: [{ services: [FTMS_SVC] }, { namePrefix: 'FAL' }], optionalServices: [FTMS_SVC] });
+    } catch (e) { logError('Elliptique non sélectionné', e); return; }
+  }
+  ellipWanted = true;
+  const ok = await ellipConnect();
+  if (!ok) { ellipDev = null; showToast('🚲 Connexion impossible — pédale pour réveiller la console, puis réessaie'); }
+}
+
+async function ellipConnect() {
+  if (!ellipDev || ellipConnecting || ellipConnected) return ellipConnected;
+  ellipConnecting = true; ellipRenderStatus();
+  for (let i = 0; i < 3 && ellipWanted; i++) {
+    try {
+      const server = await withTimeout(ellipDev.gatt.connect(), 10000, 'connexion elliptique');
+      const svc = await withTimeout(server.getPrimaryService(FTMS_SVC), 8000, 'service FTMS');
+      ellipDataChar = await withTimeout(svc.getCharacteristic(FTMS_BIKE), 5000, 'données elliptique');
+      try { ellipCp = await withTimeout(svc.getCharacteristic(FTMS_CP), 5000, 'contrôle elliptique'); } catch (e) { ellipCp = null; }
+      ellipDataChar.removeEventListener('characteristicvaluechanged', ellipOnData);
+      ellipDataChar.addEventListener('characteristicvaluechanged', ellipOnData);
+      ellipLastD = null;
+      await withTimeout(ellipDataChar.startNotifications(), 5000, 'notifications elliptique');
+      if (ellipCp) {
+        ellipCp.removeEventListener('characteristicvaluechanged', ellipOnCp);
+        ellipCp.addEventListener('characteristicvaluechanged', ellipOnCp);
+        try { await withTimeout(ellipCp.startNotifications(), 5000, 'indications contrôle'); } catch (e) { logError('Elliptique : indications du point de contrôle', e); }
+      }
+      ellipDev.removeEventListener('gattserverdisconnected', ellipOnDisconnect);
+      ellipDev.addEventListener('gattserverdisconnected', ellipOnDisconnect);
+      ellipConnected = true; ellipConnecting = false;
+      log(`Elliptique connecté : ${ellipDev.name || 'console FTMS'}`);
+      ellipRenderStatus(); ellipRenderLive();
+      ellipApplyLevel();
+      return true;
+    } catch (e) {
+      logError(`Connexion elliptique (essai ${i + 1}/3)`, e);
+      try { ellipDev.gatt.disconnect(); } catch (_) {}
+      await sleep(1500);
+    }
+  }
+  ellipConnecting = false; ellipRenderStatus(); ellipRenderLive();
+  if (ellipWanted && ellipSessionLive()) setTimeout(() => { if (ellipWanted && !ellipConnected) ellipConnect(); }, 5000);
+  return false;
+}
+
+function ellipOnDisconnect() {
+  ellipConnected = false; ellipCur = null;
+  log('Elliptique déconnecté');
+  ellipRenderStatus(); ellipRenderLive();
+  if (ellipWanted) setTimeout(() => { if (ellipWanted && !ellipConnected) ellipConnect(); }, 1500);
+}
+
+function ellipDisconnect() {
+  ellipWanted = false;
+  try { if (ellipDev && ellipDev.gatt.connected) ellipDev.gatt.disconnect(); } catch (e) {}
+  ellipConnected = false; ellipCur = null;
+  ellipRenderStatus(); ellipRenderLive();
+}
+
+function ellipTargetLevel() {
+  const l = getLoads();
+  const v = l && l[ELLIP_EX];
+  return v >= 1 ? Math.round(v) : null;
+}
+function ellipLevelNow() { return ellipCur && ellipCur.r != null ? ellipCur.r : ellipTargetLevel(); }
+
+// Réglage de la résistance par le point de contrôle FTMS : prise de contrôle (0x00), puis
+// « Set Target Resistance Level » (0x04). Le format du paramètre varie selon les consoles
+// (sint16 au 1/10, uint8 au 1/10, entier) : on essaie jusqu'à ce que la console renvoie
+// le bon niveau dans ses trames.
+async function ellipApplyLevel() {
+  const lvl = ellipTargetLevel();
+  if (!lvl || !ellipConnected || !ellipCp || ellipLevelBusy) return;
+  ellipLevelBusy = true;
+  const hex = b => b.map(x => x.toString(16).padStart(2, '0')).join(' ');
+  try {
+    const rc = await ellipCpSend([0x00]);
+    log(`Elliptique : prise de contrôle → ${rc}`);
+    const x = lvl * 10;
+    const variants = [[0x04, x & 255, (x >> 8) & 255]];
+    if (x <= 255) variants.push([0x04, x]);
+    variants.push([0x04, lvl & 255, (lvl >> 8) & 255]);
+    let accepted = false;
+    for (const b of variants) {
+      const r = await ellipCpSend(b);
+      if (r === 1) accepted = true;
+      await sleep(1500);
+      const rep = ellipCur ? ellipCur.r : null;
+      log(`Elliptique : résistance ${lvl} (${hex(b)}) → réponse ${r}, niveau lu ${rep}`);
+      if (rep === lvl || rep === x) { showToast(`🚲 Résistance réglée : niveau ${lvl}`); return; }
+      if (!ellipConnected) return;
+    }
+    showToast(accepted ? `🚲 Niveau ${lvl} envoyé, non confirmé par la console` : '🚲 La console a refusé le réglage de résistance');
+  } catch (e) {
+    logError('Réglage de résistance elliptique', e);
+  } finally { ellipLevelBusy = false; }
+}
+
+function ellipRenderStatus() {
+  const b = document.getElementById('ellip-btn');
+  if (!b) return;
+  b.textContent = ellipConnected ? '🚲 Connecté' : ellipConnecting ? '🚲 Connexion…' : '🚲 Connecter';
+  b.style.background = ellipConnected ? 'var(--green)' : 'var(--surface2)';
+  b.style.color = ellipConnected ? '#111' : 'var(--text)';
+}
+
+function ellipRenderLive() {
+  try {
+    const el = document.getElementById('t-ellip');
+    if (!el) return;
+    const cur = (typeof SEQ !== 'undefined' && SEQ) ? SEQ[tIdx] : null;
+    const show = ellipDev && cur && ellipSessionLive() && (cur.name === ELLIP_EX || cur.phase === 'WARMUP');
+    if (!show) { el.style.display = 'none'; return; }
+    el.style.display = 'block';
+    if (!ellipConnected) { el.innerHTML = '<span style="font-size:13px;color:#ffb454">🚲 Elliptique déconnecté — reconnexion…</span>'; return; }
+    const d = ellipCur && ellipPhaseOdo != null ? Math.max(0, Math.round(ellipCur.odo - ellipPhaseOdo)) : 0;
+    const lvl = ellipLevelNow();
+    if (cur.name === ELLIP_EX) {
+      el.innerHTML = `<div style="font-size:46px;font-weight:900;font-family:'Courier New',monospace;line-height:1;color:var(--accent)">${d} m</div>`
+        + `<div style="font-size:13px;color:var(--muted);margin-top:4px">${lvl != null ? `niv. ${lvl}` : ''}${ellipRef != null ? ` · dernière fois ${ellipRef} m` : ''}</div>`;
+    } else {
+      el.innerHTML = `<span style="font-size:15px;color:var(--muted)">🚲 ${d} m${lvl != null ? ` · niv. ${lvl}` : ''}</span>`;
+    }
+  } catch (e) {}
+}
+
+// Distance du même sprint (même tour) lors de la dernière séance, au même niveau.
+function lastSprintFor(round, level) {
+  try {
+    const idx = JSON.parse(localStorage.getItem('hiitHistoryIndex') || '[]')
+      .filter(e => e.type === 'hiit' && e.summary && e.summary.sprints)
+      .sort((a, b) => a.filename < b.filename ? -1 : 1);
+    for (let i = idx.length - 1; i >= 0; i--) {
+      const s = idx[i].summary.sprints[round];
+      if (s && s.d > 0 && (level == null || s.l == null || s.l === level)) return s;
+    }
+  } catch (e) {}
+  return null;
+}
+
+function ellipOnSessionStart() {
+  ellipSamples = []; ellipPhases = []; ellipRef = null;
+  ellipRecording = true;
+  if (ellipDev && !ellipConnected) { ellipWanted = true; ellipConnect(); }
+  else if (ellipConnected) ellipApplyLevel();
+}
+
+function ellipOnPhaseChange() {
+  if (!ellipRecording || typeof SEQ === 'undefined' || !SEQ[tIdx]) return;
+  const p = SEQ[tIdx];
+  ellipPhases.push({ name: p.name, type: p.type, round: p.round, phase: p.phase, tElapsedStart: tElapsed, atMs: Date.now() });
+  ellipPhaseOdo = ellipCur ? ellipCur.odo : null;
+  const s = p.name === ELLIP_EX ? lastSprintFor(p.round || 1, ellipLevelNow()) : null;
+  ellipRef = s ? s.d : null;
+  ellipRenderLive();
+}
+
+function ellipComputeSprints(samples, phaseLog, endMs) {
+  const out = {};
+  if (!samples || !samples.length || !phaseLog) return out;
+  const odoAt = ms => {
+    let v = null;
+    for (const s of samples) { if (s[0] <= ms) v = s[1]; else break; }
+    if (v == null && samples[0][0] - ms < 2000) v = samples[0][1];
+    return v;
+  };
+  phaseLog.forEach((p, i) => {
+    if (p.name !== ELLIP_EX || p.atMs == null) return;
+    const s = p.atMs;
+    const nx = phaseLog[i + 1];
+    const e = nx && nx.atMs != null ? nx.atMs : (endMs || s + 30000);
+    const a = odoAt(s), b = odoAt(e);
+    if (a == null || b == null || samples[samples.length - 1][0] < s) return;
+    const win = samples.filter(x => x[0] >= s && x[0] <= e);
+    const lv = win.map(x => x[2]).filter(v => v != null);
+    const hr = win.find(x => x[3] > 0);
+    out[p.round || 1] = { d: Math.round(b - a), l: lv.length ? lv[lv.length - 1] : null, hrAtS: hr ? Math.round((hr[0] - s) / 1000) : null };
+  });
+  return out;
+}
+
+// Fin de séance : avec le capteur Polar, les données de l'elliptique attendent la
+// récupération du capteur (stockées pour survivre à un rechargement) ; sans capteur,
+// la séance est enregistrée tout de suite avec les seuls sprints.
+function ellipOnSessionEnd(polarActive) {
+  if (!ellipRecording) return;
+  ellipRecording = false;
+  const endedAtMs = Date.now();
+  if (ellipSamples.length) {
+    const ell = { device: ellipDev ? ellipDev.name : null, targetLevel: ellipTargetLevel(), endedAtMs, samples: ellipSamples };
+    if (polarActive) {
+      try { localStorage.setItem(ELLIP_PENDING, JSON.stringify(ell)); } catch (e) { logError('Sauvegarde temporaire elliptique', e); }
+    } else {
+      ell.sprints = ellipComputeSprints(ellipSamples, ellipPhases, endedAtMs);
+      ellipSaveStandalone(ell, ellipPhases.slice(), endedAtMs);
+    }
+  }
+  setTimeout(() => ellipDisconnect(), 1500); // la console rallume son écran
+}
+
+function ellipTakePending(phaseLog, endedAtMs) {
+  let ell = null;
+  try { ell = JSON.parse(localStorage.getItem(ELLIP_PENDING) || 'null'); } catch (e) {}
+  if (!ell || !ell.samples) return null;
+  // Garde-fou : ne jamais coller les sprints d'une autre séance.
+  const ref = endedAtMs || (phaseLog && phaseLog.length ? phaseLog[phaseLog.length - 1].atMs : null);
+  if (ref && Math.abs((ell.endedAtMs || 0) - ref) > 10 * 60000) { log('Données elliptique d\'une autre séance ignorées'); return null; }
+  ell.sprints = ellipComputeSprints(ell.samples, phaseLog, endedAtMs || ell.endedAtMs);
+  return ell;
+}
+
+async function ellipSaveStandalone(ell, phaseLog, endedAtMs) {
+  try {
+    const combined = { noSensor: true, phaseLog, endedAtMs, rewindEvents: [], loads: getLoads(), elliptical: ell };
+    combined.analysis = { reps: [], recovery: null, algoVersion: REP_ALGO_VERSION };
+    const box = showSessionResultsModal(combined);
+    const savedAs = await saveSessionData(combined);
+    if (savedAs && box && box._hc) { box._hc.filename = savedAs; hiitCachePut(savedAs, combined); }
+  } catch (e) { logError('Enregistrement de la séance (elliptique seul)', e); }
+}
+
+function renderSprintsHtml(combined, history) {
+  const ell = combined.elliptical;
+  const now = ell && ell.sprints;
+  if (!now || !Object.keys(now).length) return '';
+  const past = (history || []).filter(e => e.summary && e.summary.sprints).map(e => e.summary.sprints);
+  const lvls = [...new Set(Object.values(now).map(s => s.l).filter(v => v != null))];
+  let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:6px;">';
+  html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Sprint elliptique</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>Total</th></tr>';
+  html += `<tr><td style="padding:4px 0;">Distance (m)${lvls.length ? ` <span style="color:var(--muted);font-size:11px;">niv. ${lvls.join('/')}</span>` : ''}</td>`;
+  let total = 0, n = 0;
+  for (let r = 1; r <= 4; r++) {
+    const s = now[r];
+    if (!s) { html += '<td>—</td>'; continue; }
+    total += s.d; n++;
+    const c = compareColor(s.d, past.map(p => p[r] && (s.l == null || p[r].l == null || p[r].l === s.l) ? p[r].d : null), 3);
+    html += `<td style="${c ? `color:${c.color};font-weight:bold;` : ''}">${s.d}</td>`;
+  }
+  const sameLvl = p => Object.keys(now).every(r => p[r] && (now[r].l == null || p[r].l == null || p[r].l === now[r].l));
+  const pastTotals = past.map(p => Object.keys(p).length === n && sameLvl(p) ? Object.values(p).reduce((a, s) => a + s.d, 0) : null);
+  const ct = compareColor(total, pastTotals, 8);
+  html += `<td style="font-weight:bold;${ct ? `color:${ct.color};` : ''}">${total}</td></tr></table>`;
+  return html;
+}
+
 const PROGRESSION_REPS = 15;     // reps à chaque tour...
 const PROGRESSION_SESSIONS = 3;  // ...sur 3 séances d'affilée à la même charge
 
@@ -2545,6 +2882,7 @@ function saveLoads() {
   }
   setLoads(l);
   showToast('Charges enregistrées');
+  ellipApplyLevel();
 }
 function setLoads(l) {
   localStorage.setItem('hiitLoads', JSON.stringify(l));
@@ -2682,7 +3020,7 @@ function computeHiitRecovery(combined) {
 
 function buildHiitAnalysis(combined) {
   return {
-    reps: analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog),
+    reps: analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog) || [],
     recovery: computeHiitRecovery(combined),
     algoVersion: REP_ALGO_VERSION
   };
@@ -2774,7 +3112,9 @@ function showSessionResultsModal(combined, filename) {
 
   function renderInto(results) {
     const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
-    const repsHtml = renderProgressionHtml(results, combined, getHiitHistory(filename)) + renderRepsResultsHtml(results, getHiitHistory(filename), combined);
+    const repsHtml = renderSprintsHtml(combined, getHiitHistory(filename)) + (combined.noSensor
+      ? '<p style="color:var(--muted);font-size:13px;">Séance sans capteur Polar : pas de comptage des reps ni de FC.</p>'
+      : renderProgressionHtml(results, combined, getHiitHistory(filename)) + renderRepsResultsHtml(results, getHiitHistory(filename), combined));
     const recHtml = renderRecoveryHtml(combined, filename);
     const zonesHtml = renderHrZonesHtml(combined, null, hiitZoneOpts(combined));
     box.innerHTML = `
@@ -3690,7 +4030,8 @@ function buildHcPayload(combined, kind, filename) {
   const notes = [
     ...Object.entries(byEx).map(([n, arr]) => `${n}${loads[n] != null ? ` (${loads[n]} kg)` : ''} : ${arr.join(' / ')} = ${arr.reduce((a,b)=>a+b,0)}`),
     rec && rec.drop != null ? `Récupération 1 min : ${rec.peak} → ${rec.end} bpm (−${rec.drop})` : null,
-    `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
+    (() => { const sp = combined.elliptical && combined.elliptical.sprints; const k = sp ? Object.keys(sp).sort() : []; if (!k.length) return null; const l = [...new Set(k.map(r => sp[r].l).filter(v => v != null))]; return `Sprints elliptique : ${k.map(r => sp[r].d).join(' / ')} m${l.length ? ` (niv. ${l.join('/')})` : ''}`; })(),
+    combined.noSensor ? 'Sans capteur — app HIIT' : `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
   ].filter(Boolean).join('\n');
   const hr = hcHrBlock(combined, t0);
   return { v: 1, kind: 'hiit', id: String(Math.round(t0)), start: Math.round(t0), end: Math.round(end),
