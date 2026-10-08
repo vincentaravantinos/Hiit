@@ -2685,33 +2685,39 @@ function ellipTargetLevel() {
 }
 function ellipLevelNow() { return ellipCur && ellipCur.r != null ? ellipCur.r : ellipTargetLevel(); }
 
-// Réglage de la résistance par le point de contrôle FTMS : prise de contrôle (0x00), puis
-// « Set Target Resistance Level » (0x04). Le format du paramètre varie selon les consoles
-// (sint16 au 1/10, uint8 au 1/10, entier) : on essaie jusqu'à ce que la console renvoie
-// le bon niveau dans ses trames.
+// Réglage de la résistance. Testé le 08/10 : cette console répond « OK » à la commande
+// FTMS « Set Target Resistance Level » (0x04) mais l'ignore ; elle n'applique que la
+// simulation de pente (0x11), qu'elle convertit elle-même en niveau (8 % → niveau 16).
+// La correspondance exacte étant inconnue, la pente est ajustée jusqu'à lire le niveau
+// voulu dans les trames, et la pente qui marche est retenue pour la fois suivante.
+var ELLIP_GRADE_LS = 'hiitEllipGradeForLevel';
 async function ellipApplyLevel() {
   const lvl = ellipTargetLevel();
   if (!lvl || !ellipConnected || !ellipCp || ellipLevelBusy) return;
   ellipLevelBusy = true;
-  const hex = b => b.map(x => x.toString(16).padStart(2, '0')).join(' ');
+  let known = {};
+  try { known = JSON.parse(localStorage.getItem(ELLIP_GRADE_LS) || '{}'); } catch (e) {}
   try {
     const rc = await ellipCpSend([0x00]);
     log(`Elliptique : prise de contrôle → ${rc}`);
-    const x = lvl * 10;
-    const variants = [[0x04, x & 255, (x >> 8) & 255]];
-    if (x <= 255) variants.push([0x04, x]);
-    variants.push([0x04, lvl & 255, (lvl >> 8) & 255]);
-    let accepted = false;
-    for (const b of variants) {
-      const r = await ellipCpSend(b);
-      if (r === 1) accepted = true;
+    let grade = known[lvl] != null ? known[lvl] : lvl / 2; // en %
+    for (let i = 0; i < 6 && ellipConnected; i++) {
+      const g = Math.max(-20, Math.min(40, Math.round(grade * 100) / 100));
+      const v = Math.round(g * 100);
+      const r = await ellipCpSend([0x11, 0, 0, v & 255, (v >> 8) & 255, 40, 51]);
       await sleep(1500);
       const rep = ellipCur ? ellipCur.r : null;
-      log(`Elliptique : résistance ${lvl} (${hex(b)}) → réponse ${r}, niveau lu ${rep}`);
-      if (rep === lvl || rep === x) { showToast(`🚲 Résistance réglée : niveau ${lvl}`); return; }
-      if (!ellipConnected) return;
+      log(`Elliptique : niveau ${lvl} visé, pente ${g} % → réponse ${r}, niveau lu ${rep}`);
+      if (rep === lvl) {
+        known[lvl] = g;
+        try { localStorage.setItem(ELLIP_GRADE_LS, JSON.stringify(known)); } catch (e) {}
+        showToast(`🚲 Résistance réglée : niveau ${lvl}`);
+        return;
+      }
+      if (rep == null || r !== 1) break;
+      grade = g + (lvl - rep) / 2; // ~2 niveaux par % d'après le premier essai
     }
-    showToast(accepted ? `🚲 Niveau ${lvl} envoyé, non confirmé par la console` : '🚲 La console a refusé le réglage de résistance');
+    showToast(`🚲 Niveau ${lvl} non atteint (lu : ${ellipCur && ellipCur.r != null ? ellipCur.r : '?'})`);
   } catch (e) {
     logError('Réglage de résistance elliptique', e);
   } finally { ellipLevelBusy = false; }
