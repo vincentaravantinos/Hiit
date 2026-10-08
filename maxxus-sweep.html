@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maxxus pentes</title>
+<style>
+  :root { --bg:#141a1f; --fg:#e4ebf0; --muted:#93a2ad; --line:#2c3842; --accent:#5aa7e6; --ok:#5cc282; --bad:#e87a6d; --panel:#1b232a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif;
+         padding: calc(env(safe-area-inset-top,0px) + 14px) 16px calc(env(safe-area-inset-bottom,0px) + 16px); }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.sub { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; margin-bottom:10px; }
+  button { font:inherit; padding:13px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); flex:1; }
+  button.primary { background:var(--accent); color:#111; border-color:var(--accent); font-weight:700; }
+  button:disabled { opacity:.4; }
+  #status { margin:6px 0 10px; font-weight:700; }
+  .big { display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-bottom:12px; }
+  .m { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px; text-align:center; }
+  .m b { display:block; font-size:30px; }
+  .m span { color:var(--muted); font-size:11px; }
+  #bar { height:6px; background:var(--panel); border-radius:3px; overflow:hidden; margin-bottom:12px; }
+  #bar div { height:100%; width:0; background:var(--accent); }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-bottom:10px; }
+  td, th { padding:3px 4px; border-bottom:1px solid var(--line); text-align:center; }
+  th { color:var(--muted); font-weight:600; }
+</style>
+</head>
+<body>
+<h1>Elliptique – correspondance pente → niveau</h1>
+<p class="sub">Ferme l'app HIIT. Connecte-toi, puis lance le balayage et <b>pédale régulièrement pendant toute la durée</b> (~2 min 40). Note au passage si la résistance varie quand tu accélères sur un même palier.</p>
+<div class="row"><button class="primary" id="connect">Connecter</button><button id="run" disabled>Lancer le balayage</button></div>
+<div class="row"><button id="stop" disabled>Arrêter</button><button id="copy">Copier le résultat</button></div>
+<div id="status">Pas connecté</div>
+<div class="big">
+  <div class="m"><b id="m-g">–</b><span>pente envoyée</span></div>
+  <div class="m"><b id="m-r">–</b><span>niveau lu</span></div>
+  <div class="m"><b id="m-v">–</b><span>km/h</span></div>
+</div>
+<div id="bar"><div></div></div>
+<table id="tbl"><tr><th>Pente</th><th>Niveau</th><th>Réponse</th><th>Variations pendant le palier</th></tr></table>
+
+<script>
+const $ = id => document.getElementById(id);
+let cp = null, cpWaiter = null, cur = { r:null, v:null }, running = false, rows = [], hold = null;
+function setStatus(s,c){ $('status').textContent=s; $('status').style.color=c?`var(--${c})`:''; }
+function parseBike(dv){
+  const f=dv.getUint16(0,true); let o=2; const m={};
+  const u16=()=>{const v=dv.getUint16(o,true);o+=2;return v}, s16=()=>{const v=dv.getInt16(o,true);o+=2;return v};
+  const u24=()=>{o+=3};
+  try{ if(!(f&1))m.v=u16()/100; if(f&2)u16(); if(f&4)u16(); if(f&8)u16(); if(f&16)u24(); if(f&32)m.r=s16(); }catch(e){}
+  return m;
+}
+async function connect(){
+  try{
+    const dev = await navigator.bluetooth.requestDevice({ filters:[{services:[0x1826]},{namePrefix:'FAL'}], optionalServices:[0x1826] });
+    setStatus('Connexion…');
+    const srv = await dev.gatt.connect();
+    dev.addEventListener('gattserverdisconnected', ()=>{ setStatus('Déconnecté','bad'); running=false; });
+    const ftms = await srv.getPrimaryService(0x1826);
+    const data = await ftms.getCharacteristic(0x2ad2);
+    data.addEventListener('characteristicvaluechanged', e => {
+      const m = parseBike(e.target.value);
+      if (m.r!=null){ cur.r=m.r; $('m-r').textContent=m.r; }
+      if (m.v!=null){ cur.v=m.v; $('m-v').textContent=m.v.toFixed(1); }
+      if (hold && m.r!=null){ hold.levels.push(m.r); if (m.v!=null) hold.speeds.push(m.v); }
+    });
+    await data.startNotifications();
+    cp = await ftms.getCharacteristic(0x2ad9);
+    cp.addEventListener('characteristicvaluechanged', e => {
+      const b = new Uint8Array(e.target.value.buffer, e.target.value.byteOffset, e.target.value.byteLength);
+      if (b[0]===0x80 && cpWaiter){ const w=cpWaiter; cpWaiter=null; w(b[2]); }
+    });
+    await cp.startNotifications();
+    setStatus(`Connecté à ${dev.name}`,'ok');
+    $('run').disabled = false;
+  }catch(e){ setStatus('Erreur : '+e.message,'bad'); }
+}
+async function send(arr){
+  const p = new Promise(res => { cpWaiter=res; setTimeout(()=>{ if(cpWaiter===res){ cpWaiter=null; res(null); } }, 2500); });
+  await cp.writeValueWithResponse(new Uint8Array(arr));
+  return p;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+async function run(){
+  running = true; rows = []; $('run').disabled = true; $('stop').disabled = false;
+  const tbl = $('tbl'); while (tbl.rows.length > 1) tbl.deleteRow(1);
+  const grades = []; for (let g = -2; g <= 17.001; g += 0.5) grades.push(Math.round(g*10)/10);
+  setStatus('Balayage en cours — pédale !','ok');
+  const rc = await send([0x00]);
+  if (rc !== 1) { setStatus('Prise de contrôle refusée ('+rc+')','bad'); running=false; return; }
+  for (let i = 0; i < grades.length && running; i++) {
+    const g = grades[i]; const v = Math.round(g*100);
+    $('m-g').textContent = g + ' %';
+    $('bar').firstElementChild.style.width = ((i+1)/grades.length*100) + '%';
+    const r = await send([0x11, 0, 0, v & 255, (v >> 8) & 255, 40, 51]);
+    await sleep(1500);                 // laisse la console appliquer
+    hold = { levels:[], speeds:[] };   // puis observe 2,5 s
+    await sleep(2500);
+    const h = hold; hold = null;
+    const lv = h.levels.length ? h.levels[h.levels.length-1] : cur.r;
+    const distinct = [...new Set(h.levels)];
+    const sp = h.speeds.length ? `${Math.min(...h.speeds).toFixed(0)}–${Math.max(...h.speeds).toFixed(0)} km/h` : '';
+    const varTxt = distinct.length > 1 ? `${distinct.join('→')} (${sp})` : sp;
+    rows.push({ g, lv, r, varTxt });
+    const tr = tbl.insertRow(); tr.innerHTML = `<td>${g} %</td><td><b>${lv ?? '?'}</b></td><td>${r === 1 ? 'OK' : r}</td><td>${varTxt}</td>`;
+  }
+  setStatus(running ? 'Terminé — copie le résultat' : 'Arrêté', running ? 'ok' : 'bad');
+  running = false; $('run').disabled = false; $('stop').disabled = true;
+  try { await send([0x11, 0, 0, 0, 0, 40, 51]); } catch(e){}
+}
+$('connect').onclick = connect;
+$('run').onclick = run;
+$('stop').onclick = () => { running = false; };
+$('copy').onclick = async () => {
+  const txt = 'pente;niveau;réponse;variations\n' + rows.map(r => `${r.g};${r.lv};${r.r};${r.varTxt}`).join('\n');
+  try { await navigator.clipboard.writeText(txt); $('copy').textContent='Copié'; } catch(e){ prompt('Copie ce texte', txt); }
+  setTimeout(()=> $('copy').textContent='Copier le résultat', 1500);
+};
+</script>
+</body>
+</html>
