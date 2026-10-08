@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Maxxus iConsole</title>
+<style>
+  :root { --bg:#141a1f; --fg:#e4ebf0; --muted:#93a2ad; --line:#2c3842; --accent:#5aa7e6; --ok:#5cc282; --bad:#e87a6d; --panel:#1b232a; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.4 system-ui, sans-serif;
+         padding: calc(env(safe-area-inset-top,0px) + 14px) 16px calc(env(safe-area-inset-bottom,0px) + 16px); }
+  h1 { font-size:18px; margin:0 0 4px; }
+  p.sub { margin:0 0 12px; color:var(--muted); font-size:13px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px; align-items:center; }
+  button { font:inherit; padding:12px 14px; border-radius:10px; border:1px solid var(--line); background:var(--panel); color:var(--fg); flex:1; min-width:30%; }
+  button.primary { background:var(--accent); color:#111; border-color:var(--accent); font-weight:700; }
+  #status { margin:6px 0 10px; font-weight:700; }
+  .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:12px; }
+  .m { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:8px; text-align:center; }
+  .m b { display:block; font-size:26px; }
+  .m span { color:var(--muted); font-size:11px; }
+  .lvl { font-size:28px; font-weight:900; min-width:56px; text-align:center; flex:0; }
+  h2 { font-size:13px; color:var(--muted); margin:14px 0 6px; text-transform:uppercase; letter-spacing:1px; }
+  #log { width:100%; height:30vh; background:var(--panel); color:var(--fg); border:1px solid var(--line); border-radius:10px;
+         padding:8px; font:11px/1.35 ui-monospace, Menlo, monospace; white-space:pre; overflow:auto; }
+</style>
+</head>
+<body>
+<h1>Elliptique – niveau par le protocole iConsole</h1>
+<p class="sub">Ferme l'app HIIT et iConsole+. Connecte-toi, pédale, puis essaie dans l'ordre. Dis-moi aussi si la résistance change <b>au ressenti</b>.</p>
+<div class="row"><button class="primary" id="connect">Connecter</button><button id="copy">Copier le log</button></div>
+<div id="status">Pas connecté</div>
+<div class="grid">
+  <div class="m"><b id="m-r">–</b><span>niveau (FTMS)</span></div>
+  <div class="m"><b id="m-i">–</b><span>niveau (iConsole)</span></div>
+  <div class="m"><b id="m-v">–</b><span>km/h (FTMS)</span></div>
+</div>
+<div class="row"><button id="minus">−</button><span class="lvl" id="lvl">8</span><button id="plus">+</button></div>
+
+<h2>Essai 1 : niveau direct</h2>
+<div class="row"><button id="b-direct">Régler le niveau (A6 seul)</button></div>
+<h2>Essai 2 : avec la séquence d'iConsole+</h2>
+<div class="row"><button id="b-init">Initialiser (A0/A1)</button><button id="b-prog">Démarrer programme (A3/A4/A5)</button></div>
+<div class="row"><button id="b-level">Régler le niveau (A6)</button><button id="b-poll">Interrogation A2 : arrêt</button></div>
+
+<textarea id="log" readonly></textarea>
+
+<script>
+const $ = id => document.getElementById(id);
+const logEl = $('log'); const t0 = performance.now();
+let fff2 = null, lvl = 8, pollTimer = null, lastR = null, lastI = null;
+function log(s){ const t=((performance.now()-t0)/1000).toFixed(1).padStart(6); logEl.value += `[${t}] ${s}\n`; logEl.scrollTop = logEl.scrollHeight; }
+const hex = a => Array.from(a).map(b=>b.toString(16).padStart(2,'0')).join(' ');
+function setStatus(s,c){ $('status').textContent=s; $('status').style.color=c?`var(--${c})`:''; }
+// Trame iConsole : F0, commande, 35 (adresse console), 01, données (valeur + 1), somme modulo 256.
+function frame(cmd, ...data){ const b=[0xF0, cmd, 0x35, 0x01, ...data]; b.push(b.reduce((a,x)=>a+x,0)&255); return new Uint8Array(b); }
+async function send(label, f, quiet){
+  if(!fff2){ log('Pas connecté'); return; }
+  if(!quiet) log(`${label} : ${hex(f)}`);
+  try{ await fff2.writeValueWithoutResponse(f); }catch(e){ log('   erreur écriture : '+e.message); }
+}
+function parseBike(dv){
+  const f=dv.getUint16(0,true); let o=2; const m={};
+  try{ if(!(f&1)){m.v=dv.getUint16(o,true)/100;o+=2;} if(f&2)o+=2; if(f&4)o+=2; if(f&8)o+=2; if(f&16)o+=3; if(f&32){m.r=dv.getInt16(o,true);o+=2;} }catch(e){}
+  return m;
+}
+async function connect(){
+  try{
+    const dev = await navigator.bluetooth.requestDevice({ filters:[{services:[0x1826]},{namePrefix:'FAL'}], optionalServices:[0x1826, 0xfff0] });
+    setStatus('Connexion…');
+    const srv = await dev.gatt.connect();
+    dev.addEventListener('gattserverdisconnected', ()=>{ setStatus('Déconnecté','bad'); log('Déconnecté'); clearInterval(pollTimer); pollTimer=null; });
+    const ftms = await srv.getPrimaryService(0x1826);
+    const data = await ftms.getCharacteristic(0x2ad2);
+    data.addEventListener('characteristicvaluechanged', e => {
+      const m = parseBike(e.target.value);
+      if (m.r!=null){ $('m-r').textContent=m.r; if(m.r!==lastR){ log(`>> niveau FTMS : ${m.r}`); lastR=m.r; } }
+      if (m.v!=null) $('m-v').textContent=m.v.toFixed(1);
+    });
+    await data.startNotifications();
+    const prop = await srv.getPrimaryService(0xfff0);
+    fff2 = await prop.getCharacteristic(0xfff2);
+    const fff1 = await prop.getCharacteristic(0xfff1);
+    fff1.addEventListener('characteristicvaluechanged', e => {
+      const b = new Uint8Array(e.target.value.buffer, e.target.value.byteOffset, e.target.value.byteLength);
+      if (b[1]===0xb2 && b.length>=22){
+        const L = b[b.length-3]-1; $('m-i').textContent=L;
+        if (L!==lastI){ log(`>> niveau iConsole : ${L}`); lastI=L; }
+      } else log(`   fff1 ${hex(b)}`);
+    });
+    await fff1.startNotifications();
+    setStatus(`Connecté à ${dev.name}`,'ok'); log('Connecté. Pédale, puis essai 1.');
+  }catch(e){ setStatus('Erreur : '+e.message,'bad'); log('Erreur : '+e.message); }
+}
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+$('connect').onclick = connect;
+$('minus').onclick = () => { lvl=Math.max(1,lvl-1); $('lvl').textContent=lvl; };
+$('plus').onclick = () => { lvl=Math.min(16,lvl+1); $('lvl').textContent=lvl; };
+$('b-direct').onclick = () => send(`Niveau ${lvl} (direct)`, frame(0xA6, lvl+1));
+$('b-level').onclick = () => send(`Niveau ${lvl}`, frame(0xA6, lvl+1));
+$('b-init').onclick = async () => {
+  await send('Ping', new Uint8Array([0xF0,0xA0,0x01,0x00,0x91])); await sleep(500);
+  for (let i=0;i<3;i++){ await send('A0', frame(0xA0)); await sleep(500); await send('A1', frame(0xA1)); await sleep(500); }
+};
+$('b-prog').onclick = async () => {
+  await send('A3', frame(0xA3, 0x01)); await sleep(500);
+  await send('A4', frame(0xA4, 1,1,1,1,1,1,1,1,1,1)); await sleep(500);
+  await send('A5', frame(0xA5, 0x02)); await sleep(500);
+  if (!pollTimer) togglePoll();
+};
+function togglePoll(){
+  if (pollTimer){ clearInterval(pollTimer); pollTimer=null; $('b-poll').textContent='Interrogation A2 : arrêt'; log('Interrogation A2 arrêtée'); }
+  else { pollTimer=setInterval(()=>send('A2', frame(0xA2), true), 500); $('b-poll').textContent='Interrogation A2 : marche'; log('Interrogation A2 démarrée (toutes les 0,5 s)'); }
+}
+$('b-poll').onclick = togglePoll;
+$('copy').onclick = async () => {
+  try { await navigator.clipboard.writeText(logEl.value); $('copy').textContent='Copié'; } catch(e){ logEl.select(); document.execCommand('copy'); $('copy').textContent='Copié'; }
+  setTimeout(()=> $('copy').textContent='Copier le log', 1500);
+};
+log('Prêt.');
+</script>
+</body>
+</html>
