@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-07T15:09:43Z';</script>
+<script>const APP_BUILD = '2026-10-08T04:27:07Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -350,7 +350,7 @@ body {
     <p id="sensor-error-detail" style="font-size:11px;color:var(--muted);opacity:0.7;margin-top:-10px;margin-bottom:18px;word-break:break-word;"></p>
     <button class="btn-connect" id="sensor-modal-retry" onclick="sensorModalRetry()">Réessayer</button>
     <button class="btn-skip" id="sensor-modal-pick" onclick="sensorModalRetry(true)" style="display:none">Choisir un autre capteur</button>
-    <button class="btn-skip" onclick="sensorModalSkip()">Continuer sans capteur</button>
+    <button class="btn-skip" id="sensor-modal-skip" onclick="sensorModalSkip()">Continuer sans capteur</button>
   </div>
 </div>
 <script>
@@ -1358,6 +1358,7 @@ function bleErrText(err) {
 }
 
 // ---- Couche de connexion unique : toutes les activités passent par ici ----
+let bleCancelled = false; // « Démarrer sans capteur » pendant une connexion : la tentative en cours s'arrête
 let bleBusy = 0; // > 0 : une opération capteur est en cours (connexion, démarrage, récupération)
 const bleHooked = new WeakSet();
 function onLinkDown(reason) {
@@ -1412,6 +1413,7 @@ async function ensureConnected(maxAttempts = 4) {
   let lastErr = null, step = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const n = `(essai ${attempt}/${maxAttempts})`;
+    if (bleCancelled) throw fatalError('Connexion annulée');
     try {
       safeDisconnect();
       step = 'recherche';
@@ -1419,6 +1421,7 @@ async function ensureConnected(maxAttempts = 4) {
       let seen = false;
       try { await waitForOneAdvertisement(8000); seen = true; }
       catch (e) { logError('Annonce non reçue', e); }
+      if (bleCancelled) throw fatalError('Connexion annulée');
       step = 'connexion';
       log(seen ? `Capteur détecté, connexion... ${n}` : `Capteur non détecté (éteint ou trop loin ?), connexion directe... ${n}`);
       server = await withTimeout(device.gatt.connect(), 15000, 'connexion Bluetooth');
@@ -1435,6 +1438,7 @@ async function ensureConnected(maxAttempts = 4) {
       const wrong = step === 'lecture des services' && err && (err.name === 'NotFoundError' || err.name === 'SecurityError') && !isSensorName(device.name);
       safeDisconnect(); // annule aussi une tentative de connexion restée en suspens
       if (wrong) { device = null; throw fatalError('Cet appareil n\'est pas le capteur Polar Sense'); }
+      if (bleCancelled) throw fatalError('Connexion annulée');
       if (attempt < maxAttempts) {
         log(`Échec ${n} — ${step} : ${bleErrText(err)}. Nouvel essai...`);
         await sleep(1500 * attempt);
@@ -1500,6 +1504,8 @@ let sensorActive = false;
 let sensorPendingAction = null; // callback invoked once connect resolves (success or skip) — defaults to the Timer flow
 let sensorPrewarmPromise = null;
 let sensorLastError = null;
+let sensorConnecting = false; // une connexion silencieuse (DÉMARRER ou pré-connexion) est en cours
+let sensorStartGen = 0;       // change à chaque DÉMARRER / « sans capteur » : un résultat tardif est ignoré
 let sensorBaseline = null;
 let sensorPhaseLog = [];
 let sensorRewindEvents = []; // ground truth for any tRewind() press during a recording session — see tRewind()
@@ -1545,23 +1551,36 @@ async function sensorPromptThenStart(btn) {
   if (bleBusy && !sensorPrewarmPromise) { showToast('Capteur occupé — patiente quelques secondes'); return; }
   const originalText = btn ? btn.textContent : null;
   if (btn) { btn.disabled = true; btn.textContent = 'CONNEXION...'; }
+  const gen = ++sensorStartGen;
+  // HIIT : si le capteur n'est pas déjà connecté, « Démarrer sans capteur » est proposé
+  // tout de suite, sans attendre la fin de la recherche.
+  if (!sensorPendingAction && !sensorLinkReady()) sensorModalConnecting();
 
   function showPopupAndResetButton() {
     sensorModalOpen();
     if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
+  function go() {
+    document.getElementById('sensor-modal').style.display = 'none';
+    (sensorPendingAction || tStartCountdown)();
+  }
 
   try {
   if (sensorPrewarmPromise) {
     const connected = await sensorPrewarmPromise;
+    if (gen !== sensorStartGen) return; // démarré sans capteur entre-temps
     sensorPrewarmPromise = null;
-    if (connected) { (sensorPendingAction || tStartCountdown)(); return; }
+    if (connected) { go(); return; }
     showPopupAndResetButton();
     return;
   }
 
   dropWrongDevice();
-  if (!device) device = pickKnownSensor(await knownDevices());
+  if (!device) {
+    const known = await knownDevices();
+    if (gen !== sensorStartGen) return;
+    if (!device) device = pickKnownSensor(known);
+  }
   if (!device) {
     // Aucun capteur connu : seule la liste Bluetooth peut en fournir un, et elle exige
     // un tap — la modale le propose.
@@ -1569,10 +1588,13 @@ async function sensorPromptThenStart(btn) {
     showPopupAndResetButton();
     return;
   }
-  if (await sensorSilentConnect()) (sensorPendingAction || tStartCountdown)();
+  const connected = await sensorSilentConnect();
+  if (gen !== sensorStartGen) return;
+  if (connected) go();
   else showPopupAndResetButton();
   } catch (err) {
     logError('Erreur inattendue dans sensorPromptThenStart', err);
+    if (gen !== sensorStartGen) return;
     showPopupAndResetButton();
   }
 }
@@ -1586,23 +1608,40 @@ function sensorModalOpen() {
     : 'Allume le capteur, puis sélectionne « Polar Sense … » dans la liste.';
   document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
   document.getElementById('sensor-modal-retry').textContent = has ? 'Réessayer' : 'Choisir le capteur';
+  document.getElementById('sensor-modal-retry').style.display = '';
   document.getElementById('sensor-modal-pick').style.display = has ? '' : 'none';
+  document.getElementById('sensor-modal-skip').textContent = 'Continuer sans capteur';
   document.getElementById('sensor-modal').style.display = 'flex';
+}
+// Même modale pendant la recherche : un seul bouton, pour partir tout de suite sans capteur.
+function sensorModalConnecting() {
+  document.getElementById('sensor-modal-title').textContent = 'CONNEXION AU CAPTEUR...';
+  document.getElementById('sensor-modal-text').textContent = 'Recherche du capteur en cours. La séance démarre dès qu\'il est connecté.';
+  document.getElementById('sensor-error-detail').textContent = '';
+  document.getElementById('sensor-modal-retry').style.display = 'none';
+  document.getElementById('sensor-modal-pick').style.display = 'none';
+  document.getElementById('sensor-modal-skip').textContent = 'Démarrer sans capteur';
+  document.getElementById('sensor-modal').style.display = 'flex';
+}
+function sensorLinkReady() {
+  return sensorActive && !sensorConnecting && !!device && device.gatt.connected && !!controlChar;
 }
 async function sensorSilentConnect() {
   bleBusy++;
+  sensorConnecting = true;
   try {
     await ensureConnected(4);
+    if (bleCancelled) { safeDisconnect(); sensorActive = false; return false; }
     sensorActive = true;
     sensorLastError = null;
     log(`Capteur connecté : ${sensorLabel()}.`);
     return true;
   } catch (err) {
     logError('Connexion silencieuse échouée', err);
-    sensorLastError = (err && err.message) ? err.message : String(err);
+    if (!bleCancelled) sensorLastError = (err && err.message) ? err.message : String(err);
     sensorActive = false;
     return false;
-  } finally { bleBusy--; }
+  } finally { bleBusy--; sensorConnecting = false; bleCancelled = false; }
 }
 
 async function sensorModalRetry(forcePick) {
@@ -1622,12 +1661,20 @@ async function sensorModalRetry(forcePick) {
   }
   // Un échec ne lance plus la séance d'office : la modale revient avec le motif, et
   // « Continuer sans capteur » reste un choix explicite.
-  if (await sensorSilentConnect()) (sensorPendingAction || tStartCountdown)();
+  const gen = ++sensorStartGen;
+  if (!sensorPendingAction) sensorModalConnecting();
+  const connected = await sensorSilentConnect();
+  if (gen !== sensorStartGen) return; // démarré sans capteur entre-temps
+  document.getElementById('sensor-modal').style.display = 'none';
+  if (connected) (sensorPendingAction || tStartCountdown)();
   else sensorModalOpen();
 }
 
 function sensorModalSkip() {
   document.getElementById('sensor-modal').style.display = 'none';
+  sensorStartGen++; // le résultat de la connexion en cours sera ignoré
+  if (sensorConnecting) { bleCancelled = true; safeDisconnect(); log('Démarrage sans capteur — connexion abandonnée.'); }
+  sensorPrewarmPromise = null;
   sensorActive = false;
   (sensorPendingAction || tStartCountdown)();
 }
