@@ -2584,18 +2584,53 @@ function ellipParseBike(dv) {
   return m;
 }
 
+// Distance : intégrée à partir de la vitesse (FTMS ou iConsole, la plus fraîche non nulle).
+// Constat du 09/10 : une fois le protocole iConsole lancé, le compteur de distance FTMS de
+// la console reste à 0 — et le champ distance iConsole n'a qu'une résolution de 100 m.
+// L'intégration de la vitesse donne une précision au mètre, identique d'une séance à l'autre.
+var ellipIc = null;            // dernière trame iConsole décodée
+var ellipIntegAt = null, ellipDiagN = 0;
+function ellipSpeedNow(now) {
+  const f = ellipCur && ellipCur.ftAt && now - ellipCur.ftAt < 3000 ? (ellipCur.v || 0) : 0;
+  const i = ellipIc && now - ellipIc.at < 3000 ? (ellipIc.v || 0) : 0;
+  return Math.max(f, i);
+}
+function ellipTick(src) {
+  const now = Date.now();
+  if (ellipIntegAt != null) {
+    const dt = Math.min(2, (now - ellipIntegAt) / 1000);
+    ellipOdo += ellipSpeedNow(now) / 3.6 * dt;
+  }
+  ellipIntegAt = now;
+  const c = ellipCur || {};
+  const lvl = c.r != null && c.ftAt && now - c.ftAt < 3000 ? c.r : (ellipIc ? ellipIc.l : c.r);
+  const hr = (ellipIc && ellipIc.hr > 0 && now - ellipIc.at < 3000) ? ellipIc.hr : (c.hr > 0 ? c.hr : 0);
+  ellipCur = Object.assign({}, c, { odo: ellipOdo, at: now, r: lvl != null ? lvl : c.r, hrAny: hr });
+  if (ellipPhaseOdo == null) ellipPhaseOdo = ellipOdo;
+  if (ellipRecording) ellipSamples.push([now, Math.round(ellipOdo * 10) / 10, lvl != null ? lvl : null, hr || null,
+    c.w != null ? c.w : (ellipIc ? ellipIc.w : null), c.c != null ? c.c : (ellipIc ? ellipIc.c : null),
+    Math.round(ellipSpeedNow(now) * 10) / 10, src]);
+  ellipRenderLive();
+}
 function ellipOnData(ev) {
   const m = ellipParseBike(ev.target.value);
-  if (m.d != null) {
-    if (ellipLastD == null) { /* première trame après connexion : référence */ }
-    else if (m.d >= ellipLastD) ellipOdo += m.d - ellipLastD;
-    else ellipOdo += m.d; // compteur remis à zéro par la console
-    ellipLastD = m.d;
+  if (ellipDiagN < 6 && ellipIcReady) {
+    ellipDiagN++;
+    const b = new Uint8Array(ev.target.value.buffer, ev.target.value.byteOffset, ev.target.value.byteLength);
+    log(`Elliptique FTMS : ${Array.from(b).map(x => x.toString(16).padStart(2, '0')).join(' ')} → ${JSON.stringify(m)}`);
   }
-  ellipCur = Object.assign({}, m, { odo: ellipOdo, at: Date.now() });
-  if (ellipPhaseOdo == null) ellipPhaseOdo = ellipOdo;
-  if (ellipRecording) ellipSamples.push([Date.now(), ellipOdo, m.r != null ? m.r : null, m.hr != null ? m.hr : null, m.w != null ? m.w : null, m.c != null ? m.c : null]);
-  ellipRenderLive();
+  ellipCur = Object.assign({}, ellipCur || {}, m, { ftAt: Date.now() });
+  ellipTick('F');
+}
+// Trame iConsole B2 : F0 B2 35 01, puis chaque valeur +1, en paires base 100 :
+// minutes, secondes, vitesse (×0,1 km/h), tr/min, distance (×100 m), calories, FC, watts (×0,1), niveau.
+function ellipOnIc(ev) {
+  const b = new Uint8Array(ev.target.value.buffer, ev.target.value.byteOffset, ev.target.value.byteLength);
+  if (b[1] !== 0xB2 || b.length < 21) return;
+  const v = i => b[i] - 1, p = i => v(i) * 100 + v(i + 1);
+  ellipIc = { v: p(6) / 10, c: p(8), dist: p(10) * 100, hr: p(14), w: Math.round(p(16) / 10), l: v(18), at: Date.now() };
+  if (ellipDiagN < 12 && ellipIcReady) { ellipDiagN++; log(`Elliptique iConsole : ${JSON.stringify(ellipIc)}`); }
+  ellipTick('I');
 }
 
 function ellipOnCp(ev) {
@@ -2715,6 +2750,8 @@ async function ellipIcStart(server) {
     ellipIcTx = await withTimeout(svc.getCharacteristic(IC_TX), 5000, 'écriture iConsole');
     try {
       const rx = await withTimeout(svc.getCharacteristic(IC_RX), 5000, 'réponses iConsole');
+      rx.removeEventListener('characteristicvaluechanged', ellipOnIc);
+      rx.addEventListener('characteristicvaluechanged', ellipOnIc);
       await withTimeout(rx.startNotifications(), 5000, 'notifications iConsole');
     } catch (e) { logError('Elliptique : réponses iConsole', e); }
   } catch (e) {
@@ -2729,11 +2766,11 @@ async function ellipIcStart(server) {
   await icSend(icFrame(0xA5, 0x02)); await sleep(500);
   if (!ellipConnected) return false;
   ellipIcPoll = setInterval(() => { if (ellipConnected) icSend(icFrame(0xA2)); }, 500);
-  ellipIcReady = true;
+  ellipIcReady = true; ellipDiagN = 0;
   log('Elliptique : protocole iConsole prêt');
   return true;
 }
-function ellipIcStop() { clearInterval(ellipIcPoll); ellipIcPoll = null; ellipIcReady = false; ellipIcTx = null; }
+function ellipIcStop() { clearInterval(ellipIcPoll); ellipIcPoll = null; ellipIcReady = false; ellipIcTx = null; ellipIc = null; ellipIntegAt = null; }
 
 async function ellipApplyLevel() {
   const lvl = ellipTargetLevel();
@@ -2805,6 +2842,9 @@ function ellipOnSessionStart() {
 function ellipOnPhaseChange() {
   if (!ellipRecording || typeof SEQ === 'undefined' || !SEQ[tIdx]) return;
   const p = SEQ[tIdx];
+  const prev = ellipPhases[ellipPhases.length - 1];
+  if (prev && prev.name === ELLIP_EX && ellipCur && ellipPhaseOdo != null)
+    log(`Elliptique : sprint R${prev.round || 1} = ${Math.round(ellipCur.odo - ellipPhaseOdo)} m (vitesse ${ellipSpeedNow(Date.now())} km/h, niveau ${ellipCur.r})`);
   ellipPhases.push({ name: p.name, type: p.type, round: p.round, phase: p.phase, tElapsedStart: tElapsed, atMs: Date.now() });
   ellipPhaseOdo = ellipCur ? ellipCur.odo : null;
   const s = p.name === ELLIP_EX ? lastSprintFor(p.round || 1, ellipLevelNow()) : null;
