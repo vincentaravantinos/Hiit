@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-08T04:27:07Z';</script>
+<script>const APP_BUILD = '2026-10-09T13:27:12Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -236,6 +236,12 @@ body {
     <button class="act-back" onclick="openActivity('activity')">‹ ACTIVITÉS</button>
     <div style="padding:10px 0 30px;text-align:center;">
       <div id="swim-status" style="font-size:14px;color:var(--muted);margin-bottom:20px;min-height:20px;"></div>
+      <div id="swim-recover-box" style="display:none;background:#1d2a23;border:2px solid var(--accent);border-radius:12px;padding:14px;margin-bottom:20px;">
+        <div style="font-size:13px;font-weight:700;letter-spacing:1px;color:var(--accent);">NATATION EN ATTENTE SUR LE CAPTEUR</div>
+        <div id="swim-recover-detail" style="font-size:12px;color:#a8b5ad;margin-top:6px;line-height:1.35;"></div>
+        <button id="swim-recover-btn" onclick="swimRecover(false)" style="width:100%;margin-top:10px;padding:14px;border:none;border-radius:10px;background:var(--accent);color:#111;font-family:var(--font);font-size:14px;font-weight:700;letter-spacing:1px;">RÉCUPÉRER LA NATATION</button>
+        <button onclick="swimAbandonPending()" style="margin-top:8px;padding:6px;border:none;background:none;color:#a8b5ad;font-family:var(--font);font-size:11px;text-decoration:underline;">Abandonner cette séance</button>
+      </div>
       <div id="swim-cc-block">
         <div style="font-size:15px;font-weight:bold;margin-bottom:4px;">Contre-courant</div>
         <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">Bloc de 20 min. Choisis le niveau de la pompe.</div>
@@ -246,6 +252,7 @@ body {
         </div>
         <button id="swim-cc-btn" data-mode="countercurrent" data-label="DÉMARRER LE CONTRE-COURANT" onclick="swimPromptThenStart(this,'countercurrent')" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LE CONTRE-COURANT</button>
         <p style="font-size:12px;color:var(--muted);margin-top:16px;">Les 5 premières minutes de nage et les pauses sont exclues du calcul de FC.</p>
+        <button id="swim-latest-btn" onclick="swimRecover(true)" style="margin-top:14px;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:12px;text-decoration:underline;">Récupérer le dernier enregistrement resté sur le capteur</button>
       </div>
     </div>
   </div>
@@ -618,7 +625,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -1709,6 +1716,20 @@ function sensorOnPhaseChange() {
   sensorSavePending();
 }
 
+// Sans ligne de base (page rechargée, séance d'avant la mise à jour) : on prend le
+// dernier enregistrement du capteur, soit le dossier horaire le plus récent et ceux
+// démarrés dans les 2 minutes précédentes (un dossier par type si la seconde a tourné).
+function latestRecordingGroup(recordings) {
+  const stamp = r => {
+    const m = r.path.match(/\/(\d{4})(\d{2})(\d{2})\/R\/(\d{2})(\d{2})(\d{2})\//);
+    return m ? Date.UTC(+m[1], +m[2]-1, +m[3], +m[4], +m[5], +m[6]) : null;
+  };
+  const dated = recordings.map(r => ({ r, t: stamp(r) })).filter(x => x.t != null);
+  if (!dated.length) return [];
+  const last = Math.max(...dated.map(x => x.t));
+  return dated.filter(x => last - x.t <= 120000).map(x => x.r);
+}
+
 async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES) {
   // Shared by the Timer, Swim and Free flows: reconnect (with retries), stop recording,
   // list, diff against the baseline, download and decode every new file. Returns
@@ -1724,7 +1745,7 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
         await pftpEnsureReady();
         log('Lecture de la liste des fichiers...');
         const current = await listAllRecordings();
-        const fresh = current.filter(r => !baseline.has(r.path));
+        const fresh = baseline === 'latest' ? latestRecordingGroup(current) : current.filter(r => !baseline.has(r.path));
         if (fresh.length === 0) throw new Error('Aucun nouvel enregistrement listé.');
         return fresh;
       }, maxAttempts);
@@ -3438,6 +3459,8 @@ function swimResetButton(btn) {
 }
 
 function swimPromptThenStart(btn, mode = 'countercurrent') {
+  if (swimRecoverBusy) return;
+  if (swimLoadPending()) { showToast('Récupère (ou abandonne) d\'abord la natation en attente'); swimRefreshRecoverBox(); return; }
   swimMode = mode;
   swimActiveBtn = btn;
   sensorPendingAction = swimActuallyStart;
@@ -3460,6 +3483,7 @@ async function swimActuallyStart() {
     safeDisconnect();
     swimStartWallMs = performance.now();
     swimStartEpochMs = Date.now();
+    swimSavePending({ baseline: Array.from(swimBaseline), startedAtMs: swimStartEpochMs, level: getCcLevel() });
     btn.textContent = swimMode === 'countercurrent' ? 'ARRÊTER LE CONTRE-COURANT' : 'ARRÊTER LA NATATION';
     btn.style.background = '#c0392b'; btn.style.color = '#fff';
     btn.disabled = false;
@@ -3481,6 +3505,8 @@ async function swimStop(btn) {
   clearInterval(swimTimerInterval);
   swimTimerInterval = null;
   const durationS = (performance.now()-swimStartWallMs)/1000;
+  const pend = swimLoadPending();
+  if (pend) { pend.endedAtMs = Date.now(); pend.durationS = durationS; swimSavePending(pend); }
   btn.disabled = true;
   btn.textContent = 'ANALYSE EN COURS...';
   document.getElementById('swim-status').textContent = 'Récupération des données...';
@@ -3490,13 +3516,82 @@ async function swimStop(btn) {
   sensorProgressExtraEl = null;
   swimResetButton(btn);
   document.getElementById('swim-status').textContent = '';
+  swimRefreshRecoverBox();
 }
 
-async function swimRetrieveAndFinish(baseline, durationS, mode = 'countercurrent', level = null, startedAtMs = null) {
+// ---- Natation en attente : comme pour le HIIT, une récupération échouée (ou une
+// page rechargée pendant la nage) doit pouvoir être relancée. La séance est gardée
+// en localStorage jusqu'à ce que ses données soient importées ou abandonnées. ----
+const SWIM_PENDING_KEY = 'hiitSwimPendingSession';
+let swimRecoverBusy = false;
+function swimLoadPending() { try { return JSON.parse(localStorage.getItem(SWIM_PENDING_KEY) || 'null'); } catch (e) { return null; } }
+function swimSavePending(p) { try { localStorage.setItem(SWIM_PENDING_KEY, JSON.stringify(p)); } catch (e) {} }
+function swimRefreshRecoverBox() {
+  const box = document.getElementById('swim-recover-box');
+  if (!box) return;
+  const p = swimLoadPending();
+  const show = !!p && swimTimerInterval == null && !swimRecoverBusy;
+  box.style.display = show ? 'block' : 'none';
+  if (show) {
+    const when = new Date(p.startedAtMs).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    document.getElementById('swim-recover-detail').textContent = `Séance du ${when}. `
+      + (sensorLastError ? 'Dernière erreur : ' + sensorLastError + '. ' : '')
+      + 'Capteur allumé et proche du téléphone, puis choisis-le dans la liste.';
+  }
+}
+function swimAbandonPending() {
+  if (swimRecoverBusy) return;
+  if (!confirm('Abandonner la natation en attente ?\n\nSes données ne seront pas importées dans l\'app. Cette action est définitive.')) return;
+  localStorage.removeItem(SWIM_PENDING_KEY);
+  logAppend('Natation en attente abandonnée par l\'utilisateur.');
+  swimRefreshRecoverBox();
+}
+// latest=true : aucune séance mémorisée, on prend le dernier enregistrement du capteur.
+// requestDevice() doit rester le premier await (geste utilisateur).
+async function swimRecover(latest) {
+  if (swimRecoverBusy || sensorRecoverBusy || swimTimerInterval != null) return;
+  if (bleBusy) { showToast('Capteur occupé — patiente quelques secondes'); return; }
+  const p = latest ? null : swimLoadPending();
+  if (!latest && !p) { swimRefreshRecoverBox(); return; }
+  try {
+    dropWrongDevice();
+    if (!device) device = await navigator.bluetooth.requestDevice(sensorRequestOpts());
+  } catch (err) { logError('Récupération natation : capteur non sélectionné', err); return; }
+  swimRecoverBusy = true;
+  swimRefreshRecoverBox();
+  const statusEl = document.getElementById('swim-status');
+  const ccBtn = document.getElementById('swim-cc-btn');
+  const latestBtn = document.getElementById('swim-latest-btn');
+  ccBtn.disabled = true; latestBtn.disabled = true;
+  statusEl.textContent = 'Récupération des données...';
+  sensorProgressExtraEl = statusEl;
+  let ok = false;
+  try {
+    ok = p ? await swimRetrieveAndFinish(new Set(p.baseline || []), p.durationS || null, 'countercurrent', p.level, p.startedAtMs, p.endedAtMs || null)
+           : await swimRetrieveAndFinish('latest', null, 'countercurrent', getCcLevel(), null, null);
+  } catch (err) { logError('Récupération natation', err); sensorLastError = (err && err.message) ? err.message : String(err); showToast('⚠️ Erreur pendant l\'analyse — voir le journal'); }
+  sensorProgressExtraEl = null;
+  swimRecoverBusy = false;
+  ccBtn.disabled = false; latestBtn.disabled = false;
+  if (!ok) { safeDisconnect(); device = null; sensorActive = false; } // prochain essai : sélecteur, donc objet neuf
+  statusEl.textContent = ok ? '' : 'Récupération échouée' + (sensorLastError ? ' : ' + sensorLastError : '') + ' — les données restent sur le capteur.';
+  swimRefreshRecoverBox();
+}
+
+async function swimRetrieveAndFinish(baseline, durationS, mode = 'countercurrent', level = null, startedAtMs = null, endedAtMs = null) {
   const { ok, combined } = await retrieveAllSensorData(baseline);
   if (!ok) {
-    showToast('⚠️ Récupération reportée — les données restent sur le capteur');
+    showToast('⚠️ Récupération reportée — bouton « Récupérer la natation » dans l\'onglet Natation');
     return false;
+  }
+  // Durée inconnue (récupération tardive sans séance mémorisée) : le capteur a pu
+  // continuer d'enregistrer après la nage, on la déduit donc plus bas des segments nagés.
+  const lateNoDuration = durationS == null;
+  if (lateNoDuration) {
+    durationS = (endedAtMs && startedAtMs) ? (endedAtMs - startedAtMs) / 1000
+      : (combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0);
+    if (!startedAtMs) startedAtMs = hcParseSensorUtc(combined.acc && combined.acc.startTimeStr);
+    combined.recoveredLate = true;
   }
   combined.durationS = durationS;
   if (startedAtMs) combined.startedAtMs = startedAtMs;
@@ -3507,6 +3602,11 @@ async function swimRetrieveAndFinish(baseline, durationS, mode = 'countercurrent
   document.getElementById('swim-status').textContent = 'Analyse...';
   await new Promise(r => setTimeout(r, 30));
   combined.analysis = buildSwimAnalysis(combined);
+  if (lateNoDuration && !endedAtMs) {
+    const segs = combined.analysis.swimSegments || [];
+    if (segs.length) { durationS = Math.min(durationS, segs[segs.length-1].endS + 30); combined.durationS = durationS; }
+  }
+  localStorage.removeItem(SWIM_PENDING_KEY);
   showSwimResultsModal(combined);
   if (durationS >= 600) {
     logWorkout('R', true);
