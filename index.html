@@ -199,6 +199,7 @@ body {
       <div class="t-glow"></div>
       <div style="width:100%;max-width:400px;z-index:1">
         <button class="act-back" onclick="openActivity('activity')">‹ ACTIVITÉS</button>
+        <div id="t-variant" style="display:none;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <span id="t-phase" style="font-size:13px;letter-spacing:3px;color:var(--muted);text-transform:uppercase">ÉCHAUFFEMENT</span>
           <span id="t-total" style="font-size:13px;letter-spacing:2px;color:var(--muted)">15:00</span>
@@ -534,16 +535,64 @@ function buildSeq(prog){
   if(prog.recovery!==false)s.push({name:"Récupération",spoken:"Bravo ! Circuit terminé. Une minute de récupération, tu peux ranger.",duration:RECOVERY_S,type:"rest",phase:"RECOVERY",round:null});
   return s;
 }
+// ======= Variantes de programme (déplacements) =======
+// HIIT_program.json décrit le programme maison ; un bloc facultatif "variants" peut
+// ajouter une variante temporaire, p. ex. :
+//   "variants": { "hotel": { "label": "Hôtel", "until": "2026-10-12",
+//     "sensors": { "polar": true, "elliptical": false },
+//     "warmup": {...}, "rounds": 4, "skip_last_rest": true, "exercises": [...] } }
+// Tant que "until" (inclus) n'est pas dépassé, la variante est proposée — et choisie par
+// défaut — dans l'onglet HIIT ; ensuite l'app revient seule au programme maison. Les
+// séances d'une variante sont étiquetées et ne servent jamais de référence aux séances
+// maison (annonces « dernière séance », couleurs, sprints), ni l'inverse.
+let PROGRAMS={maison:FALLBACK_PROGRAM},PROGRAM_VARIANT='maison';
+const VARIANT_LS='hiitProgramVariant';
+function activeVariants(){return Object.keys(PROGRAMS).filter(k=>k!=='maison');}
+function curProgram(){return PROGRAMS[PROGRAM_VARIANT]||PROGRAMS.maison;}
+function curSensors(){const s=curProgram().sensors||{};return{polar:s.polar!==false,elliptical:PROGRAM_VARIANT==='maison'?s.elliptical!==false:s.elliptical===true};}
+// Étiquette des séances : null pour la maison (compatibilité avec tout l'historique).
+function curVariantTag(){return PROGRAM_VARIANT==='maison'?null:PROGRAM_VARIANT;}
+function sameVariant(e,tag){const v=(e&&e.summary&&e.summary.variant)||null;return v===(tag===undefined?curVariantTag():tag);}
+function selectVariant(k){
+  if(tState!=='idle')return;
+  if(!PROGRAMS[k])k='maison';
+  PROGRAM_VARIANT=k;
+  try{localStorage.setItem(VARIANT_LS,k);}catch(e){}
+  applyProgram(curProgram());
+  renderVariantPicker();
+  tRender();
+  if(curSensors().elliptical)ellipAutoStart(true);else if(typeof ellipDisconnect==='function'&&ellipConnected)ellipDisconnect();
+}
+function renderVariantPicker(){
+  const el=document.getElementById('t-variant');if(!el)return;
+  const vs=activeVariants();
+  if(!vs.length||tState!=='idle'){el.style.display='none';return;}
+  el.style.display='flex';
+  const chip=(k,label)=>`<button class="free-chip${PROGRAM_VARIANT===k?' on':''}" onclick="selectVariant('${k}')">${label}</button>`;
+  el.innerHTML=chip('maison','Maison')+vs.map(k=>{const v=PROGRAMS[k];return chip(k,(v.label||k)+(v.until?` · jusqu'au ${v.until.slice(8,10)}/${v.until.slice(5,7)}`:''));}).join('');
+  const ld=document.getElementById('load-ellip');if(ld&&ld.parentElement)ld.parentElement.style.display=curSensors().elliptical?'flex':'none';
+  const lr=document.getElementById('load-rowing'),lq=document.getElementById('load-squats');
+  [lr,lq].forEach(x=>{if(x&&x.parentElement)x.parentElement.style.display=PROGRAM_VARIANT==='maison'?'flex':'none';});
+}
 async function loadProgram(){
+  let prog=null;
   try{
     const r=await fetch(PROGRAM_URL+'?v='+Date.now());
     if(!r.ok)throw new Error('HTTP '+r.status);
-    const prog=await r.json();
-    applyProgram(prog);
+    prog=await r.json();
   }catch(e){
     console.warn('HIIT_program.json non chargé, fallback:',e);
-    applyProgram(FALLBACK_PROGRAM);
+    prog=FALLBACK_PROGRAM;
   }
+  PROGRAMS={maison:prog};
+  const today=todayStr();
+  Object.entries(prog.variants||{}).forEach(([k,v])=>{if(k!=='maison'&&v&&Array.isArray(v.exercises)&&(!v.until||v.until>=today))PROGRAMS[k]=v;});
+  let saved=null;try{saved=localStorage.getItem(VARIANT_LS);}catch(e){}
+  const vs=activeVariants();
+  // Variante choisie par défaut pendant sa période ; retour automatique à la maison ensuite.
+  PROGRAM_VARIANT=saved&&PROGRAMS[saved]?saved:(vs[0]||'maison');
+  if(saved&&!PROGRAMS[saved]){try{localStorage.removeItem(VARIANT_LS);}catch(e){}}
+  applyProgram(curProgram());
 }let tIdx=0,tLeft=0,tElapsed=0,tState="idle",ticker=null,audioCtx=null,frVoice=null,wakeLock=null,tickStart=0,tickLastSec=-1,duckTimeout=null,duckReleaseAt=0;
 function setWakeStatus(state,msg){const el=document.getElementById('t-wake');if(!el)return;if(state==='ok'){el.style.display='none';el.textContent='';return;}el.style.display='block';if(state==='unsupported'){el.textContent='\u26a0\ufe0f Wake lock non support\u00e9 par ce navigateur \u2014 l\u2019\u00e9cran peut s\u2019\u00e9teindre.';}else if(state==='lost'){el.textContent='\u26a0\ufe0f Wake lock rel\u00e2ch\u00e9 par le syst\u00e8me \u2014 nouvelle tentative\u2026';}else{el.textContent='\u26a0\ufe0f \u00c9cran non maintenu allum\u00e9. D\u00e9sactive l\u2019\u00e9conomie d\u2019\u00e9nergie.'+(msg?' ('+msg+')':'');}}
 async function acquireWakeLock(){if(!('wakeLock'in navigator)){setWakeStatus('unsupported');return;}if(wakeLock)return;try{const s=await navigator.wakeLock.request('screen');wakeLock=s;setWakeStatus('ok');s.addEventListener('release',()=>{if(wakeLock===s)wakeLock=null;if(tState==='running'||tState==='countdown'){setWakeStatus('lost');setTimeout(()=>{if(!wakeLock&&(tState==='running'||tState==='countdown'))acquireWakeLock();},600);}});}catch(e){wakeLock=null;setWakeStatus('denied',e&&e.name?e.name:'');setTimeout(()=>{if(!wakeLock&&(tState==='running'||tState==='countdown'))acquireWakeLock();},5000);}}
@@ -573,7 +622,7 @@ function testVoice(){const el=document.getElementById('tts-status');let n=0,fr='
 setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+APP_BUILD;},0);
 // Reps de la dernière séance, même exercice et même tour (historique local).
 let lastRepsIntroDone=false;
-function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
+function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
 // Annonce de début de phase : nom de l'exercice + reps de la dernière fois.
 function phaseSpeech(i){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'&&p.name===ELLIP_EX){const s=ellipConnected?lastSprintFor(p.round||1,ellipLevelNow()):null;if(s){t+=' '+s.d+' mètres';if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}else if(p.type==='work'&&p.phase==='CIRCUIT'){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}return t;}
 const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
@@ -593,7 +642,7 @@ function tRewind(){
   else{tLeft=SEQ[tIdx].duration;tStartTicker();tRender();}
 }
 function tForward(){if(tIdx+1<SEQ.length)tGoNext();}
-function tRenderControls(){ellipRenderLive();const ctrl=document.getElementById('t-controls'),col=tCol();const ld=document.getElementById('t-loads');if(ld)ld.style.display=tState==='idle'?'flex':'none';
+function tRenderControls(){ellipRenderLive();renderVariantPicker();const ctrl=document.getElementById('t-controls'),col=tCol();const ld=document.getElementById('t-loads');if(ld)ld.style.display=tState==='idle'?'flex':'none';
 const iconBtn=(icon,fn)=>`<button onclick="${fn}" style="padding:15px 18px;font-size:20px;background:rgba(255,255,255,.08);color:var(--text);border:1px solid rgba(255,255,255,.18);border-radius:50px;cursor:pointer;line-height:1">${icon}</button>`;
 const bs=`font-family:'Courier New',monospace;font-weight:700;letter-spacing:2px;text-transform:uppercase;border-radius:50px;cursor:pointer;border:none;transition:opacity .2s`;
 const fs=iconBtn('⛶','toggleFS()');
@@ -628,7 +677,8 @@ function duckHold(ms){
   clearTimeout(duckTimeout);
   duckTimeout=setTimeout(()=>{stopSilentAudio();duckReleaseAt=0;},Math.max(0,duckReleaseAt-Date.now()));
 }
-async function tStartCountdown(){launchSpotify();ellipOnSessionStart();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
+const SESSION_VARIANT_LS='hiitSessionVariant';
+async function tStartCountdown(){try{const v=curVariantTag();if(v)localStorage.setItem(SESSION_VARIANT_LS,v);else localStorage.removeItem(SESSION_VARIANT_LS);}catch(e){}launchSpotify();ellipOnSessionStart();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);const id=setInterval(()=>{c--;if(c<=0){clearInterval(id);document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
 function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
 function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+n.name),100);}}if(tLeft===3)countSay('Trois');if(tLeft===2)countSay('Deux');if(tLeft===1)countSay('Un',true);if(tLeft<=0){tGoNext();return;}tRender();}
 function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';ellipOnSessionEnd(sensorActive);sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
@@ -1825,7 +1875,9 @@ async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], ma
   combined.phaseLog = phaseLog;
   if (endedAtMs) combined.endedAtMs = endedAtMs;
   combined.rewindEvents = rewindEvents;
-  combined.loads = getLoads();
+  let sv = null; try { sv = localStorage.getItem(SESSION_VARIANT_LS); } catch (e) {}
+  if (sv) { combined.variant = sv; combined.programLabel = PROGRAMS[sv] ? (PROGRAMS[sv].label || sv) : sv; }
+  else combined.loads = getLoads(); // charges des élastiques : programme maison seulement
   const ell = ellipTakePending(phaseLog, endedAtMs);
   if (ell) combined.elliptical = ell;
   sensorProgress('Analyse de la séance...');
@@ -2006,6 +2058,7 @@ function buildSessionSummary(combined, type) {
     reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
     const summary = { totalReps, exerciseCount: reps.length, repsByEx };
     if (hasSprints) summary.sprints = sprints;
+    if (combined.variant) summary.variant = combined.variant;
     if (combined.loads) summary.loads = combined.loads;
     if (combined.analysis.recovery && combined.analysis.recovery.drop != null) summary.hrRecovery = combined.analysis.recovery.drop;
     return summary;
@@ -2709,7 +2762,7 @@ async function ellipWaitAdv(dev, ms) {
   finally { clearTimeout(timer); dev.removeEventListener('advertisementreceived', onAdv); try { ac.abort(); } catch (e) {} }
 }
 async function ellipAutoConnect() {
-  if (ellipConnected || ellipConnecting || ellipAutoBusy) return;
+  if (ellipConnected || ellipConnecting || ellipAutoBusy || !curSensors().elliptical) return;
   ellipAutoBusy = true;
   try {
     const dev = await ellipFindKnown();
@@ -2755,6 +2808,10 @@ function ellipModalShow(mode) {
 }
 function ellipModalHide() { document.getElementById('ellip-modal').style.display = 'none'; }
 async function ellipGateThenStart(btn) {
+  if (!curSensors().elliptical) {
+    if (!curSensors().polar && !sensorStartBlocked()) { sensorActive = false; tStartCountdown(); return; }
+    sensorPromptThenStart(btn); return;
+  }
   if (sensorStartBlocked() || (bleBusy && !sensorPrewarmPromise)) { sensorPromptThenStart(btn); return; } // mêmes messages que la Polar
   let skip = false; try { skip = localStorage.getItem(ELLIP_SKIP_LS) === '1'; } catch (e) {}
   ellipGateBtn = btn;
@@ -2951,7 +3008,7 @@ function ellipRenderLive() {
     const el = document.getElementById('t-ellip');
     if (!el) return;
     const cur = (typeof SEQ !== 'undefined' && SEQ) ? SEQ[tIdx] : null;
-    const show = ellipDev && cur && ellipSessionLive() && (cur.name === ELLIP_EX || cur.phase === 'WARMUP');
+    const show = ellipDev && curSensors().elliptical && ellipRecording && cur && ellipSessionLive() && (cur.name === ELLIP_EX || cur.phase === 'WARMUP');
     if (!show) { el.style.display = 'none'; return; }
     el.style.display = 'block';
     if (!ellipConnected) { el.innerHTML = '<span style="font-size:13px;color:#ffb454">🚲 Elliptique déconnecté — reconnexion…</span>'; return; }
@@ -2970,7 +3027,7 @@ function ellipRenderLive() {
 function lastSprintFor(round, level) {
   try {
     const idx = JSON.parse(localStorage.getItem('hiitHistoryIndex') || '[]')
-      .filter(e => e.type === 'hiit' && e.summary && e.summary.sprints)
+      .filter(e => e.type === 'hiit' && e.summary && e.summary.sprints && sameVariant(e))
       .sort((a, b) => a.filename < b.filename ? -1 : 1);
     for (let i = idx.length - 1; i >= 0; i--) {
       const s = idx[i].summary.sprints[round];
@@ -2982,6 +3039,7 @@ function lastSprintFor(round, level) {
 
 function ellipOnSessionStart() {
   ellipSamples = []; ellipPhases = []; ellipRef = null;
+  if (!curSensors().elliptical) { ellipRecording = false; return; }
   ellipRecording = true;
   ellipAfterSession = false;
   if (ellipConnected) ellipApplyLevel();
@@ -3172,11 +3230,11 @@ function renderProgressionHtml(results, combined, history) {
   return `<div style="padding:10px 12px;border-radius:10px;background:#27ae60;color:#fff;font-size:13px;margin-bottom:12px;">💪 ${msgs.join('<br>')}</div>`;
 }
 
-function getHiitHistory(currentFilename) {
+function getHiitHistory(currentFilename, variantTag) {
   let index = [];
   try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
   return index
-    .filter(e => e.type === 'hiit' && e.summary)
+    .filter(e => e.type === 'hiit' && e.summary && sameVariant(e, variantTag))
     .filter(e => !currentFilename || e.filename < currentFilename)
     .sort((a,b) => a.filename < b.filename ? -1 : 1);
 }
@@ -3257,7 +3315,7 @@ function renderRecoveryHtml(combined, filename) {
   const rec = combined.analysis && combined.analysis.recovery;
   if (!rec) return '';
   if (rec.drop == null) return `<div style="font-size:13px;color:var(--muted);">Récupération : ${rec.error}</div>`;
-  const past = getHiitHistory(filename).map(e => e.summary.hrRecovery).filter(v => v != null);
+  const past = getHiitHistory(filename, combined.variant || null).map(e => e.summary.hrRecovery).filter(v => v != null);
   const c = compareColor(rec.drop, past, 3);
   const bg = !c ? '#555' : c.state === 'up' ? '#27ae60' : c.state === 'down' ? '#c0392b' : '#f2ede6';
   const fg = c && c.state === 'same' ? '#111' : '#fff';
@@ -3339,13 +3397,15 @@ function showSessionResultsModal(combined, filename) {
 
   function renderInto(results) {
     const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
-    const repsHtml = renderSprintsHtml(combined, getHiitHistory(filename)) + (combined.noSensor
+    const hist = getHiitHistory(filename, combined.variant || null);
+    const repsHtml = renderSprintsHtml(combined, hist) + (combined.noSensor
       ? '<p style="color:var(--muted);font-size:13px;">Séance sans capteur Polar : pas de comptage des reps ni de FC.</p>'
-      : renderProgressionHtml(results, combined, getHiitHistory(filename)) + renderRepsResultsHtml(results, getHiitHistory(filename), combined));
+      : renderProgressionHtml(results, combined, hist) + renderRepsResultsHtml(results, hist, combined));
     const recHtml = renderRecoveryHtml(combined, filename);
     const zonesHtml = renderHrZonesHtml(combined, null, hiitZoneOpts(combined));
     box.innerHTML = `
       ${hiitNavHeaderHtml(box._hc)}
+      ${combined.variant ? `<p style="font-size:12px;color:var(--accent);text-align:center;margin-bottom:6px;">Programme ${combined.programLabel || combined.variant} — comparé uniquement aux séances de ce programme</p>` : ''}
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       <div style="margin-bottom:16px;">${repsHtml}</div>
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
