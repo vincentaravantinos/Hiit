@@ -50,5 +50,67 @@
       "duration": 20,
       "type": "rest"
     }
-  ]
+  ],
+  "variants": {
+    "hotel": {
+      "label": "Hôtel (test)",
+      "until": "2026-10-11",
+      "sensors": {
+        "polar": true,
+        "elliptical": false
+      },
+      "warmup": {
+        "enabled": true,
+        "name": "Jumping jacks",
+        "spoken": "Échauffement, jumping jacks !",
+        "duration": 120
+      },
+      "rounds": 4,
+      "skip_last_rest": true,
+      "exercises": [
+        {
+          "name": "Squats",
+          "spoken": "Squats !",
+          "duration": 30,
+          "type": "work"
+        },
+        {
+          "name": "Pompes",
+          "spoken": "Pompes !",
+          "duration": 30,
+          "type": "work"
+        },
+        {
+          "name": "Rowing élastique",
+          "spoken": "Rowing élastique !",
+          "duration": 30,
+          "type": "work"
+        },
+        {
+          "name": "Fentes alternées",
+          "spoken": "Fentes alternées !",
+          "duration": 30,
+          "type": "work"
+        },
+        {
+          "name": "Mountain climbers",
+          "spoken": "Mountain climbers !",
+          "duration": 30,
+          "type": "work"
+        },
+        {
+          "name": "Gainage",
+          "spoken": "Gainage !",
+          "duration": 30,
+          "type": "work"
+        },
+        {
+          "name": "Repos",
+          "spoken": "Repos, récupérez.",
+          "duration": 20,
+          "type": "rest"
+        }
+      ]
+    }
+  }
 }
