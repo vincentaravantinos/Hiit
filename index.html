@@ -135,6 +135,10 @@ body {
 .danger-btn { width: 100%; padding: 13px; background: none; border: 1px solid rgba(196,120,120,.5); border-radius: 12px; color: var(--red); font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 2px; cursor: pointer; text-transform: uppercase; }
 .toast { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%) translateY(70px); background: var(--surface2); color: var(--text); border: 1px solid var(--border2); font-family: var(--font); font-weight: 700; font-size: 14px; letter-spacing: 2px; padding: 10px 20px; border-radius: 50px; transition: transform .35s cubic-bezier(.34,1.56,.64,1); z-index: 999; white-space: nowrap; }
 .toast.show { transform: translateX(-50%) translateY(0); }
+/* Retour visuel à l'appui dans Réglages (les styles en ligne des boutons n'en ont aucun) */
+#tab-settings button, #tab-settings a, #tab-settings .toggle { transition: transform .12s ease, filter .12s ease, box-shadow .12s ease; }
+#tab-settings button.tap-fx, #tab-settings a.tap-fx { transform: scale(.96); filter: brightness(1.7); border-color: var(--accent) !important; box-shadow: 0 0 0 2px var(--accent-dim); }
+#tab-settings .toggle.tap-fx { transform: scale(.9); filter: brightness(1.4); }
 .sensor-modal-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 1000; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .sensor-modal { background: var(--surface); border: 1px solid var(--border2); border-radius: 16px; padding: 24px; max-width: 320px; width: 100%; text-align: center; }
 .sensor-modal h3 { font-size: 15px; letter-spacing: 1px; margin-bottom: 10px; color: var(--text); }
@@ -151,7 +155,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-10T06:21:31Z';</script>
+<script>const APP_BUILD = '2026-10-10T07:33:50Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -491,6 +495,20 @@ function resetData(){if(!confirm('Supprimer toutes les données ?'))return;worko
 async function requestNotifPermission(){if(!('Notification'in window)){showToast('Non supporté');return;}const p=await Notification.requestPermission();updateNotifBtn(p);if(p==='granted'){showToast('Notifications activées');scheduleReminder();}}
 function updateNotifBtn(p){const b=document.getElementById('notif-perm-btn');b.textContent=p==='granted'?'✓ Notifications activées':'Activer les notifications';b.classList.toggle('granted',p==='granted');}
 function scheduleReminder(){clearTimeout(reminderTO);if(!reminderOn||!('Notification'in window)||Notification.permission!=='granted')return;const now=new Date(),[h,m]=reminderTime.split(':').map(Number);const target=new Date(now);target.setHours(h,m,0,0);if(target<=now)target.setDate(target.getDate()+1);reminderTO=setTimeout(()=>{if(!hasTrainedToday())new Notification('HIIT Tracker',{body:"Tu n'as pas encore fait ta séance ! 💪"});scheduleReminder();},target-now);}
+// Retour visuel à l'appui dans Réglages : la classe reste au moins 220 ms, sinon un appui
+// bref ne laisse rien voir sur Android (:active trop fugace).
+(function(){
+  const root = document.getElementById('tab-settings');
+  if (!root) return;
+  root.addEventListener('pointerdown', e => {
+    const el = e.target.closest('button, a, .toggle');
+    if (!el || !root.contains(el)) return;
+    el.classList.add('tap-fx');
+    const t0 = Date.now();
+    const off = () => { setTimeout(() => el.classList.remove('tap-fx'), Math.max(0, 220 - (Date.now() - t0))); window.removeEventListener('pointerup', off); window.removeEventListener('pointercancel', off); };
+    window.addEventListener('pointerup', off); window.addEventListener('pointercancel', off);
+  }, { passive: true });
+})();
 let toastTO;function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(toastTO);toastTO=setTimeout(()=>t.classList.remove('show'),2200);}
 // ── Programme chargé depuis HIIT_program.json (même repo GitHub) ──
 const PROGRAM_URL='HIIT_program.json';
@@ -816,6 +834,7 @@ function exportSensorLog() {
   a.href = url; a.download = 'journal_capteur_' + new Date().toISOString().replace(/[:.]/g,'-') + '.txt';
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  showToast('Journal téléchargé');
 }
 function clearSensorLog() {
   sensorLogHistory = [];
