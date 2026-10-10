@@ -369,10 +369,10 @@ body {
 </div>
 <div class="sensor-modal-backdrop" id="ellip-modal" style="display:none;">
   <div class="sensor-modal">
-    <h3>CHOISIR L'ELLIPTIQUE</h3>
-    <p>Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.</p>
-    <button class="btn-connect" onclick="ellipModalPick()">Choisir l'elliptique</button>
-    <button class="btn-skip" onclick="ellipModalSkip()">Continuer sans elliptique</button>
+    <h3 id="ellip-modal-title">CHOISIR L'ELLIPTIQUE</h3>
+    <p id="ellip-modal-text">Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.</p>
+    <button class="btn-connect" id="ellip-modal-pick" onclick="ellipModalPick()">Choisir l'elliptique</button>
+    <button class="btn-skip" id="ellip-modal-skip" onclick="ellipModalSkip()">Continuer sans elliptique</button>
   </div>
 </div>
 <script>
@@ -2738,13 +2738,45 @@ function ellipAutoStart(fromTab) {
 // d'associer ou de changer la console plus tard.
 var ELLIP_SKIP_LS = 'hiitEllipSkip';
 var ellipGateBtn = null;
-async function ellipGateThenStart(btn) {
-  let skip = false; try { skip = localStorage.getItem(ELLIP_SKIP_LS) === '1'; } catch (e) {}
-  if (skip || ellipDev || !navigator.bluetooth) { sensorPromptThenStart(btn); return; }
-  await ellipFindKnown();
-  if (ellipDev) { ellipAutoStart(); sensorPromptThenStart(btn); return; }
-  ellipGateBtn = btn;
+// DÉMARRER attend l'elliptique comme il attend la Polar : fenêtre « Connexion… » avec
+// « Démarrer sans elliptique ». La console endormie se réveille en pédalant ; l'app
+// réessaie en boucle tant que la fenêtre est ouverte.
+var ellipGateGen = 0;
+function ellipModalShow(mode) {
+  const pick = mode === 'pick';
+  document.getElementById('ellip-modal-title').textContent = pick ? 'CHOISIR L\'ELLIPTIQUE' : 'CONNEXION À L\'ELLIPTIQUE...';
+  document.getElementById('ellip-modal-text').textContent = pick
+    ? 'Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.'
+    : 'Pédale quelques secondes pour réveiller la console. La séance démarre dès qu\'il est connecté.';
+  document.getElementById('ellip-modal-pick').style.display = pick ? '' : 'none';
+  document.getElementById('ellip-modal-skip').textContent = pick ? 'Continuer sans elliptique' : 'Démarrer sans elliptique';
+  document.getElementById('ellip-modal').dataset.mode = mode;
   document.getElementById('ellip-modal').style.display = 'flex';
+}
+function ellipModalHide() { document.getElementById('ellip-modal').style.display = 'none'; }
+async function ellipGateThenStart(btn) {
+  if (sensorStartBlocked() || (bleBusy && !sensorPrewarmPromise)) { sensorPromptThenStart(btn); return; } // mêmes messages que la Polar
+  let skip = false; try { skip = localStorage.getItem(ELLIP_SKIP_LS) === '1'; } catch (e) {}
+  ellipGateBtn = btn;
+  if (skip || !navigator.bluetooth || ellipConnected) { sensorPromptThenStart(btn); return; }
+  await ellipFindKnown();
+  if (!ellipDev) { ellipModalShow('pick'); return; }
+  ellipWaitThenStart();
+}
+async function ellipWaitThenStart() {
+  const gen = ++ellipGateGen;
+  ellipAfterSession = false;
+  if (!ellipConnected) {
+    ellipModalShow('connect');
+    while (!ellipConnected && gen === ellipGateGen) {
+      await ellipAutoConnect();
+      if (!ellipConnected && gen === ellipGateGen) await sleep(1500);
+    }
+    if (gen !== ellipGateGen) return; // « Démarrer sans elliptique » choisi entre-temps
+    ellipModalHide();
+  }
+  ellipAutoStart();
+  sensorPromptThenStart(ellipGateBtn);
 }
 async function ellipRequest() {
   // requestDevice doit rester le premier await après le tap (geste utilisateur).
@@ -2757,14 +2789,16 @@ async function ellipRequest() {
   return true;
 }
 async function ellipModalPick() {
-  document.getElementById('ellip-modal').style.display = 'none';
-  await ellipRequest();
-  sensorPromptThenStart(ellipGateBtn);
+  ellipModalHide();
+  if (await ellipRequest()) { ellipWaitThenStart(); return; }
+  ellipModalShow('pick');
 }
 function ellipModalSkip() {
-  document.getElementById('ellip-modal').style.display = 'none';
-  try { localStorage.setItem(ELLIP_SKIP_LS, '1'); } catch (e) {}
-  ellipRenderStatus();
+  const mode = document.getElementById('ellip-modal').dataset.mode;
+  ellipModalHide();
+  ellipGateGen++;
+  if (mode === 'pick') { try { localStorage.setItem(ELLIP_SKIP_LS, '1'); } catch (e) {} ellipRenderStatus(); }
+  else ellipAutoStart(); // séance sans attendre, mais la connexion reste tentée en fond
   sensorPromptThenStart(ellipGateBtn);
 }
 async function ellipSettingsPick() {
