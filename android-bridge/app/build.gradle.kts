@@ -14,6 +14,9 @@ android {
         // Incrémenté à chaque build CI pour que l'APK s'installe par-dessus l'ancien.
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        // Redirect URI Spotify : hiitbridge://spotify-auth (à déclarer à l'identique sur le dashboard).
+        manifestPlaceholders["redirectSchemeName"] = "hiitbridge"
+        manifestPlaceholders["redirectHostName"] = "spotify-auth"
     }
 
     signingConfigs {
@@ -50,4 +53,6 @@ dependencies {
     // SDK Spotify App Remote (absent de Maven : fichier embarqué depuis github.com/spotify/android-sdk).
     implementation(files("libs/spotify-app-remote-release-0.8.0.aar"))
     implementation("com.google.code.gson:gson:2.11.0")
+    // Autorisation Spotify (écran de consentement ouvert au premier plan, une seule fois).
+    implementation("com.spotify.android:auth:2.1.0")
 }

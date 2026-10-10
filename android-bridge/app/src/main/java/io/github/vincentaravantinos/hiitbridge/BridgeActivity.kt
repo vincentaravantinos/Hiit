@@ -49,6 +49,12 @@ class BridgeActivity : ComponentActivity() {
     override fun onPause() { super.onPause(); spotify?.disarmTimeout() }
     override fun onDestroy() { spotify?.cancel(); super.onDestroy() }
 
+    @Deprecated("Requis par la bibliothèque d'autorisation Spotify")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == SpotifyStarter.AUTH_REQUEST) spotify?.onAuthResult(resultCode, data)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         requestPermissions = registerForActivityResult(
@@ -71,11 +77,8 @@ class BridgeActivity : ComponentActivity() {
             val cid = intent.data?.getQueryParameter("cid")
             val uri = intent.data?.getQueryParameter("uri")
             if (cid.isNullOrBlank() || uri.isNullOrBlank()) { done("Spotify : réglages incomplets."); return }
-            spotify = SpotifyStarter(this, cid, uri) { msg ->
-                spotify = null
-                if (msg != null) Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
-                finish()
-            }.also { it.start() }
+            spotify?.cancel()
+            spotify = SpotifyStarter(this, cid, uri) { spotify = null; finish() }.also { it.start() }
             return
         }
         val d = intent?.data?.getQueryParameter("d")
