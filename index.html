@@ -226,7 +226,7 @@ body {
           <label style="display:flex;align-items:center;gap:6px">Rowing <input type="number" id="load-rowing" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
           <label style="display:flex;align-items:center;gap:6px">Squats <input type="number" id="load-squats" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
           <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="16" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
-          <button id="ellip-btn" onclick="ellipPick(this)" style="padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">🚲 Connecter</button>
+          <button id="ellip-btn" onclick="ellipPick(this)" style="padding:7px 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">🚲 Associer</button>
         </div>
         <div class="sensor-status" id="sensor-status"></div>
       </div>
@@ -457,7 +457,7 @@ function renderDashboard(){
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
   container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
 }
-function showPanel(name){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');if(name==='dashboard')renderDashboard();if(name==='activity')renderActivityCards();if(name==='free')freeRenderChips();if(name==='timer'||name==='swim'||name==='free')sensorPrewarmConnect();}
+function showPanel(name){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');if(name==='dashboard')renderDashboard();if(name==='activity')renderActivityCards();if(name==='free')freeRenderChips();if(name==='timer'||name==='swim'||name==='free')sensorPrewarmConnect();if(name==='timer')ellipAutoStart(true);}
 function runningActivity(){if(tState!=='idle')return'timer';if(swimTimerInterval)return'swim';if(freePending())return'free';return null;}
 function renderActivityCards(){const r=runningActivity();['timer','swim','free'].forEach(k=>{const c=document.getElementById('act-card-'+k);if(c)c.classList.toggle('running',r===k);});}
 // L'onglet ACTIVITÉ ramène directement à l'activité en cours s'il y en a une.
@@ -2671,17 +2671,72 @@ async function ellipCpSend(bytes) {
 function ellipSessionLive() { return typeof tState !== 'undefined' && (tState === 'running' || tState === 'paused' || tState === 'countdown'); }
 
 // Tap sur « 🚲 » : la liste Bluetooth n'est ouverte que la première fois (ou après un échec).
+// Connexion silencieuse, comme le capteur Polar : à l'ouverture de l'onglet HIIT et à
+// DÉMARRER, l'elliptique déjà autorisé une fois (getDevices) est retrouvé et connecté
+// sans tap. Tant que l'onglet est ouvert et la séance pas démarrée, nouvel essai toutes
+// les 10 s : la console endormie se connecte dès qu'on pédale pour la réveiller.
+// Le bouton 🚲 ne sert plus qu'à la toute première autorisation (ou à changer d'appareil).
+var ellipAutoTimer = null, ellipAutoBusy = false, ellipAfterSession = false;
+async function ellipFindKnown() {
+  if (ellipDev) return ellipDev;
+  const known = await knownDevices();
+  const d = (known || []).find(x => x.name && x.name.toUpperCase().startsWith('FAL'));
+  if (d) ellipDev = d;
+  return ellipDev;
+}
+async function ellipWaitAdv(dev, ms) {
+  if (typeof dev.watchAdvertisements !== 'function') return;
+  const ac = new AbortController(); let onAdv = null, timer = null;
+  const p = new Promise((res, rej) => {
+    timer = setTimeout(() => rej(new Error('aucune annonce')), ms);
+    onAdv = () => res();
+    dev.addEventListener('advertisementreceived', onAdv, { once: true });
+  });
+  p.catch(() => {});
+  try { await withTimeout(dev.watchAdvertisements({ signal: ac.signal }), 4000, 'annonces elliptique'); await p; }
+  finally { clearTimeout(timer); dev.removeEventListener('advertisementreceived', onAdv); try { ac.abort(); } catch (e) {} }
+}
+async function ellipAutoConnect() {
+  if (ellipConnected || ellipConnecting || ellipAutoBusy) return;
+  ellipAutoBusy = true;
+  try {
+    const dev = await ellipFindKnown();
+    if (!dev) return; // jamais autorisé : le bouton 🚲 le propose
+    try { await ellipWaitAdv(dev, 6000); } catch (e) { return; } // console endormie : prochain essai
+    ellipWanted = true;
+    await ellipConnect();
+  } catch (e) { logError('Connexion silencieuse elliptique', e); }
+  finally { ellipAutoBusy = false; ellipRenderStatus(); }
+}
+function ellipAutoStart(fromTab) {
+  if (fromTab) ellipAfterSession = false;
+  if (ellipAfterSession) return; // séance finie : la console garde son écran jusqu'à la prochaine visite
+  ellipAutoConnect();
+  if (ellipAutoTimer) return;
+  ellipAutoTimer = setInterval(() => {
+    const onTimer = document.getElementById('tab-timer') && document.getElementById('tab-timer').classList.contains('active');
+    if (!onTimer && !ellipSessionLive()) { clearInterval(ellipAutoTimer); ellipAutoTimer = null; return; }
+    if (!ellipConnected && !ellipAfterSession) ellipAutoConnect();
+  }, 10000);
+}
+
 async function ellipPick(btn) {
   if (ellipConnected || ellipConnecting) { if (ellipConnected && confirm('Déconnecter l\'elliptique ?')) ellipDisconnect(); return; }
   if (!navigator.bluetooth) { showToast('Bluetooth indisponible dans ce navigateur'); return; }
-  if (!ellipDev) {
-    try {
-      ellipDev = await navigator.bluetooth.requestDevice({ filters: [{ services: [FTMS_SVC] }, { namePrefix: 'FAL' }], optionalServices: [FTMS_SVC, IC_SVC] });
-    } catch (e) { logError('Elliptique non sélectionné', e); return; }
+  if (ellipDev) {
+    // Console déjà autorisée : on tente tout de suite (la liste Bluetooth ne servirait à rien).
+    showToast('🚲 Connexion… pédale pour réveiller la console');
+    ellipWanted = true;
+    if (!(await ellipConnect())) showToast('🚲 Console injoignable — pédale quelques secondes, la connexion se fera seule');
+    return;
   }
+  try {
+    ellipDev = await navigator.bluetooth.requestDevice({ filters: [{ services: [FTMS_SVC] }, { namePrefix: 'FAL' }], optionalServices: [FTMS_SVC, IC_SVC] });
+  } catch (e) { logError('Elliptique non sélectionné', e); return; }
   ellipWanted = true;
-  const ok = await ellipConnect();
-  if (!ok) { ellipDev = null; showToast('🚲 Connexion impossible — pédale pour réveiller la console, puis réessaie'); }
+  ellipRenderStatus();
+  if (!(await ellipConnect())) showToast('🚲 Console injoignable — pédale quelques secondes, la connexion se fera seule');
+  ellipAutoStart();
 }
 
 async function ellipConnect() {
@@ -2814,9 +2869,11 @@ async function ellipApplyLevel() {
 function ellipRenderStatus() {
   const b = document.getElementById('ellip-btn');
   if (!b) return;
-  b.textContent = ellipConnected ? '🚲 Connecté' : ellipConnecting ? '🚲 Connexion…' : '🚲 Connecter';
+  b.textContent = ellipConnected ? '🚲 Connecté' : (ellipConnecting || ellipAutoBusy) ? '🚲 Connexion…' : ellipDev ? '🚲 En attente' : '🚲 Associer';
+  b.title = ellipConnected ? 'Elliptique connecté' : ellipDev ? 'Pédale pour réveiller la console : connexion automatique' : 'Première fois : choisir la console dans la liste';
   b.style.background = ellipConnected ? 'var(--green)' : 'var(--surface2)';
   b.style.color = ellipConnected ? '#111' : 'var(--text)';
+  b.style.opacity = ellipConnected || !ellipDev ? '1' : '.7';
 }
 
 function ellipRenderLive() {
@@ -2856,8 +2913,9 @@ function lastSprintFor(round, level) {
 function ellipOnSessionStart() {
   ellipSamples = []; ellipPhases = []; ellipRef = null;
   ellipRecording = true;
-  if (ellipDev && !ellipConnected) { ellipWanted = true; ellipConnect(); }
-  else if (ellipConnected) ellipApplyLevel();
+  ellipAfterSession = false;
+  if (ellipConnected) ellipApplyLevel();
+  else ellipAutoStart();
 }
 
 function ellipOnPhaseChange() {
@@ -2903,6 +2961,8 @@ function ellipComputeSprints(samples, phaseLog, endMs) {
 function ellipOnSessionEnd(polarActive) {
   if (!ellipRecording) return;
   ellipRecording = false;
+  ellipAfterSession = true;
+  clearInterval(ellipAutoTimer); ellipAutoTimer = null;
   const endedAtMs = Date.now();
   if (ellipSamples.length) {
     const ell = { device: ellipDev ? ellipDev.name : null, targetLevel: ellipTargetLevel(), endedAtMs, samples: ellipSamples };
