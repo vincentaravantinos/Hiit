@@ -151,7 +151,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-09T13:27:12Z';</script>
+<script>const APP_BUILD = '2026-10-10T06:21:31Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -286,6 +286,9 @@ body {
       <div class="setting-row" id="spotify-playlist-row" style="display:none;flex-direction:column;align-items:stretch;gap:8px">
         <div class="setting-name">Playlist</div>
         <input type="text" id="spotify-playlist-input" placeholder="Lien ou URI Spotify (ex. https://open.spotify.com/playlist/...)" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyPlaylist()">
+        <div class="setting-name">Client ID Spotify (optionnel)</div>
+        <input type="text" id="spotify-clientid-input" placeholder="Client ID de ton app sur developer.spotify.com" autocapitalize="off" autocomplete="off" spellcheck="false" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyClientId()">
+        <div class="setting-sub">Avec un Client ID, HIIT Bridge lance la lecture en arrière-plan, sans quitter l'app. Sans, Spotify s'ouvre sur la playlist et il faut appuyer sur lecture.</div>
       </div>
     </div>
     <div class="settings-section">
@@ -377,9 +380,9 @@ body {
   </div>
 </div>
 <script>
-const KEYS={workouts:'hiit_workouts_v1',goal:'hiit_goal_v1',reminderOn:'hiit_reminderOn_v1',reminderTime:'hiit_reminderTime_v1',spotifyOn:'hiit_spotifyOn_v1',spotifyPlaylist:'hiit_spotifyPlaylist_v1'};
+const KEYS={workouts:'hiit_workouts_v1',goal:'hiit_goal_v1',reminderOn:'hiit_reminderOn_v1',reminderTime:'hiit_reminderTime_v1',spotifyOn:'hiit_spotifyOn_v1',spotifyPlaylist:'hiit_spotifyPlaylist_v1',spotifyClientId:'hiit_spotifyClientId_v1'};
 const S={get:(k,d)=>{try{const v=localStorage.getItem(k);return v!==null?JSON.parse(v):d;}catch{return d;}},set:(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v));}catch{}}};
-let workouts=S.get(KEYS.workouts,[]),goal=S.get(KEYS.goal,5),reminderOn=S.get(KEYS.reminderOn,false),reminderTime=S.get(KEYS.reminderTime,'19:00'),reminderTO=null,spotifyOn=S.get(KEYS.spotifyOn,false),spotifyPlaylist=S.get(KEYS.spotifyPlaylist,'');
+let workouts=S.get(KEYS.workouts,[]),goal=S.get(KEYS.goal,5),reminderOn=S.get(KEYS.reminderOn,false),reminderTime=S.get(KEYS.reminderTime,'19:00'),reminderTO=null,spotifyOn=S.get(KEYS.spotifyOn,false),spotifyPlaylist=S.get(KEYS.spotifyPlaylist,''),spotifyClientId=S.get(KEYS.spotifyClientId,'');
 // Migration: old format was a plain array of date strings (all sessions treated as "Intense").
 if(workouts.length&&typeof workouts[0]==='string'){workouts=workouts.map(d=>({date:d,type:'I'}));S.set(KEYS.workouts,workouts);}
 const MAX_RECUP_RUN=3; // le streak casse si on enchaîne 3 jours sans la moindre séance Intense
@@ -481,8 +484,9 @@ function saveReminderTime(){reminderTime=document.getElementById('reminder-time'
 function saveGoal(){goal=parseInt(document.getElementById('goal-select').value);S.set(KEYS.goal,goal);renderDashboard();}
 function toggleSpotify(){spotifyOn=!spotifyOn;S.set(KEYS.spotifyOn,spotifyOn);document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';}
 function saveSpotifyPlaylist(){spotifyPlaylist=document.getElementById('spotify-playlist-input').value;S.set(KEYS.spotifyPlaylist,spotifyPlaylist);}
+function saveSpotifyClientId(){spotifyClientId=document.getElementById('spotify-clientid-input').value.trim();S.set(KEYS.spotifyClientId,spotifyClientId);}
 function extractSpotifyId(raw){if(!raw)return null;raw=raw.trim();let m=raw.match(/playlist[:\/]([A-Za-z0-9]+)/);if(m)return m[1].split('?')[0];if(/^[A-Za-z0-9]{10,}$/.test(raw))return raw;return null;}
-function launchSpotify(){if(!spotifyOn)return;const id=extractSpotifyId(spotifyPlaylist);if(!id)return;const webUrl='https://open.spotify.com/playlist/'+id;const w=window.open(webUrl,'_blank');if(!w)window.location.href=webUrl;}
+function launchSpotify(){if(!spotifyOn)return;const id=extractSpotifyId(spotifyPlaylist);if(!id)return;if(spotifyClientId){location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent('spotify:playlist:'+id)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';return;}const webUrl='https://open.spotify.com/playlist/'+id;const w=window.open(webUrl,'_blank');if(!w)window.location.href=webUrl;}
 function resetData(){if(!confirm('Supprimer toutes les données ?'))return;workouts=[];S.set(KEYS.workouts,[]);renderDashboard();showToast('Données effacées');}
 async function requestNotifPermission(){if(!('Notification'in window)){showToast('Non supporté');return;}const p=await Notification.requestPermission();updateNotifBtn(p);if(p==='granted'){showToast('Notifications activées');scheduleReminder();}}
 function updateNotifBtn(p){const b=document.getElementById('notif-perm-btn');b.textContent=p==='granted'?'✓ Notifications activées':'Activer les notifications';b.classList.toggle('granted',p==='granted');}
@@ -687,7 +691,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;

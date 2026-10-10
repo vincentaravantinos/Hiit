@@ -41,6 +41,13 @@ class BridgeActivity : ComponentActivity() {
     private lateinit var requestPermissions: ActivityResultLauncher<Set<String>>
     private var pending: SessionPayload? = null
     private var setupOnly = false
+    private var spotify: SpotifyStarter? = null
+
+    // Le délai de garde ne court que pendant que le pont est au premier plan : il est suspendu
+    // tant que l'écran d'autorisation Spotify (première fois) est affiché.
+    override fun onResume() { super.onResume(); spotify?.armTimeout() }
+    override fun onPause() { super.onPause(); spotify?.disarmTimeout() }
+    override fun onDestroy() { spotify?.cancel(); super.onDestroy() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -59,6 +66,18 @@ class BridgeActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent?) {
+        // hiitbridge://spotify?cid=…&uri=… : lancer la playlist au démarrage d'une séance.
+        if (intent?.data?.host == "spotify") {
+            val cid = intent.data?.getQueryParameter("cid")
+            val uri = intent.data?.getQueryParameter("uri")
+            if (cid.isNullOrBlank() || uri.isNullOrBlank()) { done("Spotify : réglages incomplets."); return }
+            spotify = SpotifyStarter(this, cid, uri) { msg ->
+                spotify = null
+                if (msg != null) Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
+                finish()
+            }.also { it.start() }
+            return
+        }
         val d = intent?.data?.getQueryParameter("d")
         try {
             val o = d?.let { SessionPayload.decode(it) }
