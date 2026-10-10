@@ -58,7 +58,7 @@ class SpotifyStarter(
                     if (finished || mine != attempt) { SpotifyAppRemote.disconnect(r); return }
                     remote = r
                     r.playerApi.play(uri)
-                        .setResultCallback { finish() }
+                        .setResultCallback { shuffleAndSkip(r) }
                         .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
                 }
 
@@ -79,6 +79,19 @@ class SpotifyStarter(
         } catch (e: Exception) {
             fail("Spotify : ${describe(e)}", openApp = true)
         }
+    }
+
+    /**
+     * Lecture aléatoire : on active le mode aléatoire puis on saute au titre suivant, pour ne
+     * pas toujours commencer par le premier morceau de la playlist. Un échec ici est sans
+     * gravité (la musique joue déjà) : on termine dans tous les cas.
+     */
+    private fun shuffleAndSkip(r: SpotifyAppRemote) {
+        val skip = {
+            r.playerApi.skipNext().setResultCallback { finish() }.setErrorCallback { finish() }
+            Unit
+        }
+        r.playerApi.setShuffle(true).setResultCallback { skip() }.setErrorCallback { skip() }
     }
 
     /** Ouvre l'autorisation Spotify au premier plan (sans écran si elle a déjà été donnée). */
