@@ -2789,10 +2789,14 @@ async function ellipAutoConnect() {
   ellipAutoBusy = true;
   try {
     const dev = await ellipFindKnown();
-    if (!dev) return; // jamais autorisé : le bouton 🚲 le propose
-    try { await ellipWaitAdv(dev, 6000); } catch (e) { return; } // console endormie : prochain essai
+    if (!dev) { ellipAutoLog('aucune console autorisée connue du navigateur (getDevices)'); return; }
+    // L'écoute d'annonces n'est qu'un accélérateur : si elle échoue ou ne voit rien (selon
+    // le téléphone, elle ne remonte pas toujours), on tente quand même une connexion directe.
+    let adv = 'annonce reçue';
+    try { await ellipWaitAdv(dev, 6000); } catch (e) { adv = 'pas d\'annonce (' + (e && e.message ? e.message : e) + ')'; }
     ellipWanted = true;
-    await ellipConnect();
+    const ok = await ellipConnect(1);
+    ellipAutoLog(`${dev.name || 'console'} : ${adv}, connexion ${ok ? 'réussie' : 'échouée'}`);
   } catch (e) { logError('Connexion silencieuse elliptique', e); }
   finally { ellipAutoBusy = false; ellipRenderStatus(); }
 }
@@ -2888,10 +2892,17 @@ async function ellipSettingsPick() {
   ellipRenderStatus();
 }
 
-async function ellipConnect() {
+// Journal des essais automatiques : un message identique n'est écrit qu'une fois par minute.
+var ellipAutoLast = { m: null, t: 0 };
+function ellipAutoLog(m) {
+  if (m === ellipAutoLast.m && Date.now() - ellipAutoLast.t < 60000) return;
+  ellipAutoLast = { m, t: Date.now() };
+  logAppend('Elliptique auto : ' + m);
+}
+async function ellipConnect(tries = 3) {
   if (!ellipDev || ellipConnecting || ellipConnected) return ellipConnected;
   ellipConnecting = true; ellipRenderStatus();
-  for (let i = 0; i < 3 && ellipWanted; i++) {
+  for (let i = 0; i < tries && ellipWanted; i++) {
     try {
       const server = await withTimeout(ellipDev.gatt.connect(), 10000, 'connexion elliptique');
       const svc = await withTimeout(server.getPrimaryService(FTMS_SVC), 8000, 'service FTMS');
@@ -2914,7 +2925,7 @@ async function ellipConnect() {
       ellipIcStart(server).then(ok => { if (ok) ellipApplyLevel(); });
       return true;
     } catch (e) {
-      logError(`Connexion elliptique (essai ${i + 1}/3)`, e);
+      logError(`Connexion elliptique (essai ${i + 1}/${tries})`, e);
       try { ellipDev.gatt.disconnect(); } catch (_) {}
       await sleep(1500);
     }
