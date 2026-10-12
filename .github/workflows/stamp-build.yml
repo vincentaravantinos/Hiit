@@ -1,0 +1,48 @@
+name: Stamp app build
+
+# Le bandeau « Nouvelle version disponible » compare APP_BUILD (dans index.html) à
+# version.txt. Ce workflow les met à jour automatiquement à chaque modification de
+# index.html, quel que soit l'auteur du commit : plus de déploiement « oublié ».
+on:
+  push:
+    branches: [main]
+    paths: ['index.html']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: stamp-build
+  cancel-in-progress: false
+
+jobs:
+  stamp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          sparse-checkout: |
+            index.html
+            version.txt
+          sparse-checkout-cone-mode: false
+      - name: Stamp APP_BUILD and version.txt
+        run: |
+          if git diff HEAD~1 -- index.html | grep -q "^+.*const APP_BUILD"; then
+            echo "Le commit met déjà APP_BUILD à jour : rien à faire."; exit 0
+          fi
+          B=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          CUR=$(grep -o "APP_BUILD = '[^']*'" index.html | head -1 | cut -d"'" -f2)
+          echo "Build actuel : $CUR — nouveau : $B"
+          sed -i "s/const APP_BUILD = '[^']*'/const APP_BUILD = '$B'/" index.html
+          printf "%s" "$B" > version.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add index.html version.txt
+          git commit -m "Build $B (tampon automatique)"
+          for i in 1 2 3 4 5; do
+            git pull --rebase -q origin main && git push -q origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
