@@ -742,6 +742,13 @@ async function healStaleBuild() {
   try { seen = localStorage.getItem(MAX_BUILD_LS); } catch (e) {}
   if (!seen || !(new Date(seen) > new Date(APP_BUILD))) {
     try { localStorage.setItem(MAX_BUILD_LS, APP_BUILD); } catch (e) {}
+    // Nouvelle version chargée (avec ou sans le bandeau) : on le dit, pour ne pas avoir à
+    // recharger « au cas où ».
+    if (seen && new Date(APP_BUILD) > new Date(seen)) {
+      const d = new Date(APP_BUILD);
+      setTimeout(() => showToast(`✓ App mise à jour (${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })})`), 800);
+      logAppend(`App mise à jour : ${seen} → ${APP_BUILD}`);
+    }
     return false;
   }
   try { if (sessionStorage.getItem('hiitHealTried')) return false; sessionStorage.setItem('hiitHealTried', '1'); } catch (e) { return false; }
