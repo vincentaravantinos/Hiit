@@ -233,7 +233,7 @@ body {
           <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="16" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
         </div>
         <div class="sensor-status" id="sensor-status"></div>
-        <div class="sensor-status" id="ellip-status"></div>
+        <div class="sensor-status" id="ellip-status" onclick="ellipStatusTap()" style="cursor:pointer"></div>
       </div>
     </div>
   </div>
@@ -380,6 +380,7 @@ body {
     <h3 id="ellip-modal-title">CHOISIR L'ELLIPTIQUE</h3>
     <p id="ellip-modal-text">Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.</p>
     <button class="btn-connect" id="ellip-modal-pick" onclick="ellipModalPick()">Choisir l'elliptique</button>
+    <button class="btn-skip" id="ellip-modal-search" onclick="ellipModalPick()" style="display:none">Rechercher dans la liste Bluetooth</button>
     <button class="btn-skip" id="ellip-modal-skip" onclick="ellipModalSkip()">Continuer sans elliptique</button>
   </div>
 </div>
@@ -2800,7 +2801,8 @@ async function ellipAutoConnect() {
     // L'écoute d'annonces n'est qu'un accélérateur : si elle échoue ou ne voit rien (selon
     // le téléphone, elle ne remonte pas toujours), on tente quand même une connexion directe.
     let adv = 'annonce reçue';
-    try { await ellipWaitAdv(dev, 6000); } catch (e) { adv = 'pas d\'annonce (' + (e && e.message ? e.message : e) + ')'; }
+    try { await ellipWaitAdv(dev, 8000); } catch (e) { adv = 'pas d\'annonce (' + ((e && e.name) || '') + ' ' + (e && e.message ? e.message : e) + ')'; }
+    if (typeof dev.watchAdvertisements !== 'function') adv = 'écoute d\'annonces indisponible';
     ellipWanted = true;
     const ok = await ellipConnect(1);
     ellipAutoLog(`${dev.name || 'console'} : ${adv}, connexion ${ok ? 'réussie' : 'échouée'}`);
@@ -2808,7 +2810,7 @@ async function ellipAutoConnect() {
   finally { ellipAutoBusy = false; ellipRenderStatus(); }
 }
 function ellipAutoStart(fromTab) {
-  if (fromTab) ellipAfterSession = false;
+  if (fromTab) { ellipAfterSession = false; ellipAutoVerbose = 6; }
   if (ellipAfterSession) return; // séance finie : la console garde son écran jusqu'à la prochaine visite
   ellipAutoConnect();
   if (ellipAutoTimer) return;
@@ -2836,6 +2838,7 @@ function ellipModalShow(mode) {
     ? 'Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.'
     : 'Pédale quelques secondes pour réveiller la console. La séance démarre dès qu\'il est connecté.';
   document.getElementById('ellip-modal-pick').style.display = pick ? '' : 'none';
+  document.getElementById('ellip-modal-search').style.display = pick ? 'none' : '';
   document.getElementById('ellip-modal-skip').textContent = pick ? 'Continuer sans elliptique' : 'Démarrer sans elliptique';
   document.getElementById('ellip-modal').dataset.mode = mode;
   document.getElementById('ellip-modal').style.display = 'flex';
@@ -2900,9 +2903,10 @@ async function ellipSettingsPick() {
 }
 
 // Journal des essais automatiques : un message identique n'est écrit qu'une fois par minute.
-var ellipAutoLast = { m: null, t: 0 };
+var ellipAutoLast = { m: null, t: 0 }, ellipAutoVerbose = 0;
 function ellipAutoLog(m) {
-  if (m === ellipAutoLast.m && Date.now() - ellipAutoLast.t < 60000) return;
+  if (ellipAutoVerbose > 0) ellipAutoVerbose--;
+  else if (m === ellipAutoLast.m && Date.now() - ellipAutoLast.t < 60000) return;
   ellipAutoLast = { m, t: Date.now() };
   logAppend('Elliptique auto : ' + m);
 }
@@ -3033,11 +3037,17 @@ async function ellipApplyLevel() {
   } finally { ellipLevelBusy = false; }
 }
 
+// Tap sur « Elliptique : en attente » : liste Bluetooth (le geste permet un vrai scan, qui
+// trouve la console même quand l'écoute d'annonces silencieuse n'aboutit pas).
+async function ellipStatusTap() {
+  if (ellipConnected || ellipConnecting || !navigator.bluetooth || !curSensors().elliptical) return;
+  if (await ellipRequest()) { ellipWanted = true; ellipConnect(2); }
+}
 function ellipRenderStatus() {
   let skip = false; try { skip = localStorage.getItem(ELLIP_SKIP_LS) === '1'; } catch (e) {}
   const txt = ellipConnected ? `Elliptique connecté${ellipDev && ellipDev.name ? ` (${ellipDev.name})` : ''}`
     : (ellipConnecting || ellipAutoBusy) ? 'Elliptique : connexion…'
-    : ellipDev ? 'Elliptique : en attente — pédale pour réveiller la console' : '';
+    : ellipDev ? 'Elliptique : en attente — pédale pour réveiller la console (ou touche ici)' : '';
   const el = document.getElementById('ellip-status');
   if (el) el.textContent = txt;
   const sub = document.getElementById('ellip-setting-sub');
