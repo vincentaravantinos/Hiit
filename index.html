@@ -3346,6 +3346,7 @@ function renderProgressionHtml(results, combined, history) {
       msgs.push(`${ex} : ${PROGRESSION_REPS} reps ou plus à chaque tour sur ${PROGRESSION_SESSIONS} séances${load != null ? ` à ${load} kg` : ''}. Passe à un élastique plus fort.`);
     }
   }
+  msgs.push(...trendMessages(results, combined, history));
   if (!msgs.length) return '';
   return `<div style="padding:10px 12px;border-radius:10px;background:#27ae60;color:#fff;font-size:13px;margin-bottom:12px;">💪 ${msgs.join('<br>')}</div>`;
 }
@@ -3368,6 +3369,43 @@ function compareColor(value, pastValues, tol, higherIsBetter = true) {
   return { ref, color: d > tol ? '#2ecc71' : d < -tol ? '#e74c3c' : 'var(--text)', state: d > tol ? 'up' : d < -tol ? 'down' : 'same' };
 }
 
+// Couleur vs la dernière séance (même référence que l'annonce vocale) : faire pareil = blanc.
+function compareLast(value, pastValues, tol = 0) {
+  const prev = pastValues.filter(v => v != null && v > 0);
+  if (!prev.length) return null;
+  const ref = prev[prev.length - 1];
+  const d = value - ref;
+  return { ref, color: d > tol ? '#2ecc71' : d < -tol ? '#e74c3c' : 'var(--text)', state: d > tol ? 'up' : d < -tol ? 'down' : 'same' };
+}
+
+const TREND_SESSIONS = 5; // progression mesurée vs la médiane des 5 séances précédentes
+function median(a) { const s = a.slice().sort((x, y) => x - y); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+function trendMessages(results, combined, history) {
+  const msgs = [];
+  const names = [...new Set(results.map(r => r.name))];
+  for (const name of names) {
+    const now = {};
+    results.filter(r => r.name === name).forEach(r => now[r.round] = r.reps);
+    const past = sameLoadHistory(history, name, combined.loads).map(e => e.summary.repsByEx[name]).filter(Boolean);
+    const cands = [];
+    const nRounds = Object.keys(now).length;
+    const total = Object.values(now).reduce((a, b) => a + b, 0);
+    const pastTotals = past.filter(p => Object.keys(p).length === nRounds).map(p => Object.values(p).reduce((a, b) => a + b, 0)).filter(v => v > 0).slice(-TREND_SESSIONS);
+    if (pastTotals.length === TREND_SESSIONS) { const g = total - median(pastTotals); if (g >= 4) cands.push({ label: 'au total', g }); }
+    if (!cands.length) for (const r in now) {
+      const pv = past.map(p => p[r]).filter(v => v != null && v > 0).slice(-TREND_SESSIONS);
+      if (pv.length < TREND_SESSIONS) continue;
+      const g = now[r] - median(pv);
+      if (g >= 2) cands.push({ label: `au tour ${r}`, g });
+    }
+    if (!cands.length) continue;
+    const best = cands.sort((a, b) => b.g - a.g)[0];
+    const g = Math.round(best.g * 10) / 10;
+    msgs.push(`Bravo ! ${name} ${best.label} : +${g} répétition${g >= 2 ? 's' : ''} par rapport à tes ${TREND_SESSIONS} dernières séances (médiane).`);
+  }
+  return msgs;
+}
+
 function renderRepsResultsHtml(results, history = [], combined = {}) {
   if (!results || results.length === 0) return '<p style="color:var(--muted);font-size:13px;">Aucun exercice analysé.</p>';
   const byExercise = {};
@@ -3384,19 +3422,19 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
     for (let r=1; r<=4; r++) {
       const v = byRound[r];
       if (v === undefined) { html += '<td>—</td>'; continue; }
-      const c = compareColor(v, past.map(p => p[name] ? p[name][r] : null), 1);
+      const c = compareLast(v, past.map(p => p[name] ? p[name][r] : null));
       if (c) anyColor = true;
       html += `<td style="${c ? `color:${c.color};font-weight:bold;` : ''}">${v}</td>`;
     }
     const total = Object.values(byRound).reduce((a,b) => a+b, 0);
     const pastTotals = past.map(p => p[name] && Object.keys(p[name]).length === Object.keys(byRound).length ? Object.values(p[name]).reduce((a,b) => a+b, 0) : null);
-    const ct = compareColor(total, pastTotals, 2);
+    const ct = compareLast(total, pastTotals);
     html += `<td style="font-weight:bold;${ct ? `color:${ct.color};` : ''}">${total}</td></tr>`;
   }
   html += '</table>';
   html += `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${anyColor
-    ? '<span style="color:#2ecc71;">Vert</span> : mieux que la médiane de tes 3 dernières séances au même tour, à charge égale (±1 rep, ±2 sur le total). <span style="color:#e74c3c;">Rouge</span> : moins bien.'
-    : `Couleurs à partir de 3 séances enregistrées (${Math.min(history.length,3)}/3).`}</div>`;
+    ? '<span style="color:#2ecc71;">Vert</span> : mieux que ta dernière séance au même tour, à charge égale. Blanc : pareil. <span style="color:#e74c3c;">Rouge</span> : moins bien.'
+    : 'Couleurs à partir de la 2ᵉ séance enregistrée.'}</div>`;
   return html;
 }
 
