@@ -155,7 +155,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-12T13:34:45Z';</script>
+<script>const APP_BUILD = '2026-10-13T06:50:25Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2039,6 +2039,17 @@ async function tryResumePendingSensorSession() {
   if (!raw) return;
   let pending;
   try { pending = JSON.parse(raw); } catch (e) { return; }
+  // Sans endedAtMs, la fin du programme n'a jamais été atteinte (app fermée, test…) :
+  // la séance est abandonnée, pas importée. L'enregistrement resté actif sur le capteur
+  // sera clôturé au prochain DÉMARRER (stopStrayRecordings).
+  if (!pending.endedAtMs) {
+    localStorage.removeItem(SENSOR_STORAGE_KEY);
+    localStorage.removeItem(ELLIP_PENDING);
+    logAppend('Séance HIIT inachevée (fin non atteinte) : abandonnée, non enregistrée.');
+    showToast('Séance HIIT inachevée : non enregistrée');
+    sensorRefreshStartButtons();
+    return;
+  }
   log('Séance capteur en attente détectée.');
   // Bandeau affiché tout de suite ; si le navigateur connaît déjà le capteur, la même
   // récupération est lancée sans attendre de tap.
@@ -2128,6 +2139,50 @@ function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
   localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index));
 }
 
+// ---- Suppression d'une séance passée : fichier GitHub + historique local (+ jour du
+// suivi s'il ne reste plus aucune séance ce jour-là). Renvoie true si supprimée. ----
+async function deleteSessionEntry(filename) {
+  let index = [];
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { index = []; }
+  const entry = index.find(e => e.filename === filename);
+  const date = entry ? entry.date : null;
+  const dropDay = !!date && !index.some(e => e.date === date && e.filename !== filename) && !!getEntry(date);
+  if (!confirm(`Supprimer cette séance${date ? ' du ' + date : ''} ?\n\nElle sera effacée de l'historique et de GitHub${dropDay ? ', et la journée retirée du suivi' : ''}. Cette action est définitive.`)) return false;
+  if (!entry || entry.savedToGithub !== false) {
+    const token = localStorage.getItem('hiitGithubToken');
+    if (!token) { showToast('Token GitHub requis pour supprimer la séance'); return false; }
+    const url = `https://api.github.com/repos/vincentaravantinos/Hiit/contents/data/sessions/${filename}`;
+    try {
+      const r = await fetch(url, { headers: { 'Authorization': 'token ' + token }, cache: 'no-store' });
+      if (r.ok) {
+        const { sha } = await r.json();
+        const d = await fetch(url, { method: 'DELETE', headers: { 'Authorization': 'token ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: 'Séance supprimée', sha }) });
+        if (!d.ok) throw new Error('GitHub a répondu ' + d.status);
+      } else if (r.status !== 404) throw new Error('GitHub a répondu ' + r.status);
+    } catch (err) {
+      logError('Suppression séance ' + filename, err);
+      showToast('Échec de la suppression sur GitHub — réessaie');
+      return false;
+    }
+  }
+  try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { index = []; }
+  localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index.filter(e => e.filename !== filename)));
+  hiitSessionCache.delete(filename);
+  if (dropDay) { workouts = workouts.filter(w => w.date !== date); S.set(KEYS.workouts, workouts); }
+  log('Séance supprimée : ' + filename);
+  renderDashboard();
+  showToast('Séance supprimée');
+  return true;
+}
+async function sessionModalDelete(btn) {
+  const box = btn.closest('.sensor-modal');
+  const ctx = box && box._hc;
+  if (!ctx || !ctx.filename) { showToast('Séance pas encore sauvegardée — patiente un instant'); return; }
+  if (!(await deleteSessionEntry(ctx.filename))) return;
+  if (hcDeferred && hcDeferred.filename === ctx.filename) hcDeferred = null;
+  btn.closest('.sensor-modal-backdrop').remove();
+}
+
 function showDayActionMenu(dstr, histEntries, entry) {
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
@@ -2146,7 +2201,17 @@ function showDayActionMenu(dstr, histEntries, entry) {
     btn.style.marginBottom = '8px';
     btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : e.type === 'free' ? `${freeIcon(e.summary && e.summary.activity)} Voir ${(e.summary && e.summary.activity) || "l'activité libre"}` : '📊 Voir le HIIT';
     btn.onclick = () => { modal.remove(); openHistoryEntry(e); };
-    box.appendChild(btn);
+    btn.style.marginBottom = '0';
+    btn.style.flex = '1';
+    const del = document.createElement('button');
+    del.textContent = '🗑';
+    del.title = 'Supprimer cette séance';
+    del.style.cssText = 'padding:0 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;cursor:pointer;';
+    del.onclick = async () => { modal.remove(); await deleteSessionEntry(e.filename); };
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;';
+    row.append(btn, del);
+    box.appendChild(row);
   });
 
   const toggleBtn = document.createElement('button');
@@ -3462,7 +3527,7 @@ function showSessionResultsModal(combined, filename) {
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
-      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   }
   box._hc = { combined, kind: 'hiit', filename, openedAt: Date.now() };
   hiitAttachSwipe(modal, box);
@@ -4114,7 +4179,7 @@ function showSwimResultsModal(combined, filename) {
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <div style="margin-bottom:16px;">${swimHtml}</div>
-      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   }
   box._hc = { combined, kind: 'swim', filename };
 
@@ -4752,7 +4817,7 @@ function showFreeResultsModal(combined, filename, live = null) {
     ${classHtml}
     ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
     <div style="margin-bottom:16px;">${renderHrChartSvg(combined.hr ? combined.hr.samples : null)}</div>
-    <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button>`;
+    <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   box._hc = { combined, kind: 'free', filename };
   if (live) {
     const paint = () => box.querySelectorAll('[data-cls]').forEach(b => {
