@@ -155,7 +155,7 @@ body {
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
 </style>
-<script>const APP_BUILD = '2026-10-13T06:50:25Z';</script>
+<script>const APP_BUILD = '2026-10-13T06:54:25Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -393,10 +393,13 @@ if(workouts.length&&typeof workouts[0]==='string'){workouts=workouts.map(d=>({da
 const MAX_RECUP_RUN=3; // le streak casse si on enchaîne 3 jours sans la moindre séance Intense
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 const ds=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+// Moment où la séance a eu lieu (début), et non celui où ses données ont été récupérées.
+function sessionStartMs(c){const pl=c&&c.phaseLog;return (c&&c.startedAtMs)||(pl&&pl[0]&&pl[0].atMs)||(c&&c.endedAtMs)||Date.now();}
+function sessionDayStr(c){return ds(new Date(sessionStartMs(c)));}
 const getEntry=dstr=>workouts.find(w=>w.date===dstr);
 const hasEntry=dstr=>!!getEntry(dstr);
 const hasTrainedToday=()=>hasEntry(todayStr());
-function logWorkout(type,silent=false){const t=todayStr();if(hasEntry(t))return;workouts.unshift({date:t,type});S.set(KEYS.workouts,workouts);if(!silent)showToast(type==='I'?'Séance Intense enregistrée ✓':'Séance Récup enregistrée ✓');renderDashboard();}
+function logWorkout(type,silent=false,dstr=null){const t=dstr||todayStr();if(hasEntry(t))return;workouts.unshift({date:t,type});workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);if(!silent)showToast(type==='I'?'Séance Intense enregistrée ✓':'Séance Récup enregistrée ✓');renderDashboard();}
 function toggleDay(dstr){const cur=getEntry(dstr);if(!cur){workouts.push({date:dstr,type:'I'});showToast('Intense ajouté ✓');}else if(cur.type==='I'){cur.type='R';showToast('Passé en Récup');}else{workouts=workouts.filter(w=>w.date!==dstr);showToast('Séance retirée');}workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);renderDashboard();}
 // Parcourt une séquence de jours triée (ancien -> récent) et calcule les longueurs de streak,
 // en respectant la règle : le streak casse sur un jour non-entraîné OU sur 3 jours consécutifs sans Intense.
@@ -2129,7 +2132,7 @@ function buildSessionSummary(combined, type) {
 const HISTORY_INDEX_KEY = 'hiitHistoryIndex';
 function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
   const type = prefix === 'natation_' ? 'swim' : (prefix === 'libre_' || prefix === 'rugby_') ? 'free' : 'hiit';
-  const date = todayStr();
+  const date = sessionDayStr(combined);
   const summary = buildSessionSummary(combined, type);
   let index = [];
   try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
@@ -2201,12 +2204,13 @@ function showDayActionMenu(dstr, histEntries, entry) {
     btn.style.marginBottom = '8px';
     btn.textContent = e.type === 'swim' ? '🏊 Voir la natation' : e.type === 'free' ? `${freeIcon(e.summary && e.summary.activity)} Voir ${(e.summary && e.summary.activity) || "l'activité libre"}` : '📊 Voir le HIIT';
     btn.onclick = () => { modal.remove(); openHistoryEntry(e); };
-    btn.style.marginBottom = '0';
+    btn.style.margin = '0';
     btn.style.flex = '1';
+    btn.style.minWidth = '0';
     const del = document.createElement('button');
     del.textContent = '🗑';
     del.title = 'Supprimer cette séance';
-    del.style.cssText = 'padding:0 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;cursor:pointer;';
+    del.style.cssText = 'flex:0 0 44px;width:44px;margin:0;padding:0;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);color:var(--text);font-size:16px;cursor:pointer;';
     del.onclick = async () => { modal.remove(); await deleteSessionEntry(e.filename); };
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;';
@@ -2445,7 +2449,7 @@ async function importSessionFiles(input) {
 }
 
 async function saveSessionData(combined, prefix = 'seance_') {
-  const filename = prefix + new Date().toISOString().replace(/[:.]/g,'-') + '.json';
+  const filename = prefix + new Date(sessionStartMs(combined)).toISOString().replace(/[:.]/g,'-') + '.json';
   const token = localStorage.getItem('hiitGithubToken');
   if (!token) {
     downloadSessionLocally(combined, filename);
@@ -3527,7 +3531,7 @@ function showSessionResultsModal(combined, filename) {
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
-      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
+      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;width:auto;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   }
   box._hc = { combined, kind: 'hiit', filename, openedAt: Date.now() };
   hiitAttachSwipe(modal, box);
@@ -3915,7 +3919,7 @@ async function swimRetrieveAndFinish(baseline, durationS, mode = 'countercurrent
   localStorage.removeItem(SWIM_PENDING_KEY);
   showSwimResultsModal(combined);
   if (durationS >= 600) {
-    logWorkout('R', true);
+    logWorkout('R', true, sessionDayStr(combined));
     showToast('🏊 Séance natation enregistrée');
   } else {
     log(`Séance natation de ${Math.round(durationS)}s — sous les 10 min, non comptée dans le suivi.`);
@@ -4179,7 +4183,7 @@ function showSwimResultsModal(combined, filename) {
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
       <div style="margin-bottom:16px;">${swimHtml}</div>
-      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
+      <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;width:auto;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   }
   box._hc = { combined, kind: 'swim', filename };
 
@@ -4764,7 +4768,7 @@ async function freeStop(btn) {
   freeResetButton();
   statusEl.textContent = '';
   // Le suivi reçoit tout de suite la suggestion ; le choix dans la modale la remplace.
-  const dayKey = todayStr();
+  const dayKey = sessionDayStr(combined);
   const prevType = (getEntry(dayKey) || {}).type || null;
   freeApplyClass(dayKey, prevType, combined.classification);
   showFreeResultsModal(combined, null, { dayKey, prevType });
@@ -4817,7 +4821,7 @@ function showFreeResultsModal(combined, filename, live = null) {
     ${classHtml}
     ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
     <div style="margin-bottom:16px;">${renderHrChartSvg(combined.hr ? combined.hr.samples : null)}</div>
-    <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
+    <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;width:auto;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   box._hc = { combined, kind: 'free', filename };
   if (live) {
     const paint = () => box.querySelectorAll('[data-cls]').forEach(b => {
