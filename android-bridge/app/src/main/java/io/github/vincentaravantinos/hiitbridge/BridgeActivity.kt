@@ -72,6 +72,19 @@ class BridgeActivity : ComponentActivity() {
     }
 
     private fun handle(intent: Intent?) {
+        // hiitbridge://chrome-reset?pkg=… : ouvrir la fiche système de Chrome (bouton « Forcer l'arrêt »).
+        // Android 14+ interdit à une app d'arrêter une autre app : c'est le plus court chemin possible.
+        if (intent?.data?.host == "chrome-reset") {
+            val pkg = intent.data?.getQueryParameter("pkg")?.takeIf { it.isNotBlank() } ?: "com.android.chrome"
+            try {
+                startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                Toast.makeText(this, "Touche « Forcer l'arrêt », puis rouvre l'app HIIT", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+                Toast.makeText(this, "Impossible d'ouvrir la fiche de Chrome : ${e.message}", Toast.LENGTH_LONG).show()
+            }
+            finish(); return
+        }
         // hiitbridge://spotify?cid=…&uri=… : lancer la playlist au démarrage d'une séance.
         if (intent?.data?.host == "spotify") {
             val cid = intent.data?.getQueryParameter("cid")

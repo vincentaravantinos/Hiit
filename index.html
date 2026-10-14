@@ -433,6 +433,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <div id="t-next" style="margin-top:6px;font-size:13px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;min-height:16px"></div>
         <div id="t-ellip" style="display:none;margin-top:8px;text-align:center"></div>
         <div id="t-wake" style="display:none;margin-top:8px;font-size:12px;line-height:1.35;color:#ffb454;background:rgba(255,180,84,.10);border:1px solid rgba(255,180,84,.35);border-radius:10px;padding:6px 10px;max-width:320px;margin-left:auto;margin-right:auto"></div>
+        <div id="t-voice" style="display:none;margin-top:8px;font-size:12px;line-height:1.35;color:#ff7a7a;background:rgba(255,90,90,.10);border:1px solid rgba(255,90,90,.40);border-radius:10px;padding:8px 10px;max-width:320px;margin-left:auto;margin-right:auto;text-align:center">🔇 Voix indisponible — Chrome a perdu le moteur vocal.<br><button onclick="chromeReset()" style="margin-top:6px;padding:7px 12px;border:1px solid rgba(255,90,90,.6);border-radius:8px;background:rgba(255,90,90,.18);color:inherit;font-family:var(--font);font-size:12px">Redémarrer Chrome</button></div>
       </div>
       <div style="width:100%;max-width:400px;z-index:1">
         <div id="t-list" style="background:rgba(255,255,255,.04);border-radius:14px;padding:11px 14px;border:1px solid var(--border);margin-bottom:16px"></div>
@@ -856,15 +857,20 @@ function ttsCandidates(){let vs=[];try{vs=speechSynthesis.getVoices().filter(v=>
 function ttsPick(){const c=ttsCandidates();return c[ttsIdx%c.length];}
 function ttsNext(why){const c=ttsCandidates();ttsIdx=(ttsIdx+1)%c.length;try{logAppend('Voix : « '+why+' » → essai avec '+c[ttsIdx].key+' ('+(ttsIdx+1)+'/'+c.length+')');}catch(e){}}
 function ttsVoice(){const p=ttsPick();return p?p.voice:null;}
+// Bandeau « voix indisponible » : dès 2 erreurs du moteur d'affilée ; masqué quand une voix repart.
+// Le bouton ouvre, via le pont Android, la fiche de Chrome (Forcer l'arrêt) : seul remède connu.
+function setVoiceBanner(on){const el=document.getElementById('t-voice');if(el)el.style.display=on?'block':'none';}
+function chromeReset(){try{logAppend('Voix : ouverture de la fiche Chrome pour forcer l\u2019arrêt');}catch(e){}
+  location.href='intent://chrome-reset?pkg=com.android.chrome#Intent;scheme=hiitbridge;package='+HC_BRIDGE_PKG+';S.browser_fallback_url='+encodeURIComponent(HC_APK_URL)+';end';}
 function ttsReset(why){try{if(!speechSynthesis.speaking)speechSynthesis.cancel();}catch(e){}ttsFails=0;try{logAppend('Voix : réinitialisée ('+why+')');}catch(e){}}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(()=>ttsReset('retour au premier plan'),400);});
 function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();let started=false,done=false;const cand=ttsPick();
   const fail=why=>{if(done)return;done=true;ttsFails++;let st='';try{st=' — voix:'+(cand?cand.key:'?')+' parle:'+speechSynthesis.speaking+' attente:'+speechSynthesis.pending+' visible:'+document.visibilityState;}catch(e){}try{logAppend('Voix : échec « '+txt+' » ('+why+')'+st);}catch(e){}duckHold(hold);
-    if(why!=='pas de démarrage'&&cand&&ttsPick().key===cand.key)ttsNext(why);
+    if(why!=='pas de démarrage'&&cand&&ttsPick().key===cand.key)ttsNext(why);if(why!=='pas de démarrage'&&ttsFails>=2)setVoiceBanner(true);
     if(o.onfail)o.onfail(why);
     if(ttsFails>=2)setTimeout(()=>{try{speechSynthesis.cancel();}catch(e){}},250);};
   const go=()=>{try{const u=new SpeechSynthesisUtterance(txt);if(cand&&cand.lang)u.lang=cand.lang;u.rate=o.rate||0.95;u.pitch=1.05;u.volume=1;if(cand&&cand.voice)u.voice=cand.voice;
-    u.onstart=()=>{started=true;try{if(ttsFails>0||localStorage.getItem(TTS_LS)!==cand.key){localStorage.setItem(TTS_LS,cand.key);logAppend('Voix : OK avec '+cand.key);}}catch(e){}ttsFails=0;if(o.onstart)o.onstart();};
+    u.onstart=()=>{started=true;setVoiceBanner(false);try{if(ttsFails>0||localStorage.getItem(TTS_LS)!==cand.key){localStorage.setItem(TTS_LS,cand.key);logAppend('Voix : OK avec '+cand.key);}}catch(e){}ttsFails=0;if(o.onstart)o.onstart();};
     u.onend=()=>{if(done)return;done=true;duckHold(hold);};
     u.onerror=e=>{const err=e&&e.error;if(err==='interrupted'||err==='canceled'){done=true;duckHold(hold);return;}fail(err||'erreur');};
     ttsKeep=u;try{speechSynthesis.resume();}catch(e){}speechSynthesis.speak(u);
@@ -878,7 +884,7 @@ function countSay(word,last){if(ttsFails>=1)beep(last?990:750,last?.18:.12,1.0,1
 function testVoice(){const el=document.getElementById('tts-status');let n=0;try{n=speechSynthesis.getVoices().length;}catch(e){}
   try{localStorage.removeItem(TTS_LS);}catch(e){}ttsIdx=0;ttsFails=0;const c=ttsCandidates();
   const base='Version '+APP_BUILD+' · '+n+' voix, '+(c.length-2)+' françaises';getACtx();beep(825,.14,1.0);
-  const tryOne=i=>{if(i>=c.length){el.textContent=base+' · ÉCHEC avec toutes les voix';return;}ttsIdx=i;el.textContent=base+' · essai '+(i+1)+'/'+c.length+' : '+c[i].key+'…';
+  const tryOne=i=>{if(i>=c.length){el.innerHTML=base+' · ÉCHEC avec toutes les voix — <a href="#" onclick="chromeReset();return false" style="color:#ff7a7a">redémarrer Chrome</a>';return;}ttsIdx=i;el.textContent=base+' · essai '+(i+1)+'/'+c.length+' : '+c[i].key+'…';
     speak('Test de la voix.',{onstart:()=>{el.textContent=base+' · voix OK ✔ ('+c[i].key+')';},onfail:()=>{ttsIdx=i;setTimeout(()=>tryOne(i+1),400);}});};
   setTimeout(()=>tryOne(0),300);}
 setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+APP_BUILD;},0);
@@ -946,7 +952,7 @@ function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now
 function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';ellipOnSessionEnd(sensorActive);sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
 function tPause(){tState='paused';clearInterval(ticker);tRenderControls();}
 function tResume(){tState='running';tStartTicker();tRenderControls();}
-function tReset(){clearInterval(ticker);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
+function tReset(){clearInterval(ticker);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
 function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
