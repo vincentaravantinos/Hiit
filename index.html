@@ -330,7 +330,9 @@ html.oura #tab-settings button:not(.danger-btn):not(.notif-btn), html.oura #tab-
   border: none !important; border-radius: 12px !important; background: rgba(255,255,255,.08) !important; font-weight: 500 !important;
 }
 html.oura .position-toggle button { border: none !important; border-radius: 999px !important; letter-spacing: .6px; }
-html.oura .position-toggle button.active { background: var(--accent) !important; color: #0a0d14 !important; }
+html.oura #tab-settings .position-toggle button { color: var(--muted) !important; font-weight: 500 !important; }
+html.oura #tab-settings .position-toggle button.active { background: var(--accent) !important; color: #0a0d14 !important; font-weight: 700 !important; box-shadow: 0 0 16px rgba(166,220,203,.35); }
+html.oura #tab-settings .position-toggle button.active::before { content: '✓ '; }
 html.oura .notif-btn, html.oura .danger-btn { border-radius: 14px; font-weight: 600; letter-spacing: .4px; text-transform: none; }
 html.oura .notif-btn { border: none; background: var(--surface2); }
 html.oura .toggle { width: 48px; height: 28px; border-radius: 14px; border: none; background: rgba(255,255,255,.14); }
