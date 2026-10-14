@@ -840,22 +840,31 @@ function setWakeStatus(state,msg){const el=document.getElementById('t-wake');if(
 async function acquireWakeLock(){if(!('wakeLock'in navigator)){setWakeStatus('unsupported');return;}if(wakeLock)return;try{const s=await navigator.wakeLock.request('screen');wakeLock=s;setWakeStatus('ok');s.addEventListener('release',()=>{if(wakeLock===s)wakeLock=null;if(tState==='running'||tState==='countdown'){setWakeStatus('lost');setTimeout(()=>{if(!wakeLock&&(tState==='running'||tState==='countdown'))acquireWakeLock();},600);}});}catch(e){wakeLock=null;setWakeStatus('denied',e&&e.name?e.name:'');setTimeout(()=>{if(!wakeLock&&(tState==='running'||tState==='countdown'))acquireWakeLock();},5000);}}
 function getACtx(){if(!audioCtx)audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(audioCtx.state==='suspended')audioCtx.resume().catch(()=>{});return audioCtx;}
 function beep(freq=1100,dur=0.18,vol=1.0,holdMs=null){duckStart();try{const ctx=getACtx(),o=ctx.createOscillator(),g=ctx.createGain(),c=ctx.createDynamicsCompressor();c.threshold.value=-6;c.knee.value=0;c.ratio.value=20;c.attack.value=0;c.release.value=0.1;o.connect(g);g.connect(c);c.connect(ctx.destination);o.frequency.value=freq;g.gain.setValueAtTime(vol,ctx.currentTime);g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+dur);o.start();o.stop(ctx.currentTime+dur);}catch{}duckHold(holdMs!==null?holdMs:dur*1000+250);}
-speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=>v.lang.startsWith('fr'))||null;};
 // Voix : jamais de cancel() collé à speak() (Android Chrome avale alors la nouvelle phrase),
-// échecs écrits au journal, et repli sur des bips si la voix ne démarre plus.
-let ttsFails=0,ttsKeep=null;
-// Voix relue à chaque phrase : après un passage en arrière-plan (lancement Spotify via le pont,
-// Health Connect…), Android redémarre son moteur et l'ancien objet voix devient muet.
-function ttsVoice(){if(ttsFails>0)return null;try{const vs=speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.toLowerCase().startsWith('fr'));frVoice=(frVoice&&vs.find(v=>v.name===frVoice.name))||vs[0]||null;}catch(e){frVoice=null;}return frVoice;}
-// Remise à zéro du moteur : file vidée (loin de tout speak), échecs oubliés.
-function ttsReset(why){try{if(!speechSynthesis.speaking)speechSynthesis.cancel();}catch(e){}ttsFails=0;frVoice=null;try{logAppend('Voix : réinitialisée ('+why+')');}catch(e){}}
+// échecs écrits au journal, repli sur des bips tant que la voix est en panne.
+// Choix de la voix par essais : quand une voix renvoie une erreur, on passe à la suivante
+// (voix par défaut, voix françaises locales, voix réseau, sans langue imposée) et on retient
+// celle qui a parlé. Le 13/10, toutes les phrases tombaient en « synthesis-failed ».
+let ttsFails=0,ttsKeep=null,ttsIdx=0;
+const TTS_LS='hiitTtsVoice';
+function ttsCandidates(){let vs=[];try{vs=speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.toLowerCase().replace('_','-').startsWith('fr'));}catch(e){}
+  const loc=vs.filter(v=>v.localService),net=vs.filter(v=>!v.localService);
+  const c=[{key:'défaut fr-FR',voice:null,lang:'fr-FR'}].concat(loc.concat(net).map(v=>({key:v.name,voice:v,lang:v.lang})),[{key:'sans langue',voice:null,lang:''}]);
+  let saved=null;try{saved=localStorage.getItem(TTS_LS);}catch(e){}
+  if(saved){const i=c.findIndex(x=>x.key===saved);if(i>0)c.unshift(c.splice(i,1)[0]);}
+  return c;}
+function ttsPick(){const c=ttsCandidates();return c[ttsIdx%c.length];}
+function ttsNext(why){const c=ttsCandidates();ttsIdx=(ttsIdx+1)%c.length;try{logAppend('Voix : « '+why+' » → essai avec '+c[ttsIdx].key+' ('+(ttsIdx+1)+'/'+c.length+')');}catch(e){}}
+function ttsVoice(){const p=ttsPick();return p?p.voice:null;}
+function ttsReset(why){try{if(!speechSynthesis.speaking)speechSynthesis.cancel();}catch(e){}ttsFails=0;try{logAppend('Voix : réinitialisée ('+why+')');}catch(e){}}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(()=>ttsReset('retour au premier plan'),400);});
-function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();let started=false,done=false;
-  const fail=why=>{if(done)return;done=true;ttsFails++;let st='';try{st=' — parle:'+speechSynthesis.speaking+' attente:'+speechSynthesis.pending+' voix:'+speechSynthesis.getVoices().length+' visible:'+document.visibilityState;}catch(e){}try{logAppend('Voix : échec « '+txt+' » ('+why+')'+st);}catch(e){}duckHold(hold);if(o.onfail)o.onfail(why);
-    // Moteur bloqué : on vide la file à l'écart du prochain speak pour qu'il reparte.
+function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();let started=false,done=false;const cand=ttsPick();
+  const fail=why=>{if(done)return;done=true;ttsFails++;let st='';try{st=' — voix:'+(cand?cand.key:'?')+' parle:'+speechSynthesis.speaking+' attente:'+speechSynthesis.pending+' visible:'+document.visibilityState;}catch(e){}try{logAppend('Voix : échec « '+txt+' » ('+why+')'+st);}catch(e){}duckHold(hold);
+    if(why!=='pas de démarrage'&&cand&&ttsPick().key===cand.key)ttsNext(why);
+    if(o.onfail)o.onfail(why);
     if(ttsFails>=2)setTimeout(()=>{try{speechSynthesis.cancel();}catch(e){}},250);};
-  const go=()=>{try{const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=o.rate||0.95;u.pitch=1.05;u.volume=1;const v=ttsVoice();if(v)u.voice=v;
-    u.onstart=()=>{started=true;ttsFails=0;if(o.onstart)o.onstart();};
+  const go=()=>{try{const u=new SpeechSynthesisUtterance(txt);if(cand&&cand.lang)u.lang=cand.lang;u.rate=o.rate||0.95;u.pitch=1.05;u.volume=1;if(cand&&cand.voice)u.voice=cand.voice;
+    u.onstart=()=>{started=true;try{if(ttsFails>0||localStorage.getItem(TTS_LS)!==cand.key){localStorage.setItem(TTS_LS,cand.key);logAppend('Voix : OK avec '+cand.key);}}catch(e){}ttsFails=0;if(o.onstart)o.onstart();};
     u.onend=()=>{if(done)return;done=true;duckHold(hold);};
     u.onerror=e=>{const err=e&&e.error;if(err==='interrupted'||err==='canceled'){done=true;duckHold(hold);return;}fail(err||'erreur');};
     ttsKeep=u;try{speechSynthesis.resume();}catch(e){}speechSynthesis.speak(u);
@@ -865,9 +874,13 @@ function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();let started
   if(busy&&!o.queue){try{speechSynthesis.cancel();}catch(e){}setTimeout(go,80);}else go();}
 // Décompte de fin de phase : voix, doublée d'un bip tant que la voix est en panne.
 function countSay(word,last){if(ttsFails>=1)beep(last?990:750,last?.18:.12,1.0,1300);speak(word,{rate:1.15,hold:last?600:1300,queue:word!=='Trois'});}
-function testVoice(){const el=document.getElementById('tts-status');let n=0,fr='aucune';try{n=speechSynthesis.getVoices().length;ttsFails=0;const v=ttsVoice();if(v)fr=v.name;}catch(e){}
-  const base='Version '+APP_BUILD+' · '+n+' voix, française : '+fr;el.textContent=base+' · test en cours…';getACtx();beep(825,.14,1.0);
-  setTimeout(()=>speak('Trois, deux, un. Test de la voix.',{onstart:()=>{el.textContent=base+' · voix démarrée ✔';},onfail:w=>{el.textContent=base+' · ÉCHEC : '+w;}}),300);}
+// Test : essaie chaque voix française tour à tour jusqu'à en trouver une qui parle.
+function testVoice(){const el=document.getElementById('tts-status');let n=0;try{n=speechSynthesis.getVoices().length;}catch(e){}
+  try{localStorage.removeItem(TTS_LS);}catch(e){}ttsIdx=0;ttsFails=0;const c=ttsCandidates();
+  const base='Version '+APP_BUILD+' · '+n+' voix, '+(c.length-2)+' françaises';getACtx();beep(825,.14,1.0);
+  const tryOne=i=>{if(i>=c.length){el.textContent=base+' · ÉCHEC avec toutes les voix';return;}ttsIdx=i;el.textContent=base+' · essai '+(i+1)+'/'+c.length+' : '+c[i].key+'…';
+    speak('Test de la voix.',{onstart:()=>{el.textContent=base+' · voix OK ✔ ('+c[i].key+')';},onfail:()=>{ttsIdx=i;setTimeout(()=>tryOne(i+1),400);}});};
+  setTimeout(()=>tryOne(0),300);}
 setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+APP_BUILD;},0);
 // Reps de la dernière séance, même exercice et même tour (historique local).
 let lastRepsIntroDone=false;
