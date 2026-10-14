@@ -467,7 +467,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <button onclick="ccChangeLevel(1)" style="width:48px;height:48px;border-radius:50%;border:1px solid var(--border2);background:var(--surface2);color:var(--text);font-size:24px;">+</button>
         </div>
         <button id="swim-cc-btn" data-mode="countercurrent" data-label="DÉMARRER LE CONTRE-COURANT" onclick="swimPromptThenStart(this,'countercurrent')" style="padding:22px;font-size:17px;background:var(--accent);color:#111;border:none;border-radius:12px;font-weight:bold;width:100%;letter-spacing:1px;">DÉMARRER LE CONTRE-COURANT</button>
-        <p style="font-size:12px;color:var(--muted);margin-top:16px;">Les 5 premières minutes de nage et les pauses sont exclues du calcul de FC.</p>
+        <p style="font-size:12px;color:var(--muted);margin-top:16px;">Les pauses sont exclues du calcul de FC.</p>
         <button id="swim-latest-btn" onclick="swimRecover(true)" style="margin-top:14px;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:12px;text-decoration:underline;">Récupérer le dernier enregistrement resté sur le capteur</button>
       </div>
     </div>
@@ -2355,6 +2355,7 @@ function buildSessionSummary(combined, type) {
     const strokes = [...new Set(combined.analysis.swimSegments.map(s => s.stroke))];
     const summary = { totalReps, segments: combined.analysis.swimSegments.length, strokes };
     summary.ccChecked = true;
+    summary.ccV = CC_KPI_VERSION;
     summary.strokeStats = computeStrokeStats(combined.analysis.swimSegments);
     if (combined.analysis.cc && combined.analysis.cc.avgHr) {
       summary.ccLevel = combined.currentLevel;
@@ -2592,7 +2593,7 @@ async function backfillHiitSummaries() {
   try {
     await syncHistoryIndexFromGithub(token);
     const readIndex = () => { try { return JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { return []; } };
-    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx) : e.type === 'swim' ? !(e.summary && e.summary.ccChecked) : false));
+    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION) : false));
     for (const entry of todo) {
       try {
         const combined = await fetchSessionFile(entry.filename, token);
@@ -4219,7 +4220,8 @@ const HR_ZONES = [
   { name: 'Z5', lo: 0.90, hi: 1.01, color: '#c9e2f5' },
 ];
 const CC_DEFAULT_LEVEL = 3; // niveau supposé des séances enregistrées avant l'ajout du sélecteur
-const CC_WARMUP_S = 300;   // FC ignorée les 5 premières minutes de nage
+const CC_WARMUP_S = 0;     // (14/10) plus d'exclusion du début : toute la nage compte
+const CC_KPI_VERSION = 2;  // à incrémenter quand le calcul du KPI change → recalcul des anciennes séances
 const CC_MIN_WINDOW_S = 300;
 
 function hrTimeline(combined) {
@@ -4250,14 +4252,14 @@ function computeCcKpi(segments, tl) {
   const w = swimWindow(segments);
   if (!w) return { error: 'Aucune nage détectée' };
   const winStart = w.startS + CC_WARMUP_S;
-  // Seulement pendant la nage (pauses exclues), après l'échauffement.
+  // Seulement pendant la nage (pauses exclues).
   const inSwim = t => t >= winStart && segments.some(sg => t >= sg.startS && t <= sg.endS);
   const swimS = segments.reduce((a, sg) => a + Math.max(0, sg.endS - Math.max(sg.startS, winStart)), 0);
-  if (swimS < CC_MIN_WINDOW_S) return { error: `Pas assez de nage après les 5 premières minutes (${Math.round(swimS/60)} min, il en faut 5)` };
+  if (swimS < CC_MIN_WINDOW_S) return { error: `Pas assez de nage (${Math.round(swimS/60)} min, il en faut 5)` };
   const vals = tl.filter(p => inSwim(p.t)).map(p => p.hr);
   if (vals.length < 30) return { error: 'Pas assez de données FC' };
   const avg = vals.reduce((a,b) => a+b, 0) / vals.length;
-  return { avgHr: Math.round(avg*10)/10, winStartS: winStart, winEndS: w.endS, swimS: Math.round(swimS) };
+  return { v: CC_KPI_VERSION, avgHr: Math.round(avg*10)/10, winStartS: winStart, winEndS: w.endS, swimS: Math.round(swimS) };
 }
 
 function normalizeSwimSession(combined) {
@@ -4368,7 +4370,7 @@ function getCcHistory(level, currentFilename) {
   let index = [];
   try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { index = []; }
   return index
-    .filter(e => e.type === 'swim' && e.summary && e.summary.ccLevel === level && e.summary.ccHr)
+    .filter(e => e.type === 'swim' && e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.ccLevel === level && e.summary.ccHr)
     .filter(e => !currentFilename || e.filename < currentFilename)
     .sort((a,b) => a.filename < b.filename ? -1 : 1);
 }
@@ -4440,7 +4442,7 @@ const SWIM_ALGO_VERSION = 'v1-segmentation-strokeclassify';
 
 function showSwimResultsModal(combined, filename) {
   normalizeSwimSession(combined);
-  const cacheValid = combined.analysis && combined.analysis.swimSegments && combined.analysis.algoVersion === SWIM_ALGO_VERSION && (combined.swimMode !== 'countercurrent' || combined.analysis.cc);
+  const cacheValid = combined.analysis && combined.analysis.swimSegments && combined.analysis.algoVersion === SWIM_ALGO_VERSION && (combined.swimMode !== 'countercurrent' || (combined.analysis.cc && combined.analysis.cc.v === CC_KPI_VERSION));
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
@@ -4749,7 +4751,7 @@ function buildHcPayload(combined, kind, filename) {
     const notes = [
       `Contre-courant, niveau ${combined.currentLevel ?? '?'}`,
       'Mouvements : ' + (Object.entries(byStroke).map(([k,v]) => `${k} ${v}`).join(', ') || '—'),
-      cc && cc.avgHr ? `FC moyenne en nage (après 5 min) : ${cc.avgHr} bpm` : null,
+      cc && cc.avgHr ? `FC moyenne en nage : ${cc.avgHr} bpm` : null,
       `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
     ].filter(Boolean).join('\n');
     return { v: 1, kind: 'swim', id: String(start), start, end: start + durMs,
