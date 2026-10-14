@@ -4829,7 +4829,7 @@ function buildHcPayload(combined, kind, filename) {
       `Capteur : Polar Verity Sense (${combined.position || 'bras'}) — app HIIT`
     ].filter(Boolean).join('\n');
     return { v: 1, kind: 'swim', id: String(start), start, end: start + durMs,
-      title: `Nage contre-courant · niveau ${combined.currentLevel ?? '?'}`, notes, segments, hr,
+      title: 'Nage contre-courant', notes, segments, hr,
       kcal: hr ? hcActiveKcal(hr.bpm, hr.dtMs/1000) : null };
   }
 
