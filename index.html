@@ -844,9 +844,16 @@ speechSynthesis.onvoiceschanged=()=>{frVoice=speechSynthesis.getVoices().find(v=
 // Voix : jamais de cancel() collé à speak() (Android Chrome avale alors la nouvelle phrase),
 // échecs écrits au journal, et repli sur des bips si la voix ne démarre plus.
 let ttsFails=0,ttsKeep=null;
-function ttsVoice(){if(ttsFails>0)return null;if(!frVoice){try{frVoice=speechSynthesis.getVoices().find(v=>v.lang&&v.lang.toLowerCase().startsWith('fr'))||null;}catch(e){}}return frVoice;}
+// Voix relue à chaque phrase : après un passage en arrière-plan (lancement Spotify via le pont,
+// Health Connect…), Android redémarre son moteur et l'ancien objet voix devient muet.
+function ttsVoice(){if(ttsFails>0)return null;try{const vs=speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.toLowerCase().startsWith('fr'));frVoice=(frVoice&&vs.find(v=>v.name===frVoice.name))||vs[0]||null;}catch(e){frVoice=null;}return frVoice;}
+// Remise à zéro du moteur : file vidée (loin de tout speak), échecs oubliés.
+function ttsReset(why){try{if(!speechSynthesis.speaking)speechSynthesis.cancel();}catch(e){}ttsFails=0;frVoice=null;try{logAppend('Voix : réinitialisée ('+why+')');}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(()=>ttsReset('retour au premier plan'),400);});
 function speak(txt,opt){const o=opt||{},hold=o.hold||300;duckStart();let started=false,done=false;
-  const fail=why=>{if(done)return;done=true;ttsFails++;try{logAppend('Voix : échec « '+txt+' » ('+why+')');}catch(e){}duckHold(hold);if(o.onfail)o.onfail(why);};
+  const fail=why=>{if(done)return;done=true;ttsFails++;let st='';try{st=' — parle:'+speechSynthesis.speaking+' attente:'+speechSynthesis.pending+' voix:'+speechSynthesis.getVoices().length+' visible:'+document.visibilityState;}catch(e){}try{logAppend('Voix : échec « '+txt+' » ('+why+')'+st);}catch(e){}duckHold(hold);if(o.onfail)o.onfail(why);
+    // Moteur bloqué : on vide la file à l'écart du prochain speak pour qu'il reparte.
+    if(ttsFails>=2)setTimeout(()=>{try{speechSynthesis.cancel();}catch(e){}},250);};
   const go=()=>{try{const u=new SpeechSynthesisUtterance(txt);u.lang='fr-FR';u.rate=o.rate||0.95;u.pitch=1.05;u.volume=1;const v=ttsVoice();if(v)u.voice=v;
     u.onstart=()=>{started=true;ttsFails=0;if(o.onstart)o.onstart();};
     u.onend=()=>{if(done)return;done=true;duckHold(hold);};
