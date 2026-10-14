@@ -2356,6 +2356,7 @@ function buildSessionSummary(combined, type) {
     const summary = { totalReps, segments: combined.analysis.swimSegments.length, strokes };
     summary.ccChecked = true;
     summary.ccV = CC_KPI_VERSION;
+    summary.swimAlgo = SWIM_ALGO_VERSION;
     summary.strokeStats = computeStrokeStats(combined.analysis.swimSegments);
     if (combined.analysis.cc && combined.analysis.cc.avgHr) {
       summary.ccLevel = combined.currentLevel;
@@ -2593,7 +2594,7 @@ async function backfillHiitSummaries() {
   try {
     await syncHistoryIndexFromGithub(token);
     const readIndex = () => { try { return JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { return []; } };
-    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION) : false));
+    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.swimAlgo === SWIM_ALGO_VERSION) : false));
     for (const entry of todo) {
       try {
         const combined = await fetchSessionFile(entry.filename, token);
@@ -4412,17 +4413,88 @@ function renderCcKpiHtml(combined, filename) {
   return html;
 }
 
+// (14/10) Découpage brasse/crawl À L'INTÉRIEUR d'un bloc de nage : on enchaîne souvent
+// brasse puis crawl sans pause, et un bloc entier était classé d'un seul type.
+// Caractéristique : amplitude totale de l'accélération (√ somme des variances des 3 axes)
+// sur 10 s — indépendante de l'orientation du capteur. Brasse ≈ 480-700, crawl ≈ 800-990
+// (séances du 29/09, 09/10, 14/10).
+const STROKE_WIN_S = 10, STROKE_STEP_S = 2, CRAWL_ACC_STD = 760, REST_ACC_STD = 420, STROKE_MIN_RUN_S = 15;
+function accTotalStd(win) {
+  const n = win.length; if (n < 2) return 0;
+  let mx=0,my=0,mz=0; for (const [x,y,z] of win) { mx+=x; my+=y; mz+=z; } mx/=n; my/=n; mz/=n;
+  let v=0; for (const [x,y,z] of win) v += (x-mx)**2 + (y-my)**2 + (z-mz)**2;
+  return Math.sqrt(v/n);
+}
+// Renvoie des sous-segments [début, fin, type|null]. null = bloc homogène, laissé au
+// classifieur historique. Les bords « au repos » (amplitude faible : pompes qui ralentissent,
+// arrêt) sont retirés du bloc.
+function splitSegmentByStroke(accSamples, s, e) {
+  const lab = [];
+  for (let t = s; t + STROKE_WIN_S <= e + 0.01; t += STROKE_STEP_S) {
+    const sd = accTotalStd(accSamples.slice(Math.round(t*FS_ALGO), Math.round((t+STROKE_WIN_S)*FS_ALGO)));
+    lab.push({ c: t + STROKE_WIN_S/2, k: sd > CRAWL_ACC_STD ? 'crawl' : sd < REST_ACC_STD ? 'rest' : 'brasse' });
+  }
+  if (lab.length < 3) return [[s, e, null]];
+  // lissage : vote majoritaire sur 5 fenêtres (≈ 18 s)
+  const sm = lab.map((_, i) => {
+    const cnt = {};
+    for (let d = -2; d <= 2; d++) { const k = lab[Math.min(lab.length-1, Math.max(0, i+d))].k; cnt[k] = (cnt[k]||0) + 1; }
+    return Object.keys(cnt).sort((x,y) => cnt[y]-cnt[x] || (x === lab[i].k ? -1 : 1))[0];
+  });
+  let spans = [];
+  sm.forEach((k, i) => {
+    const l = spans[spans.length-1];
+    if (l && l.k === k) l.j = i; else spans.push({ k, i, j: i });
+  });
+  const bound = i => (lab[i].c + lab[i+1].c) / 2;
+  spans.forEach((p, n) => { p.s = n === 0 ? s : bound(p.i - 1); p.e = n === spans.length-1 ? e : bound(p.j); });
+  // bords : on retire le repos et ce qui traîne au-delà (moins de 15 s d'agitation après
+  // l'arrêt : sortie du bassin, pompes qui ralentissent…)
+  const trimEdge = (first) => {
+    for (;;) {
+      const p = first ? spans[0] : spans[spans.length-1];
+      const q = first ? spans[1] : spans[spans.length-2];
+      if (!q) return;
+      if (p.k === 'rest' || (p.e - p.s < STROKE_MIN_RUN_S && q.k === 'rest')) { first ? spans.shift() : spans.pop(); continue; }
+      return;
+    }
+  };
+  trimEdge(true); trimEdge(false);
+  // les morceaux trop courts rejoignent leur plus long voisin
+  const glue = arr => arr.reduce((acc, p) => { const l = acc[acc.length-1]; if (l && l.k === p.k) l.e = p.e; else acc.push({ ...p }); return acc; }, []);
+  for (let g = 0; g < 50 && spans.length > 1; g++) {
+    const k = spans.findIndex(p => p.e - p.s < STROKE_MIN_RUN_S);
+    if (k < 0) break;
+    const L = spans[k-1], R = spans[k+1];
+    const nb = !L ? R : !R ? L : (L.e - L.s >= R.e - R.s ? L : R);
+    spans[k].k = nb.k;
+    spans = glue(spans);
+  }
+  // repos restant au milieu (rare, la segmentation l'a déjà coupé) : compté avec la nage
+  spans.forEach(p => { if (p.k === 'rest') p.k = 'brasse'; });
+  spans = glue(spans);
+  if (spans.length === 1 && spans[0].k === 'rest') return [[s, e, null]];
+  const kinds = new Set(spans.map(p => p.k));
+  if (kinds.size === 1) return [[Math.round(spans[0].s), Math.round(spans[spans.length-1].e), null]];
+  return spans.map(p => [Math.round(p.s), Math.round(p.e), p.k]);
+}
+
 function analyzeSwimSession(accSamples) {
   if (!accSamples || accSamples.length < 20) return [];
   const segments = detectSwimSegments(accSamples);
-  return segments.map(([s, e]) => {
-    const window = accSamples.slice(Math.round(s*FS_ALGO), Math.round(e*FS_ALGO));
-    const { stroke } = classifyStrokeType(window);
-    // Plain tilt counting, not auto-axis — auto-axis was only validated for land
-    // exercises; swim stroke counts were validated using the standard tilt signal.
-    const reps = countRepsOnSignal(computeTilt(window));
-    return { startS: s, endS: e, stroke, reps };
+  const out = [];
+  segments.forEach(([s0, e0]) => {
+    splitSegmentByStroke(accSamples, s0, e0).forEach(([s, e, forced]) => {
+      const window = accSamples.slice(Math.round(s*FS_ALGO), Math.round(e*FS_ALGO));
+      // Bloc homogène : classifieur historique ; bloc découpé : type donné par l'amplitude.
+      const stroke = forced || classifyStrokeType(window).stroke;
+      // Plain tilt counting, not auto-axis — auto-axis was only validated for land
+      // exercises; swim stroke counts were validated using the standard tilt signal.
+      const reps = countRepsOnSignal(computeTilt(window));
+      out.push({ startS: s, endS: e, stroke, reps });
+    });
   });
+  return out;
 }
 
 function renderSwimResultsHtml(segments) {
@@ -4438,7 +4510,7 @@ function renderSwimResultsHtml(segments) {
   return html;
 }
 
-const SWIM_ALGO_VERSION = 'v1-segmentation-strokeclassify';
+const SWIM_ALGO_VERSION = 'v2-split-stroke-in-segment';
 
 function showSwimResultsModal(combined, filename) {
   normalizeSwimSession(combined);
