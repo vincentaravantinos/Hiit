@@ -4490,7 +4490,9 @@ function analyzeSwimSession(accSamples) {
       const stroke = forced || classifyStrokeType(window).stroke;
       // Plain tilt counting, not auto-axis — auto-axis was only validated for land
       // exercises; swim stroke counts were validated using the standard tilt signal.
-      const reps = countRepsOnSignal(computeTilt(window));
+      // Crawl : le capteur ne voit qu'un bras → 1 cycle = 2 mouvements (on compte les deux bras).
+      const cycles = countRepsOnSignal(computeTilt(window));
+      const reps = stroke === 'crawl' ? cycles * 2 : cycles;
       out.push({ startS: s, endS: e, stroke, reps });
     });
   });
@@ -4510,7 +4512,7 @@ function renderSwimResultsHtml(segments) {
   return html;
 }
 
-const SWIM_ALGO_VERSION = 'v2-split-stroke-in-segment';
+const SWIM_ALGO_VERSION = 'v3-crawl-both-arms';
 
 function showSwimResultsModal(combined, filename) {
   normalizeSwimSession(combined);
