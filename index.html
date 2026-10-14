@@ -3846,33 +3846,34 @@ function hiitCachePut(filename, combined) {
   hiitSessionCache.set(filename, combined);
   while (hiitSessionCache.size > 3) hiitSessionCache.delete(hiitSessionCache.keys().next().value);
 }
-function hiitNavList() {
+// (14/10) Même navigation pour la nage : on parcourt alors uniquement les séances de nage.
+function hiitNavList(kind = 'hiit') {
   let index = [];
   try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { index = []; }
-  return index.filter(e => e.type === 'hiit' && e.savedToGithub && e.filename).sort((a, b) => a.filename < b.filename ? -1 : 1);
+  return index.filter(e => e.type === kind && e.savedToGithub && e.filename).sort((a, b) => a.filename < b.filename ? -1 : 1);
 }
 // Une séance tout juste terminée n'a pas encore de fichier : elle se place après toutes
 // les autres, à l'heure d'ouverture de sa fenêtre.
 function hiitNavKey(ctx) {
-  return ctx.filename || ('seance_' + new Date(ctx.openedAt || Date.now()).toISOString().replace(/[:.]/g, '-') + '.json');
+  return ctx.filename || ((ctx.kind === 'swim' ? 'natation_' : 'seance_') + new Date(ctx.openedAt || Date.now()).toISOString().replace(/[:.]/g, '-') + '.json');
 }
 function hiitNavTarget(ctx, dir) {
-  const key = hiitNavKey(ctx), list = hiitNavList();
+  const key = hiitNavKey(ctx), list = hiitNavList(ctx.kind);
   if (dir < 0) { const older = list.filter(e => e.filename < key); return older[older.length - 1] || null; }
   return ctx.filename ? (list.find(e => e.filename > key) || null) : null;
 }
 function hiitNavDateLabel(ctx) {
   let d = new Date(ctx.openedAt || Date.now());
-  const entry = ctx.filename ? hiitNavList().find(e => e.filename === ctx.filename) : null;
+  const entry = ctx.filename ? hiitNavList(ctx.kind).find(e => e.filename === ctx.filename) : null;
   const m = /(\d{4})-(\d{2})-(\d{2})/.exec((entry && entry.date) || ctx.filename || '');
   if (m) d = new Date(+m[1], +m[2] - 1, +m[3]);
   return d.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 }
-function hiitNavHeaderHtml(ctx) {
+function hiitNavHeaderHtml(ctx, title = 'RÉSULTATS DE LA SÉANCE') {
   const btn = (dir, on) => `<button onclick="hiitNavGo(this,${dir})" ${on ? '' : 'disabled'} aria-label="${dir < 0 ? 'Séance précédente' : 'Séance suivante'}" style="width:44px;margin:0;padding:8px 0;background:var(--surface2);color:var(--text);border:1px solid var(--border2);font-size:20px;line-height:1;opacity:${on ? 1 : .25};">${dir < 0 ? '‹' : '›'}</button>`;
   return `<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
       ${btn(-1, !!hiitNavTarget(ctx, -1))}
-      <div style="text-align:center;flex:1;min-width:0;"><h3 style="margin:0 0 2px;">RÉSULTATS DE LA SÉANCE</h3><div class="hiit-nav-date" style="font-size:12px;color:var(--muted);">${hiitNavDateLabel(ctx)}</div></div>
+      <div style="text-align:center;flex:1;min-width:0;"><h3 style="margin:0 0 2px;">${title}</h3><div class="hiit-nav-date" style="font-size:12px;color:var(--muted);">${hiitNavDateLabel(ctx)}</div></div>
       ${btn(1, !!hiitNavTarget(ctx, 1))}
     </div>`;
 }
@@ -3889,9 +3890,10 @@ let hiitNavBusy = false;
 async function hiitNavGo(el, dir) {
   const box = el.classList && el.classList.contains('sensor-modal') ? el : el.closest('.sensor-modal');
   const ctx = box && box._hc;
-  if (!ctx || ctx.kind !== 'hiit' || hiitNavBusy) return;
+  if (!ctx || (ctx.kind !== 'hiit' && ctx.kind !== 'swim') || hiitNavBusy) return;
   const target = hiitNavTarget(ctx, dir);
-  if (!target) { showToast(dir < 0 ? 'Pas de séance HIIT plus ancienne' : 'C\'est la séance HIIT la plus récente'); return; }
+  const what = ctx.kind === 'swim' ? 'de nage' : 'HIIT';
+  if (!target) { showToast(dir < 0 ? `Pas de séance ${what} plus ancienne` : `C'est la séance ${what} la plus récente`); return; }
   const token = localStorage.getItem('hiitGithubToken');
   if (!token) { showToast('Configure ton token GitHub pour parcourir les séances.'); return; }
   hiitNavBusy = true;
@@ -3905,7 +3907,8 @@ async function hiitNavGo(el, dir) {
     if (ctx.filename) hiitCachePut(ctx.filename, ctx.combined);
     if (!hcDeferred) hcDeferred = ctx; // l'envoi Health Connect de la séance quittée reste dû au « Fermer »
     box.closest('.sensor-modal-backdrop').remove();
-    showSessionResultsModal(next, target.filename);
+    if (ctx.kind === 'swim') showSwimResultsModal(next, target.filename);
+    else showSessionResultsModal(next, target.filename);
   } catch (err) {
     logError('Navigation vers ' + target.filename, err);
     if (label) label.textContent = prevText;
@@ -4323,7 +4326,8 @@ function renderHrZonesHtml(combined, segments, opts = {}) {
 }
 
 const CADENCE_MIN_S = 180;      // au moins 3 min dans une nage pour comparer sa cadence
-const CADENCE_FLAG_PCT = 0.15;   // jaune au-delà de ±15 % vs médiane des 3 dernières
+const CADENCE_FLAG_PCT = 0.15;
+const CADENCE_COLOR_PCT = 0.04;  // vert/rouge à partir de ±4 % vs médiane des 3 dernières   // jaune au-delà de ±15 % vs médiane des 3 dernières
 
 function computeStrokeStats(segments) {
   const stats = {};
@@ -4360,6 +4364,10 @@ function renderStrokeMixHtml(segments, history) {
     let txt = `${name} ${Math.round(st.s/60)} min`;
     if (st.s >= CADENCE_MIN_S && st.rate) txt += ` (${Math.round(st.rate)} mvt/min${f ? `, d'habitude ${Math.round(f.med)}` : ''})`;
     if (f && f.flagged) { anyFlag = true; return `<span style="color:#f1c40f;font-weight:bold;">${txt}</span>`; }
+    // (14/10) Au même niveau, moins de mouvements/min pour tenir face au courant = plus de
+    // propulsion par mouvement → vert ; plus → rouge. Au-delà de ±15 % : jaune (réglage ?).
+    if (f && f.dev <= -CADENCE_COLOR_PCT) return `<span style="color:#2ecc71;font-weight:bold;">${txt}</span>`;
+    if (f && f.dev >= CADENCE_COLOR_PCT) return `<span style="color:#e74c3c;font-weight:bold;">${txt}</span>`;
     return txt;
   });
   let html = `<div style="font-size:12px;color:var(--muted);text-align:center;margin-top:8px;line-height:1.5;">${parts.join(', ')}<br>${total} mouvements au total</div>`;
@@ -4533,7 +4541,7 @@ function showSwimResultsModal(combined, filename) {
     const ccHtml = isCc ? `<div style="margin-bottom:16px;">${renderCcKpiHtml(combined, filename)}</div>` : '';
     const zonesHtml = renderHrZonesHtml(combined, segments);
     box.innerHTML = `
-      <h3 style="text-align:center;">${isCc ? 'RÉSULTATS CONTRE-COURANT' : 'RÉSULTATS NATATION'}</h3>
+      ${hiitNavHeaderHtml(box._hc, isCc ? 'CONTRE-COURANT' : 'NATATION')}
       <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       ${ccHtml}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
@@ -4541,7 +4549,8 @@ function showSwimResultsModal(combined, filename) {
       <div style="margin-bottom:16px;">${swimHtml}</div>
       <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;width:auto;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   }
-  box._hc = { combined, kind: 'swim', filename };
+  box._hc = { combined, kind: 'swim', filename, openedAt: Date.now() };
+  hiitAttachSwipe(modal, box);
 
   if (cacheValid) {
     renderInto(combined.analysis.swimSegments);
