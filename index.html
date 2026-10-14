@@ -9,6 +9,9 @@
 <title>HIIT Tracker</title>
 <link rel="manifest" href="/Hiit/manifest.json">
 <link rel="apple-touch-icon" href="/Hiit/icons/icon-192.png">
+<script>(function(){var c=true;try{c=localStorage.getItem('hiit_theme_v1')!=='"classic"';}catch(e){}if(c)document.documentElement.classList.add('oura');})();</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
@@ -154,6 +157,198 @@ body {
 .timer-wrap.rest-mode { background: #111410; }
 .t-glow { position: absolute; top: 35%; left: 50%; transform: translate(-50%,-50%); width: 260px; height: 260px; background: var(--accent-dim); border-radius: 50%; filter: blur(60px); pointer-events: none; transition: background .8s; z-index: 0; }
 .timer-wrap.rest-mode .t-glow { background: var(--green-dim); }
+
+/* ===== Thème « moderne » (inspiré Oura) — tout est scopé sous html.oura ; html sans .oura = thème classique ===== */
+html.oura {
+  --accent: #a6dccb;
+  --accent-dim: rgba(166,220,203,.16);
+  --green: #9ad8b0;
+  --green-dim: rgba(154,216,176,.16);
+  --recup: #9dbcf0;
+  --recup-dim: rgba(157,188,240,.16);
+  --gold: #ecd09a;
+  --red: #eea597;
+  --bg: #0a0d14;
+  --surface: rgba(255,255,255,.045);
+  --surface2: rgba(255,255,255,.075);
+  --border: rgba(255,255,255,.06);
+  --border2: rgba(255,255,255,.12);
+  --text: #eef1f6;
+  --muted: rgba(214,222,236,.68);
+  --font: 'Inter', -apple-system, 'Segoe UI', Roboto, system-ui, sans-serif;
+  --radius: 22px;
+  --nav-h: calc(66px + env(safe-area-inset-bottom));
+}
+html.oura body {
+  background:
+    radial-gradient(120% 60% at 50% -10%, #1d2b45 0%, rgba(29,43,69,0) 60%),
+    radial-gradient(80% 50% at 100% 0%, rgba(90,70,140,.25) 0%, rgba(90,70,140,0) 60%),
+    linear-gradient(180deg, #0e1420 0%, #0a0d14 55%, #07090e 100%);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+html.oura body, html.oura body * { font-family: var(--font) !important; }
+html.oura svg text { font-family: var(--font) !important; font-variant-numeric: tabular-nums; }
+
+/* En-tête */
+html.oura .app-header { background: transparent; border-bottom: none; padding: max(18px, env(safe-area-inset-top)) 22px 6px; order: 1; }
+html.oura .app-title { font-size: 20px; font-weight: 600; letter-spacing: -.2px; opacity: 1; text-transform: none; }
+html:not(.oura) .app-title { text-transform: uppercase; }
+html.oura .streak-badge { background: var(--surface2); border: none; padding: 6px 13px; font-size: 14px; font-weight: 600; backdrop-filter: blur(10px); }
+
+/* Barre d'onglets en bas */
+html.oura .tab-content { order: 2; }
+html.oura .tab-nav {
+  order: 3; border-bottom: none; border-top: 1px solid var(--border);
+  background: rgba(10,13,20,.82); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+  padding: 6px 10px env(safe-area-inset-bottom); height: var(--nav-h);
+}
+html.oura .tab-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  border-bottom: none; font-size: 11px; font-weight: 500; letter-spacing: .3px; text-transform: none;
+  color: rgba(214,222,236,.5); padding: 6px 4px;
+}
+html.oura .tab-btn .tab-ico { display: block; width: 24px; height: 24px; }
+html.oura .tab-btn.active { color: var(--text); }
+html.oura .tab-btn.active .tab-ico { color: var(--accent); }
+html:not(.oura) .tab-ico { display: none; }
+html:not(.oura) .tab-btn { text-transform: uppercase; }
+
+html.oura .tab-panel { padding: 14px 18px 32px; }
+
+/* Typo des titres de section : petites capitales discrètes */
+html.oura .section-title, html.oura .streaks-title, html.oura .settings-label {
+  font-size: 12px; font-weight: 600; letter-spacing: 1.4px; color: var(--muted);
+}
+html.oura .settings-label { margin: 0 4px 10px; }
+
+/* Héros du Suivi : anneau de la semaine */
+.oura-hero { display: none; }
+html.oura .oura-hero {
+  display: flex; align-items: center; gap: 20px; padding: 22px 20px; margin-bottom: 14px;
+  border-radius: var(--radius); background: linear-gradient(160deg, rgba(255,255,255,.07), rgba(255,255,255,.025));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+html.oura .oura-hero svg { flex-shrink: 0; }
+html.oura .oura-ring-num { font-size: 38px; font-weight: 300; letter-spacing: -1px; fill: var(--text); }
+html.oura .oura-ring-sub { font-size: 11px; font-weight: 500; letter-spacing: 1.2px; fill: var(--muted); text-transform: uppercase; }
+html.oura .oura-hero-side { flex: 1; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+html.oura .oura-hero-msg { font-size: 17px; font-weight: 600; line-height: 1.25; letter-spacing: -.2px; }
+html.oura .oura-kv { display: flex; gap: 18px; }
+html.oura .oura-kv div { display: flex; flex-direction: column; }
+html.oura .oura-kv b { font-size: 24px; font-weight: 300; letter-spacing: -.5px; font-variant-numeric: tabular-nums; }
+html.oura .oura-kv span { font-size: 11px; color: var(--muted); letter-spacing: .4px; }
+html.oura #week-score, html.oura .stats-row { display: none; }
+
+/* Semaine */
+html.oura .row-between { margin: 6px 4px 12px; }
+html.oura .week-nav-btn { font-weight: 300; font-size: 24px; }
+html.oura .week-grid {
+  background: var(--surface); border-radius: var(--radius); padding: 16px 10px 12px; gap: 2px;
+}
+html.oura .day-dot { width: 34px; height: 34px; border-width: 1.5px; border-color: rgba(255,255,255,.14); font-size: 14px; font-weight: 600; }
+html.oura .day-dot.done { background: var(--green); border-color: var(--green); color: #0a0d14; box-shadow: 0 0 14px rgba(154,216,176,.35); }
+html.oura .day-dot.done-recup { background: var(--recup); border-color: var(--recup); color: #0a0d14; box-shadow: 0 0 14px rgba(157,188,240,.35); }
+html.oura .day-dot.today-ring { border-color: var(--text); border-width: 2px; }
+html.oura .day-dot.missed { opacity: .35; }
+html.oura .day-dot.future { opacity: .55; border-style: solid; border-color: rgba(255,255,255,.07); }
+html.oura .day-label { font-size: 11px; font-weight: 500; letter-spacing: .6px; }
+
+/* Cartes génériques */
+html.oura .stat-card, html.oura .streak-row, html.oura .setting-row {
+  background: var(--surface); border: none; border-radius: 18px;
+}
+html.oura .setting-row { padding: 15px 16px; margin-bottom: 6px; }
+html.oura .setting-name { font-size: 15px; font-weight: 500; }
+html.oura .setting-sub { font-size: 13px; font-weight: 400; line-height: 1.45; }
+html.oura #health-card {
+  border: none !important; border-radius: var(--radius) !important; padding: 18px !important;
+  background: linear-gradient(160deg, rgba(157,188,240,.10), rgba(255,255,255,.03)) !important;
+}
+html.oura #health-card > div > div[style*="border:1px"] { border: none !important; background: rgba(255,255,255,.05); border-radius: 14px !important; padding: 9px 11px !important; }
+
+/* Boutons de log */
+html.oura .log-btn { border-radius: 18px; font-size: 15px; font-weight: 600; letter-spacing: .2px; text-transform: none; padding: 16px; }
+html.oura .log-btn.done-today { border: 1px solid rgba(255,255,255,.1); background: var(--surface); }
+
+/* Streaks */
+html.oura .streak-row { padding: 14px 16px; }
+html.oura .streak-bar-track { height: 6px; border-radius: 3px; background: rgba(255,255,255,.07); }
+html.oura .streak-bar-fill { border-radius: 3px; background: linear-gradient(90deg, rgba(166,220,203,.5), var(--accent)); }
+html.oura .streak-bar-fill.gold { background: linear-gradient(90deg, rgba(236,208,154,.5), var(--gold)); }
+html.oura .streak-days { font-weight: 300; font-size: 26px; letter-spacing: -.5px; }
+html.oura .streak-unit { font-weight: 400; letter-spacing: .3px; }
+
+/* Activité */
+html.oura .act-card {
+  border: none; border-radius: var(--radius); padding: 22px 18px; margin-bottom: 12px;
+  background: linear-gradient(150deg, rgba(255,255,255,.08), rgba(255,255,255,.03));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+}
+html.oura #act-card-timer { background: linear-gradient(150deg, rgba(166,220,203,.20), rgba(255,255,255,.03)); }
+html.oura #act-card-swim  { background: linear-gradient(150deg, rgba(157,188,240,.20), rgba(255,255,255,.03)); }
+html.oura #act-card-free  { background: linear-gradient(150deg, rgba(196,170,240,.18), rgba(255,255,255,.03)); }
+html.oura .act-card .ico { font-size: 26px; width: 48px; height: 48px; border-radius: 50%; background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; }
+html.oura .act-card .ttl { font-size: 18px; font-weight: 600; letter-spacing: -.2px; text-transform: none; }
+html.oura .act-card .sub { font-size: 13px; }
+html.oura .act-card.running { box-shadow: 0 0 0 1.5px var(--accent), 0 0 24px rgba(166,220,203,.25); }
+html.oura .act-back { font-size: 14px; letter-spacing: .2px; font-weight: 500; }
+html.oura .free-chip { border: none; background: var(--surface2); border-radius: 999px; }
+
+/* Gros boutons d'action (inline) — arrondis en pilule */
+html.oura #swim-cc-btn, html.oura #free-btn, html.oura #swim-recover-btn { border-radius: 999px !important; font-weight: 600 !important; letter-spacing: .5px !important; }
+html.oura #swim-recover-box { background: rgba(166,220,203,.08) !important; border: 1px solid rgba(166,220,203,.35) !important; border-radius: var(--radius) !important; }
+html.oura #cc-level { font-weight: 300 !important; font-size: 48px !important; }
+
+/* Minuteur */
+html.oura .timer-wrap { background: transparent; }
+html.oura .timer-wrap.rest-mode { background: radial-gradient(90% 60% at 50% 35%, rgba(154,216,176,.10), transparent 70%); }
+html.oura .t-glow { width: 300px; height: 300px; filter: blur(70px); opacity: .9; }
+html.oura #tab-timer svg circle:first-of-type { stroke: rgba(255,255,255,.07); stroke-width: 9px; }
+html.oura #t-arc { stroke-width: 9px; filter: drop-shadow(0 0 8px currentColor); }
+html.oura #t-time { font-weight: 200 !important; font-size: 70px; letter-spacing: -2px; fill: var(--text); }
+html.oura #t-cd { font-weight: 200 !important; }
+html.oura #t-ex { font-weight: 600 !important; font-size: 13px; letter-spacing: 1.6px; }
+html.oura #t-phase, html.oura #t-total { font-weight: 500; letter-spacing: 1.4px !important; font-size: 12px !important; }
+html.oura #t-bar { border-radius: 3px; }
+html.oura div:has(> #t-bar) { height: 4px !important; background: rgba(255,255,255,.08) !important; border-radius: 3px !important; }
+html.oura #t-list { background: var(--surface) !important; border: none !important; border-radius: var(--radius) !important; padding: 12px 16px !important; }
+html.oura #t-list span { letter-spacing: .4px !important; text-transform: none !important; }
+html.oura #t-controls button { font-weight: 600 !important; letter-spacing: .6px !important; }
+html.oura #t-controls button[onclick^="tPause"], html.oura #t-controls button[onclick^="tRewind"],
+html.oura #t-controls button[onclick^="tForward"], html.oura #t-controls button[onclick^="toggleFS"] {
+  background: rgba(255,255,255,.08) !important; border: none !important;
+}
+
+/* Champs et petits boutons (styles en ligne) */
+html.oura input[type="text"], html.oura input[type="password"], html.oura input[type="number"], html.oura select, html.oura .time-input {
+  background: rgba(255,255,255,.07) !important; border: 1px solid transparent !important; border-radius: 12px !important; font-weight: 500 !important;
+}
+html.oura input:focus, html.oura select:focus { outline: none; border-color: var(--accent) !important; }
+html.oura select option { background: #141a26; color: var(--text); }
+html.oura #tab-settings button:not(.danger-btn):not(.notif-btn), html.oura #tab-settings a[href] {
+  border: none !important; border-radius: 12px !important; background: rgba(255,255,255,.08) !important; font-weight: 500 !important;
+}
+html.oura .position-toggle button { border: none !important; border-radius: 999px !important; letter-spacing: .6px; }
+html.oura .position-toggle button.active { background: var(--accent) !important; color: #0a0d14 !important; }
+html.oura .notif-btn, html.oura .danger-btn { border-radius: 14px; font-weight: 600; letter-spacing: .4px; text-transform: none; }
+html.oura .notif-btn { border: none; background: var(--surface2); }
+html.oura .toggle { width: 48px; height: 28px; border-radius: 14px; border: none; background: rgba(255,255,255,.14); }
+html.oura .toggle::after { width: 22px; height: 22px; top: 3px; left: 3px; box-shadow: 0 1px 3px rgba(0,0,0,.35); }
+html.oura .toggle.on::after { left: 23px; }
+html.oura .toggle.on { background: var(--accent); }
+
+/* Toast et modales */
+html.oura .toast { pointer-events: none; opacity: 0; transform: translateX(-50%) translateY(16px); transition: transform .35s cubic-bezier(.34,1.56,.64,1), opacity .25s; }
+html.oura .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+html.oura .toast { bottom: calc(var(--nav-h) + 14px); border: none; background: rgba(30,38,54,.92); backdrop-filter: blur(14px); font-weight: 500; letter-spacing: .2px; }
+html.oura .sensor-modal-backdrop { background: rgba(4,6,10,.72); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+html.oura .sensor-modal { background: #121826; border: 1px solid rgba(255,255,255,.08); border-radius: 26px; box-shadow: 0 20px 60px rgba(0,0,0,.5); }
+html.oura .sensor-modal h3 { font-size: 17px; font-weight: 600; letter-spacing: -.1px; }
+html.oura .sensor-modal button { border-radius: 999px; font-weight: 600; letter-spacing: .3px; }
+html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.08); }
+html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
+html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
 <script>const APP_BUILD = '2026-10-13T07:31:52Z';</script>
 </head>
@@ -162,16 +357,29 @@ body {
   <span id="update-text">Nouvelle version disponible —</span> <button id="update-btn" onclick="applyUpdate()" style="background:#fff;color:#e67e22;border:none;border-radius:6px;padding:5px 12px;font-weight:bold;margin-left:6px;">Mettre à jour</button>
 </div>
 <div class="app-header">
-  <div class="app-title">HIIT TRACKER</div>
+  <div class="app-title">HIIT Tracker</div>
   <div class="streak-badge">🔥 <span id="streak-count">0</span>&thinsp;<span style="opacity:.55;font-size:13px;color:var(--text)">jours</span></div>
 </div>
 <div class="tab-nav">
-  <button class="tab-btn active" onclick="showTab('dashboard',this)">SUIVI</button>
-  <button class="tab-btn" id="tab-btn-activity" onclick="showTab('activity',this)">ACTIVITÉ</button>
-  <button class="tab-btn" onclick="showTab('settings',this)">RÉGLAGES</button>
+  <button class="tab-btn active" onclick="showTab('dashboard',this)"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5" opacity=".35"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"/><circle cx="12" cy="12" r="3.2"/></svg><span>Suivi</span></button>
+  <button class="tab-btn" id="tab-btn-activity" onclick="showTab('activity',this)"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2.8 5.5 13.2h5.6L10.4 21.2 18.5 10.4h-5.7z"/></svg><span>Activité</span></button>
+  <button class="tab-btn" onclick="showTab('settings',this)"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></svg><span>Réglages</span></button>
 </div>
 <div class="tab-content">
   <div id="tab-dashboard" class="tab-panel active">
+    <div class="oura-hero" id="oura-hero">
+      <svg width="124" height="124" viewBox="0 0 124 124">
+        <defs><linearGradient id="oh-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#d4f3e8"/><stop offset="1" stop-color="#7cc4ad"/></linearGradient></defs>
+        <circle cx="62" cy="62" r="52" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="9"/>
+        <circle id="oh-arc" cx="62" cy="62" r="52" fill="none" stroke="url(#oh-grad)" stroke-width="9" stroke-linecap="round" transform="rotate(-90 62 62)" stroke-dasharray="326.7" stroke-dashoffset="326.7" style="transition:stroke-dashoffset 1s ease"/>
+        <text x="62" y="66" text-anchor="middle" class="oura-ring-num" id="oh-num">0</text>
+        <text x="62" y="86" text-anchor="middle" class="oura-ring-sub" id="oh-sub">sur 5</text>
+      </svg>
+      <div class="oura-hero-side">
+        <div class="oura-hero-msg" id="oh-msg"></div>
+        <div class="oura-kv"><div><b id="oh-streak">0</b><span>jours de streak</span></div><div><b id="oh-total">0</b><span>séances</span></div></div>
+      </div>
+    </div>
     <div class="row-between">
       <div class="week-nav">
         <button class="week-nav-btn" id="week-prev" onclick="changeWeek(-1)">‹</button>
@@ -273,6 +481,10 @@ body {
     </div>
   </div>
   <div id="tab-settings" class="tab-panel">
+    <div class="settings-section">
+      <div class="settings-label">Apparence</div>
+      <div class="setting-row"><div><div class="setting-name">Design moderne</div><div class="setting-sub">Désactivé = ancien thème</div></div><div class="toggle" id="theme-toggle" onclick="toggleTheme()"></div></div>
+    </div>
     <div class="settings-section">
       <div class="settings-label">Rappels</div>
       <div class="setting-row"><div><div class="setting-name">Rappel quotidien</div><div class="setting-sub">Si pas encore entraîné</div></div><div class="toggle" id="reminder-toggle" onclick="toggleReminder()"></div></div>
@@ -444,7 +656,7 @@ function renderDashboard(){
   document.getElementById('week-label').textContent=weekLabel(weekOffset);
   document.getElementById('week-next').disabled=weekOffset>=0;
   const weekDone=weekDates.filter(d=>hasEntry(ds(d))).length;
-  document.getElementById('week-score').textContent=`${weekDone} / ${goal}`;
+  document.getElementById('week-score').textContent=`${weekDone} / ${goal}`;try{renderOuraHero(weekDone);}catch(e){}
   const grid=document.getElementById('week-grid');grid.innerHTML='';
   weekDates.forEach((d,i)=>{
     const dstr=ds(d),isToday=dstr===today,isFuture=d>now&&!isToday,isPast=!isToday&&!isFuture;
@@ -4888,6 +5100,24 @@ function freeUpdateIndexClass(combined) {
   if (e) { e.summary.classification = combined.classification; localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(index)); }
 }
 
+// ===== Thème moderne (Oura) =====
+function isModernTheme(){return document.documentElement.classList.contains('oura');}
+function syncThemeToggle(){const t=document.getElementById('theme-toggle');if(t)t.classList.toggle('on',isModernTheme());}
+function toggleTheme(){const on=!isModernTheme();document.documentElement.classList.toggle('oura',on);S.set('hiit_theme_v1',on?'modern':'classic');syncThemeToggle();renderDashboard();}
+function renderOuraHero(weekDone){
+  const st=getCurrentStreak(),C=326.7,pct=Math.min(1,goal?weekDone/goal:0);
+  document.getElementById('oh-arc').style.strokeDashoffset=C*(1-pct);
+  document.getElementById('oh-num').textContent=weekDone;
+  document.getElementById('oh-sub').textContent='sur '+goal;
+  document.getElementById('oh-streak').textContent=st;
+  document.getElementById('oh-total').textContent=workouts.length;
+  let msg;const left=goal-weekDone;
+  if(weekOffset<0)msg=weekDone>=goal?'Objectif atteint cette semaine-là':'Semaine passée';
+  else if(hasTrainedToday())msg=left>0?'Séance du jour faite. Encore '+left+' cette semaine':'Séance faite, objectif de la semaine atteint';
+  else msg=left>0?'Encore '+left+' séance'+(left>1?'s':'')+' cette semaine':'Objectif de la semaine atteint';
+  document.getElementById('oh-msg').textContent=msg;
+}
+syncThemeToggle();
 loadProgram().then(init);
 </script>
 </body>
