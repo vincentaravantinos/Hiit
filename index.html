@@ -4078,8 +4078,10 @@ async function swimActuallyStart() {
     statusEl.textContent = 'Démarrage de l\'enregistrement...';
     swimBaseline = new Set(await sensorStartRecording());
     safeDisconnect();
-    swimStartWallMs = performance.now();
+    // Horloge murale (Date.now) et non performance.now() : sur Android, performance.now()
+    // s'arrête quand le téléphone se met en veille (écran éteint), le chrono prenait donc du retard.
     swimStartEpochMs = Date.now();
+    swimStartWallMs = swimStartEpochMs;
     swimSavePending({ baseline: Array.from(swimBaseline), startedAtMs: swimStartEpochMs, level: getCcLevel() });
     btn.textContent = swimMode === 'countercurrent' ? 'ARRÊTER LE CONTRE-COURANT' : 'ARRÊTER LA NATATION';
     btn.style.background = '#c0392b'; btn.style.color = '#fff';
@@ -4087,7 +4089,7 @@ async function swimActuallyStart() {
     btn.onclick = () => swimStop(btn);
     const lvl = swimMode === 'countercurrent' ? ` (niveau ${getCcLevel()})` : '';
     swimTimerInterval = setInterval(() => {
-      const s = Math.floor((performance.now()-swimStartWallMs)/1000);
+      const s = Math.max(0, Math.floor((Date.now()-swimStartWallMs)/1000));
       const mm = String(Math.floor(s/60)).padStart(2,'0'), ss = String(s%60).padStart(2,'0');
       statusEl.textContent = `Enregistrement en cours${lvl}... ${mm}:${ss}`;
     }, 1000);
@@ -4101,7 +4103,7 @@ async function swimActuallyStart() {
 async function swimStop(btn) {
   clearInterval(swimTimerInterval);
   swimTimerInterval = null;
-  const durationS = (performance.now()-swimStartWallMs)/1000;
+  const durationS = (Date.now()-swimStartWallMs)/1000;
   const pend = swimLoadPending();
   if (pend) { pend.endedAtMs = Date.now(); pend.durationS = durationS; swimSavePending(pend); }
   btn.disabled = true;
