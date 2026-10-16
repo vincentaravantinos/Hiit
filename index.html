@@ -3590,9 +3590,8 @@ function renderProgressionHtml(results, combined, history) {
       msgs.push(`${ex} : ${PROGRESSION_REPS} reps ou plus à chaque tour sur ${PROGRESSION_SESSIONS} séances${load != null ? ` à ${load} kg` : ''}. Passe à un élastique plus fort.`);
     }
   }
-  msgs.push(...trendMessages(results, combined, history));
   if (!msgs.length) return '';
-  return `<div style="padding:10px 12px;border-radius:10px;background:#27ae60;color:#fff;font-size:13px;margin-bottom:12px;">💪 ${msgs.join('<br>')}</div>`;
+  return `<div style="padding:10px 12px;border-radius:10px;background:#27ae60;color:#fff;font-size:13px;margin-bottom:12px;">${msgs.map(m => '💪 ' + m).join('<br>')}</div>`;
 }
 
 function getHiitHistory(currentFilename, variantTag) {
@@ -3645,7 +3644,7 @@ function trendMessages(results, combined, history) {
     if (!cands.length) continue;
     const best = cands.sort((a, b) => b.g - a.g)[0];
     const g = Math.round(best.g * 10) / 10;
-    msgs.push(`Bravo ! ${name} ${best.label} : +${g} répétition${g >= 2 ? 's' : ''} par rapport à tes ${TREND_SESSIONS} dernières séances (médiane).`);
+    msgs.push({ name, text: `Bravo ! +${g} rep${g >= 2 ? 's' : ''} ${best.label} vs tes ${TREND_SESSIONS} dernières` });
   }
   return msgs;
 }
@@ -3655,6 +3654,8 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
   const byExercise = {};
   results.forEach(r => { (byExercise[r.name] = byExercise[r.name] || []).push(r); });
   let anyColor = false;
+  const trend = {};
+  trendMessages(results, combined, history).forEach(m => trend[m.name] = m.text);
   let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
   html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Exercice</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>Total</th></tr>';
   for (const name in byExercise) {
@@ -3674,6 +3675,7 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
     const pastTotals = past.map(p => p[name] && Object.keys(p[name]).length === Object.keys(byRound).length ? Object.values(p[name]).reduce((a,b) => a+b, 0) : null);
     const ct = compareLast(total, pastTotals);
     html += `<td style="font-weight:bold;${ct ? `color:${ct.color};` : ''}">${total}</td></tr>`;
+    if (trend[name]) html += `<tr><td colspan="6" style="padding:0 0 6px;color:#2ecc71;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;">💪 ${trend[name]}</td></tr>`;
   }
   html += '</table>';
   html += `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${anyColor
