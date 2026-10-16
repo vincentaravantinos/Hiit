@@ -4727,7 +4727,7 @@ function healthAssessment(h) {
   if (rv != null) {
     const b = pick(rhrOf); let st = 'ok';
     if (b) { const gap = rv - b.m; if (gap >= Math.max(b.sd, 3)) st = 'bad'; else if (gap >= Math.max(b.sd / 2, 1.5)) st = 'meh'; }
-    out.metrics.push({ label: d.rhr != null ? 'FC repos' : 'FC nuit (min)', val: `${Math.round(rv)} bpm`, base: b ? `${Math.round(b.m)}` : null, st });
+    out.metrics.push({ label: d.rhr != null ? 'FC repos' : 'FC nuit', val: `${Math.round(rv)} bpm`, base: b ? `${Math.round(b.m)}` : null, st });
   }
   out.points = out.metrics.reduce((a, m) => a + (m.st === 'bad' ? 2 : m.st === 'meh' ? 1 : 0), 0);
   return out;
@@ -4741,19 +4741,15 @@ function renderHealthCard() {
   const a = healthAssessment(h);
   const color = { ok: 'var(--green)', meh: '#d9b45a', bad: '#d77a6b' };
   let reco;
-  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore remontée par Oura — relevé toutes les heures dès 6h jusqu'à son arrivée (au plus tard midi), ou Réglages → Synchroniser maintenant.</div>`;
-  else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">Récup conseillée</div><div style="font-size:13px;color:var(--muted);">Vélo ou natation tranquille aujourd'hui.</div>`;
-  else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">Intense possible, sans forcer</div><div style="font-size:13px;color:var(--muted);">Un signal en retrait : écoute tes sensations à l'échauffement.</div>`;
-  else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">Feu vert pour l'Intense</div>`;
-  const chips = a.metrics.map(m => `<div style="flex:1;min-width:30%;padding:6px 8px;border-radius:8px;border:1px solid var(--border2);">
-      <div style="font-size:11px;color:var(--muted);letter-spacing:1px;text-transform:uppercase;">${m.label}</div>
-      <div style="font-size:15px;font-weight:700;color:${color[m.st]};">${m.val}</div>
-      ${m.base ? `<div style="font-size:11px;color:var(--muted);">moy. 14 j : ${m.base}</div>` : ''}</div>`).join('');
-  const upd = h.updatedAt ? new Date(h.updatedAt).toLocaleString('fr-FR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
-  el.innerHTML = `<div style="font-size:12px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;font-weight:700;margin-bottom:6px;">Forme du jour</div>
-    ${reco}
-    ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">${chips}</div>` : ''}
-    <div style="font-size:11px;color:var(--muted);margin-top:8px;">Données santé du ${upd}</div>`;
+  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore synchronisée</div>`;
+  else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">Récup conseillée</div>`;
+  else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">Intense, sans forcer</div>`;
+  else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">Feu vert Intense</div>`;
+  const chips = a.metrics.map(m => `<div style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border2);text-align:center;">
+      <div style="font-size:11px;color:var(--muted);">${m.label}</div>
+      <div style="font-size:15px;font-weight:700;color:${color[m.st]};">${m.val}</div></div>`).join('');
+  el.innerHTML = `${reco}
+    ${chips ? `<div style="display:flex;gap:6px;margin-top:10px;">${chips}</div>` : ''}`;
 }
 
 // ======= Health Connect (via l'app Android « HIIT Bridge », android-bridge/ dans le repo) =======
