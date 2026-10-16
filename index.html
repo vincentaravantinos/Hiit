@@ -396,10 +396,6 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
       <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total séances</div></div>
     </div>
     <div id="health-card" style="display:none;margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface2);"></div>
-    <div class="log-btn-row">
-      <button class="log-btn active" id="log-btn-intense" onclick="logWorkout('I')">✓ HIIT / Rugby</button>
-      <button class="log-btn recup-active" id="log-btn-recup" onclick="logWorkout('R')">✓ Récup (vélo / natation)</button>
-    </div>
     <div class="streaks-title">Top 3 streaks</div>
     <div id="top-streaks"></div>
   </div>
@@ -688,12 +684,6 @@ function renderDashboard(){
   });
   const streak=getCurrentStreak();
   document.getElementById('streak-count').textContent=streak;document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
-  const todayEntry=getEntry(today);
-  const btnI=document.getElementById('log-btn-intense'),btnR=document.getElementById('log-btn-recup');
-  if(todayEntry){
-    if(todayEntry.type==='I'){btnI.className='log-btn done-today';btnI.textContent="✓ Intense enregistré";btnR.className='log-btn done-today';btnR.textContent='Indisponible (Intense déjà loggé)';}
-    else{btnI.className='log-btn done-today';btnI.textContent='Indisponible (Récup déjà loggée)';btnR.className='log-btn done-today recup-done';btnR.textContent='✓ Récup enregistrée';}
-  }else{btnI.className='log-btn active';btnI.textContent='✓ HIIT / Rugby';btnR.className='log-btn recup-active';btnR.textContent='✓ Récup (vélo / natation)';}
   const top3=getAllStreaks().slice(0,3),maxVal=top3[0]||1,container=document.getElementById('top-streaks');
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
   container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
