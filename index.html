@@ -5223,7 +5223,7 @@ function renderOuraHero(weekDone){
   document.getElementById('oh-msg').textContent=msg;
 }
 
-// ===== Bouton Retour Android : ferme l'écran d'une séance (HIIT, natation, activité libre) =====
+// ===== Bouton Retour Android : ferme l'écran d'une séance, puis ramène de l'écran d'activité à la sélection =====
 // Tant qu'un écran de séance est ouvert, une entrée d'historique factice est poussée : le Retour
 // la consomme et ferme l'écran au lieu de quitter l'app. Fermé autrement (bouton Fermer), l'entrée
 // est retirée ensuite — après le retour du pont Health Connect s'il vient d'être lancé, pour ne
@@ -5232,8 +5232,13 @@ let backPushed = false, backPending = false, backWaitVisible = false, hcLaunchAt
 const _hcOpenBridge = hcOpenBridge;
 hcOpenBridge = function (p) { hcLaunchAt = Date.now(); return _hcOpenBridge(p); };
 function backSessionModals() { return [...document.querySelectorAll('.sensor-modal-backdrop')].filter(m => { const b = m.querySelector('.sensor-modal'); return b && b._hc; }); }
+// Écrans d'activité (HIIT, natation, activité libre) : le Retour ramène à la sélection d'activité.
+const BACK_PANELS = ['timer', 'swim', 'free'];
+function backActivityPanel() { const p = document.querySelector('.tab-panel.active'); const n = p ? p.id.replace('tab-', '') : ''; return BACK_PANELS.includes(n) ? n : null; }
+const _showPanel = showPanel;
+showPanel = function (name) { const r = _showPanel(name); setTimeout(backSync, 0); return r; };
 function backSync() {
-  const open = backSessionModals().length;
+  const open = backSessionModals().length || backActivityPanel();
   if (open && !backPushed && !backPending) { try { history.pushState({ hiitModal: 1 }, ''); backPushed = true; } catch (e) {} }
   else if (!open && backPushed && !backPending) {
     if (Date.now() - hcLaunchAt < 4000) { backWaitVisible = true; return; }
@@ -5254,6 +5259,8 @@ window.addEventListener('popstate', () => {
     try { const pl = buildHcPayload(ctx.combined, ctx.kind, ctx.filename); unsent = !pl.error && !hcSentSet().has(pl.id); } catch (e) {}
     if (unsent && !hcDeferred) { hcDeferred = ctx; showToast('Envoi Health Connect au prochain « Fermer »'); }
     top.remove();
+  } else if (backActivityPanel()) {
+    showPanel('activity');
   }
   backSync();
 });
