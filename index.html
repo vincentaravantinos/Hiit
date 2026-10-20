@@ -2361,7 +2361,7 @@ function buildSessionSummary(combined, type) {
     const totalReps = reps.reduce((a,r) => a + r.reps, 0);
     const repsByEx = {};
     reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
-    const summary = { totalReps, exerciseCount: reps.length, repsByEx };
+    const summary = { totalReps, exerciseCount: reps.length, repsByEx, repAlgo: REP_ALGO_VERSION };
     if (hasSprints) summary.sprints = sprints;
     if (combined.variant) summary.variant = combined.variant;
     if (combined.loads) summary.loads = combined.loads;
@@ -2612,7 +2612,7 @@ async function backfillHiitSummaries() {
   try {
     await syncHistoryIndexFromGithub(token);
     const readIndex = () => { try { return JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { return []; } };
-    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.swimAlgo === SWIM_ALGO_VERSION) : false));
+    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx && e.summary.repAlgo === REP_ALGO_VERSION) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.swimAlgo === SWIM_ALGO_VERSION) : false));
     for (const entry of todo) {
       try {
         const combined = await fetchSessionFile(entry.filename, token);
@@ -2632,7 +2632,7 @@ async function backfillHiitSummaries() {
         logError('Échec complétion historique ' + entry.filename, err);
       }
     }
-    if (done) showToast(`📊 ${done} ancienne(s) séance(s) ajoutée(s) aux comparaisons`);
+    if (done) showToast(`📊 ${done} ancienne(s) séance(s) recalculée(s) pour les comparaisons`);
   } catch (err) {
     logError('Échec complétion historique', err);
   } finally {
@@ -2836,6 +2836,11 @@ function countRepsOnSignal(signal1d, gracesS = 0.5, lowPct = 20, highPct = 80, b
   return reps;
 }
 
+function detrendJS(sig, sigmaS) {
+  const tr = gaussianSmoothJS(sig, sigmaS*FS_ALGO);
+  return sig.map((v, i) => v - tr[i]);
+}
+
 // ---- auto_axis_detect.py port ----
 function periodicityScoreJS(signal) {
   if (signal.length < FS_ALGO*1.5) return { cv: Infinity, n: 0 };
@@ -2866,7 +2871,9 @@ function autoAxisRecount(windowXYZ) {
   }
   if (winner === null) return { reps: countRepsOnSignal(tiltArr), winner: 'tilt (fallback)', scores };
   const chosenSignal = winner === 'tilt' ? tiltArr : gaussianSmoothJS(candidates[winner], 0.20*FS_ALGO);
-  return { reps: countRepsOnSignal(chosenSignal), winner, scores };
+  // Dérive lente retirée avant les seuils : sinon les reps de faible amplitude ne
+  // franchissent plus la bande 20/80 (ex. squats 9 au lieu de 16 le 20/10).
+  return { reps: countRepsOnSignal(detrendJS(chosenSignal, 1.5)), winner, scores };
 }
 
 // ---- bayesian_boundary.py port ----
@@ -3762,7 +3769,7 @@ function hiitZoneOpts(combined) {
 // NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
-const REP_ALGO_VERSION = 'v1-bayesian-autoaxis';
+const REP_ALGO_VERSION = 'v2-detrend';
 
 async function updateExistingSessionFile(filename, combined) {
   // Writes a recomputed analysis back to the existing GitHub file (same name, in
