@@ -1878,6 +1878,9 @@ async function sensorStartRecording(types = REC_TYPES) {
 // retombe sur le téléchargement complet d'avant.
 let recStartedAtMs = {};   // heure téléphone du démarrage de chaque enregistrement interne
 let liveSession = null;
+let liveLastRefusal = null;
+const PMD_ERR = { 1:'opcode invalide', 2:'type de mesure invalide', 3:'non supporté', 4:'longueur invalide', 5:'paramètre invalide', 6:'déjà dans cet état', 7:'résolution invalide', 8:'fréquence invalide', 9:'plage invalide', 10:'MTU invalide', 11:'nb de canaux invalide', 12:'état invalide', 13:'capteur sur chargeur' };
+const pmdErrTxt = (c) => `code ${c}${PMD_ERR[c] ? ' = ' + PMD_ERR[c] : ''}`;
 const LIVE_TYPES = [
   { name: 'ACC',  type: 0x02, frameType: 1, fs: 52 },
   { name: 'GYRO', type: 0x05, frameType: 0, fs: 52 },
@@ -1933,6 +1936,7 @@ function liveOnData(dv) {
 // jamais : renvoie true si au moins l'ACC est en direct.
 async function liveStart() {
   liveSession = { startedAt: Date.now(), lost: null, streams: {} };
+  liveLastRefusal = null;
   try {
     if (!dataChar) throw new Error('canal de données absent');
     dataChar.oncharacteristicvaluechanged = (e) => liveOnData(e.target.value);
@@ -1940,7 +1944,8 @@ async function liveStart() {
       const rec = REC_TYPES.find(r => r.name === t.name);
       const resp = await controlRequest(new Uint8Array([0x02, t.type, ...rec.settings]));
       if (resp[3] !== 0) {
-        logAppend(`  ${t.name}: flux direct refusé (code ${resp[3]}) — téléchargement en fin de séance`);
+        liveLastRefusal = (liveLastRefusal ? liveLastRefusal + ' ; ' : '') + `${t.name} : ${pmdErrTxt(resp[3])}`;
+        logAppend(`  ${t.name}: flux direct refusé (${pmdErrTxt(resp[3])}) — téléchargement en fin de séance`);
         if (t.name === 'ACC') throw new Error('ACC refusé en direct (code ' + resp[3] + ')');
         continue;
       }
@@ -1951,6 +1956,7 @@ async function liveStart() {
     return true;
   } catch (err) {
     logError('Flux direct indisponible', err);
+    if (!liveLastRefusal) liveLastRefusal = (err && err.message) || String(err);
     liveSession = null;
     return false;
   }
@@ -2014,7 +2020,24 @@ async function liveSelfTest(btn) {
     const baseline = new Set(await sensorStartRecording());
     started = true;
     say('Enregistrement interne démarré.');
-    if (!await liveStart()) throw new Error('le capteur refuse le direct pendant l\'enregistrement interne (voir journal)');
+    if (!await liveStart()) {
+      say('Direct refusé pendant l\'interne : ' + liveLastRefusal);
+      say('Essai dans l\'ordre inverse (direct puis interne)...');
+      await stopStrayRecordings(); await stopStrayRecordings();
+      started = false;
+      const acc = REC_TYPES.find(r => r.name === 'ACC');
+      const r1 = await controlRequest(new Uint8Array([0x02, 0x02, ...acc.settings]));
+      say('  ACC direct seul : ' + (r1[3] === 0 ? 'OK' : pmdErrTxt(r1[3])));
+      const r2 = await controlRequest(new Uint8Array([0x02, 0x82, ...acc.settings]));
+      say('  ACC interne pendant le direct : ' + (r2[3] === 0 ? 'OK ✓' : pmdErrTxt(r2[3])));
+      const hr = REC_TYPES.find(r => r.name === 'HR');
+      const r3 = await controlRequest(new Uint8Array([0x02, hr.typeByte]));
+      say('  FC interne pendant le direct : ' + (r3[3] === 0 ? 'OK ✓' : pmdErrTxt(r3[3])));
+      await stopStrayRecordings(); await stopStrayRecordings();
+      say('Diagnostic terminé. Envoie une capture de ce bloc à Claude.');
+      safeDisconnect(); sensorActive = false;
+      return;
+    }
     say('Flux direct actif. Bouge le bras pendant 60 s...');
     const t0 = Date.now();
     while (Date.now() - t0 < 60000) {
