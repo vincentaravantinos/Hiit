@@ -522,6 +522,8 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
         <button onclick="clearSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Vider le journal</button>
       </div>
+      <button onclick="liveSelfTest(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--accent);border-radius:8px;background:var(--surface2);color:var(--accent);font-family:var(--font);font-size:12px;">Tester le flux en direct (1 min)</button>
+      <pre id="live-test-out" style="display:none;white-space:pre-wrap;font-size:11px;line-height:1.4;color:var(--text);background:var(--surface2);border-radius:8px;padding:10px;margin-top:8px;"></pre>
       <button onclick="sensorStopEverything(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Arrêter tout enregistrement en cours sur le capteur</button>
     </div>
     <div class="settings-section">
@@ -1738,7 +1740,7 @@ function hookDisconnect(dev) {
   dev.addEventListener('gattserverdisconnected', () => {
     if (dev !== device || dev.gatt.connected) return; // événement tardif d'une ancienne connexion
     logAppend('Lien Bluetooth coupé.');
-    if (liveSession && !liveSession.lost && tState !== 'idle' && tState !== 'done') liveSession.lost = Date.now();
+    if (liveSession && !liveSession.lost) liveSession.lost = Date.now();
     onLinkDown('Lien Bluetooth coupé');
   });
 }
@@ -1969,6 +1971,78 @@ function liveVerdict(endedAtMs) {
       settings: null, factor: st.factor, samples: st.samples, source: 'direct' } };
   }
   return out;
+}
+
+
+// ---- Test du flux direct sans séance : 60 s d'enregistrement interne + direct, puis
+// téléchargement complet et comparaison échantillon par échantillon avec le direct.
+// Rien n'est enregistré dans l'historique. ----
+function liveCompare(live, file) {
+  if (!live.length || !file.length) return 'données vides';
+  const n = Math.min(600, live.length - 200, file.length - 200);
+  if (n < 100) return 'trop court pour comparer';
+  let best = null;
+  for (let lag = -150; lag <= 150; lag++) {
+    let err = 0, cnt = 0;
+    for (let i = 160; i < 160 + n; i++) {
+      const j = i + lag; if (j < 0 || j >= file.length) continue;
+      for (let c = 0; c < 3; c++) err += Math.abs(live[i][c] - file[j][c]);
+      cnt++;
+    }
+    if (cnt > 50 && (!best || err / cnt < best.err)) best = { lag, err: err / cnt };
+  }
+  let maxd = 0, same = 0, tot = 0;
+  for (let i = 0; i < live.length; i++) {
+    const j = i + best.lag; if (j < 0 || j >= file.length) continue;
+    const d = Math.max(...[0,1,2].map(c => Math.abs(live[i][c] - file[j][c])));
+    maxd = Math.max(maxd, d); tot++; if (d < 1e-6) same++;
+  }
+  return `direct ${live.length} / fichier ${file.length} éch., décalage ${best.lag} éch., identiques ${(100*same/tot).toFixed(1)} %, écart max ${maxd.toFixed(3)}`;
+}
+async function liveSelfTest(btn) {
+  const out = document.getElementById('live-test-out');
+  if (bleBusy || sensorStartBlocked() || (tState !== 'idle' && tState !== 'done')) { showToast('Capteur occupé ou séance en cours'); return; }
+  out.style.display = 'block'; out.textContent = '';
+  const say = (m) => { out.textContent += m + '\n'; logAppend('[test direct] ' + m); };
+  btn.disabled = true;
+  let started = false;
+  try {
+    dropWrongDevice();
+    if (!device) device = await navigator.bluetooth.requestDevice(sensorRequestOpts()); // 1er await : geste utilisateur
+    say('Connexion...');
+    if (!await sensorSilentConnect()) throw new Error(sensorLastError || 'connexion impossible');
+    const baseline = new Set(await sensorStartRecording());
+    started = true;
+    say('Enregistrement interne démarré.');
+    if (!await liveStart()) throw new Error('le capteur refuse le direct pendant l\'enregistrement interne (voir journal)');
+    say('Flux direct actif. Bouge le bras pendant 60 s...');
+    const t0 = Date.now();
+    while (Date.now() - t0 < 60000) {
+      await sleep(10000);
+      const parts = Object.values(liveSession.streams).map(st => `${st.name} ${st.samples.length}${st.broken ? ' (' + st.broken + ')' : ''}`);
+      say(`${Math.round((Date.now() - t0) / 1000)} s — ${parts.join(' · ')}${liveSession.lost ? ' — LIEN PERDU' : ''}`);
+    }
+    const verdict = liveVerdict(Date.now());
+    liveSession = null;
+    for (const [k, v] of Object.entries(verdict)) say(`${k} direct : ${v.ok ? 'complet ✓' : 'rejeté (' + v.why + ')'}`);
+    say('Téléchargement complet pour comparaison...');
+    const { ok, combined } = await retrieveAllSensorData(baseline, 3, REC_TYPES, new Set());
+    started = false;
+    if (!ok) throw new Error('téléchargement : ' + sensorLastError);
+    for (const [k, v] of Object.entries(verdict)) {
+      const f = combined[k.toLowerCase()];
+      if (!v.ok || !f) continue;
+      say(`${k} : ` + liveCompare(v.data.samples, f.samples));
+    }
+    say(combined.hr && combined.hr.samples ? `FC : ${combined.hr.samples.length} éch. téléchargés ✓` : 'FC : absente');
+    say('Terminé. Envoie une capture de ce bloc à Claude.');
+  } catch (err) {
+    logError('Test flux direct', err);
+    say('ÉCHEC : ' + ((err && err.message) || err));
+    liveSession = null;
+    if (started) { try { await withSensorRetry('Arrêt test', async () => { await stopStrayRecordings(); await stopStrayRecordings(); }); } catch (e) {} }
+    safeDisconnect(); sensorActive = false;
+  } finally { btn.disabled = false; sensorRefreshStartButtons(); }
 }
 
 // ======= HIIT app integration: sensor session lifecycle =======
