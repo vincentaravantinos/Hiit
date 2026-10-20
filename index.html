@@ -954,7 +954,7 @@ function tStop(){
   // Elliptique : rien n'est sauvegardé, on libère juste la console.
   if(ellipRecording){ellipRecording=false;ellipAfterSession=true;clearInterval(ellipAutoTimer);ellipAutoTimer=null;ellipSamples=[];ellipPhases=[];setTimeout(()=>{try{ellipDisconnect();}catch(e){}},1500);}
   try{localStorage.removeItem(SENSOR_STORAGE_KEY);localStorage.removeItem(ELLIP_PENDING);}catch(e){}
-  sensorBaseline=null;sensorPhaseLog=[];sensorRewindEvents=[];
+  sensorBaseline=null;sensorPhaseLog=[];sensorRewindEvents=[];liveSession=null;
   sensorActive=false;
   logAppend('Séance HIIT arrêtée par l\'utilisateur (non enregistrée).');
   tReset();
@@ -1658,6 +1658,7 @@ async function startAllRecordings(types = REC_TYPES) {
   for (const t of types) {
     const resp = await controlRequest(new Uint8Array([0x02, t.typeByte, ...t.settings]));
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} au demarrage`);
+    recStartedAtMs[t.name] = Date.now();
     logAppend(`  ${t.name}: enregistrement demarre (erreur=0)`);
   }
 }
@@ -1737,6 +1738,7 @@ function hookDisconnect(dev) {
   dev.addEventListener('gattserverdisconnected', () => {
     if (dev !== device || dev.gatt.connected) return; // événement tardif d'une ancienne connexion
     logAppend('Lien Bluetooth coupé.');
+    if (liveSession && !liveSession.lost && tState !== 'idle' && tState !== 'done') liveSession.lost = Date.now();
     onLinkDown('Lien Bluetooth coupé');
   });
 }
@@ -1863,6 +1865,110 @@ async function sensorStartRecording(types = REC_TYPES) {
     await startAllRecordings(types);
     return baseline;
   }, 2);
+}
+
+
+// ======= Flux en direct pendant la séance HIIT (20/10) =======
+// L'enregistrement interne reste le filet de sécurité, mais le lien n'est plus coupé :
+// ACC/GYRO/MAG sont aussi diffusés en direct et gardés en mémoire. Si un flux couvre
+// toute la séance sans trou, son gros fichier n'est pas téléchargé à la fin — seul le
+// petit fichier FC l'est. Au moindre doute (refus du capteur, lien perdu, trou), on
+// retombe sur le téléchargement complet d'avant.
+let recStartedAtMs = {};   // heure téléphone du démarrage de chaque enregistrement interne
+let liveSession = null;
+const LIVE_TYPES = [
+  { name: 'ACC',  type: 0x02, frameType: 1, fs: 52 },
+  { name: 'GYRO', type: 0x05, frameType: 0, fs: 52 },
+  { name: 'MAG',  type: 0x06, frameType: 0, fs: 50 },
+];
+const LIVE_GAP_TOL_S = 0.35;  // tolérance sur l'écart entre deux trames (horloge capteur)
+
+function liveFactorFromAck(resp) {
+  // Réponse START : F0 02 type statut plus [TLV…] ; le facteur est le TLV de type 5 (float32).
+  let off = 5;
+  while (off + 2 <= resp.length) {
+    const typ = resp[off], cnt = resp[off + 1]; off += 2;
+    const fs = typ === 5 ? 4 : (typ === 4 ? 1 : 2);
+    if (typ === 5 && cnt >= 1 && off + 4 <= resp.length) {
+      return new DataView(resp.buffer, resp.byteOffset + off, 4).getFloat32(0, true);
+    }
+    off += cnt * fs;
+  }
+  return 1.0;
+}
+
+function liveOnData(dv) {
+  const L = liveSession;
+  if (!L || dv.byteLength <= 10) return;
+  const bytes = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  const st = L.streams[bytes[0]];
+  if (!st) return;
+  const ftb = bytes[9];
+  if (!(ftb & 0x80) || (ftb & 0x7F) !== st.frameType) return;
+  let dec;
+  try { dec = parseDeltaFramesAll(bytes.slice(10), 3, 16); }
+  catch (e) { st.broken = 'trame illisible'; return; }
+  if (!dec.length) return;
+  const now = Date.now();
+  // Horodatage capteur (ns, uint64 LE) = instant du dernier échantillon de la trame.
+  const ts = Number(new DataView(dv.buffer, dv.byteOffset + 1, 8).getBigUint64(0, true)) / 1e9;
+  if (st.lastTs == null) {
+    // Premier lot : on aligne l'échantillon 0 sur le début de l'enregistrement interne,
+    // exactement comme le fichier téléchargé (quelques centaines de ms de rembourrage).
+    const firstAt = now - dec.length / st.fs * 1000;
+    const pad = Math.max(0, Math.round((firstAt - (recStartedAtMs[st.name] || firstAt)) / 1000 * st.fs));
+    for (let i = 0; i < pad && i < st.fs * 5; i++) st.samples.push(dec[0].map(v => v * st.factor));
+    st.padded = pad;
+  } else {
+    const gap = ts - st.lastTs - dec.length / st.fs;
+    if (gap > LIVE_GAP_TOL_S && !st.broken) st.broken = `trou de ${gap.toFixed(1)} s`;
+  }
+  st.lastTs = ts; st.lastAt = now;
+  for (const smp of dec) st.samples.push(smp.map(v => v * st.factor));
+}
+
+// Lance les flux en direct alors que l'enregistrement interne tourne déjà. Ne lève
+// jamais : renvoie true si au moins l'ACC est en direct.
+async function liveStart() {
+  liveSession = { startedAt: Date.now(), lost: null, streams: {} };
+  try {
+    if (!dataChar) throw new Error('canal de données absent');
+    dataChar.oncharacteristicvaluechanged = (e) => liveOnData(e.target.value);
+    for (const t of LIVE_TYPES) {
+      const rec = REC_TYPES.find(r => r.name === t.name);
+      const resp = await controlRequest(new Uint8Array([0x02, t.type, ...rec.settings]));
+      if (resp[3] !== 0) {
+        logAppend(`  ${t.name}: flux direct refusé (code ${resp[3]}) — téléchargement en fin de séance`);
+        if (t.name === 'ACC') throw new Error('ACC refusé en direct (code ' + resp[3] + ')');
+        continue;
+      }
+      liveSession.streams[t.type] = { name: t.name, frameType: t.frameType, fs: t.fs,
+        factor: liveFactorFromAck(resp), samples: [], lastTs: null, lastAt: null, broken: null, padded: 0 };
+      logAppend(`  ${t.name}: flux direct démarré (facteur ${liveSession.streams[t.type].factor})`);
+    }
+    return true;
+  } catch (err) {
+    logError('Flux direct indisponible', err);
+    liveSession = null;
+    return false;
+  }
+}
+
+// Bilan en fin de séance : pour chaque flux, données complètes ou raison du rejet.
+function liveVerdict(endedAtMs) {
+  const L = liveSession;
+  const out = {};
+  if (!L) return out;
+  for (const st of Object.values(L.streams)) {
+    let why = st.broken;
+    if (!why && L.lost) why = 'lien perdu en séance';
+    if (!why && (!st.lastAt || st.lastAt < endedAtMs - 2000)) why = 'flux interrompu avant la fin';
+    if (!why && st.samples.length < st.fs * 30) why = 'trop peu de données';
+    out[st.name] = why ? { ok: false, why } : { ok: true, data: {
+      startTimeStr: new Date(L.startedAt).toISOString().slice(0, 19).replace('T', ' '),
+      settings: null, factor: st.factor, samples: st.samples, source: 'direct' } };
+  }
+  return out;
 }
 
 // ======= HIIT app integration: sensor session lifecycle =======
@@ -2052,8 +2158,8 @@ async function sensorOnSessionStart() {
     sensorPhaseLog = [];
     sensorRewindEvents = [];
     sensorSavePending();
-    safeDisconnect();
-    log('Enregistrement démarré, capteur déconnecté (enregistre seul).');
+    if (await liveStart()) log('Enregistrement démarré + flux en direct (pas de téléchargement si tout passe).');
+    else { safeDisconnect(); log('Enregistrement démarré, capteur déconnecté (enregistre seul).'); }
   } catch (err) {
     logError('Échec démarrage enregistrement', err);
     sensorActive = false;
@@ -2086,7 +2192,7 @@ function latestRecordingGroup(recordings) {
   return dated.filter(x => last - x.t <= 120000).map(x => x.r);
 }
 
-async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES) {
+async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES, skipKinds = null) {
   // Shared by the Timer, Swim and Free flows: reconnect (with retries), stop recording,
   // list, diff against the baseline, download and decode every new file. Returns
   // {ok, combined} and never throws. Chaque étape passe par withSensorRetry : un lien
@@ -2098,6 +2204,9 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
       newRecordings = await withSensorRetry('Récupération', async () => {
         log('Arrêt de l\'enregistrement sur le capteur...');
         await stopAllRecordings(types);
+        // Flux direct + interne actifs : l'arrêt (octet de type nu) peut ne couper que l'un
+        // des deux. Un second passage coupe l'autre ; « déjà arrêté » est accepté.
+        if (skipKinds) await stopAllRecordings(types);
         await pftpEnsureReady();
         log('Lecture de la liste des fichiers...');
         const current = await listAllRecordings();
@@ -2111,6 +2220,12 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
       return { ok: false, combined: null };
     }
 
+    if (skipKinds && skipKinds.size) {
+      const kindOf = (r) => { const u = r.path.toUpperCase(); return u.includes('ACC') ? 'ACC' : u.includes('GYRO') ? 'GYRO' : u.includes('HR') ? 'HR' : 'MAG'; };
+      const skipped = newRecordings.filter(r => skipKinds.has(kindOf(r)));
+      newRecordings = newRecordings.filter(r => !skipKinds.has(kindOf(r)));
+      if (skipped.length) log(`Déjà reçu en direct : ${skipped.map(kindOf).join(', ')} — ${(skipped.reduce((a, r) => a + (r.size || 0), 0)/1024).toFixed(0)} ko de téléchargement évités.`);
+    }
     const totalBytes = newRecordings.reduce((a, r) => a + (r.size || 0), 0);
     log(`${newRecordings.length} fichier(s) trouvé(s)` + (totalBytes ? ` — ${(totalBytes/1024).toFixed(0)} ko au total` : ''));
     const combined = { position: sensorPosition, phaseLog: null, acc: null, gyro: null, mag: null, hr: null };
@@ -2163,9 +2278,13 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
   } finally { bleBusy--; }
 }
 
-async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5, endedAtMs = null) {
-  const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts);
+async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5, endedAtMs = null, live = null) {
+  const skip = new Set(Object.entries(live || {}).filter(([k, v]) => v.ok).map(([k]) => k));
+  for (const [k, v] of Object.entries(live || {})) if (!v.ok) log(`${k} direct inutilisable (${v.why}) — téléchargement.`);
+  const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts, REC_TYPES, skip);
   if (!ok) return false;
+  for (const k of skip) combined[k.toLowerCase()] = live[k].data;
+  if (skip.size) combined.liveSources = Array.from(skip);
   combined.phaseLog = phaseLog;
   if (endedAtMs) combined.endedAtMs = endedAtMs;
   combined.rewindEvents = rewindEvents;
@@ -2241,13 +2360,13 @@ function sensorBannerHide() {
 }
 function sensorRefreshStartButtons() { try { if (tState === 'idle') tRenderControls(); } catch (e) {} }
 
-async function sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs) {
+async function sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs, live = null) {
   if (sensorRecoverBusy) return;
   sensorRecoverBusy = true;
   sensorBannerShow('busy');
   sensorRefreshStartButtons();
   let ok = false;
-  try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 3, endedAtMs); }
+  try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 3, endedAtMs, live); }
   catch (err) { logError('Récupération', err); sensorLastError = (err && err.message) ? err.message : String(err); }
   sensorRecoverBusy = false;
   if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); localStorage.removeItem(ELLIP_PENDING); sensorBannerHide(); }
@@ -2265,7 +2384,9 @@ function sensorOnSessionEnd() {
     const p = JSON.parse(localStorage.getItem(SENSOR_STORAGE_KEY) || 'null');
     if (p) { p.endedAtMs = endedAtMs; localStorage.setItem(SENSOR_STORAGE_KEY, JSON.stringify(p)); }
   } catch (e) {}
-  sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs);
+  const live = liveVerdict(endedAtMs);
+  liveSession = null;
+  sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs, live);
 }
 
 // Récupération manuelle (récupération auto échouée, ou onglet rechargé). Le tap fournit
