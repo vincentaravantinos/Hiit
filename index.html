@@ -518,6 +518,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
         <button id="pos-biceps" onclick="setSensorPosition('Biceps')">BICEPS</button>
       </div>
+      <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
       <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
       <div style="display:flex;gap:8px;">
         <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
@@ -1867,6 +1868,22 @@ async function sensorStartRecording(types = REC_TYPES) {
   }, 2);
 }
 
+
+// Sélection explicite du capteur (Réglages) : seule une sélection dans la liste accorde
+// l'accès aux services ajoutés depuis (ici le service cardio standard).
+async function sensorSettingsPick() {
+  if (bleBusy || (tState !== 'idle' && tState !== 'done')) { showToast('Capteur occupé — réessaie dans un instant'); return; }
+  let picked;
+  try { picked = await navigator.bluetooth.requestDevice(sensorRequestOpts()); } // 1er await : geste utilisateur
+  catch (err) { logError('Choix du capteur annulé', err); return; }
+  safeDisconnect(); sensorActive = false;
+  device = picked;
+  try { localStorage.setItem(SENSOR_ID_LS, device.id); } catch (e) {}
+  const sub = document.getElementById('sensor-pick-sub');
+  if (sub) sub.textContent = `${device.name || 'Capteur'} choisi — FC en direct autorisée`;
+  log(`Capteur choisi dans la liste : ${sensorLabel()} (services : PMD, PFTP, cardio).`);
+  showToast('✓ Capteur choisi');
+}
 
 // ======= Séance HIIT en direct (20/10) =======
 // La Verity Sense refuse le direct et l'enregistrement interne d'une même mesure en
