@@ -352,7 +352,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-10-20T19:12:43Z';</script>
+<script>const APP_BUILD = '2026-10-20T10:39:13Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -428,6 +428,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         </svg>
         <div id="t-next" style="margin-top:6px;font-size:13px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;min-height:16px"></div>
         <div id="t-ellip" style="display:none;margin-top:8px;text-align:center"></div>
+        <div id="t-hr" style="display:none;margin-top:6px;font-size:18px;font-weight:800;font-family:var(--font);color:#ff6b6b;letter-spacing:1px"></div>
         <div id="t-wake" style="display:none;margin-top:8px;font-size:12px;line-height:1.35;color:#ffb454;background:rgba(255,180,84,.10);border:1px solid rgba(255,180,84,.35);border-radius:10px;padding:6px 10px;max-width:320px;margin-left:auto;margin-right:auto"></div>
         <div id="t-voice" style="display:none;margin-top:8px;font-size:12px;line-height:1.35;color:#ff7a7a;background:rgba(255,90,90,.10);border:1px solid rgba(255,90,90,.40);border-radius:10px;padding:8px 10px;max-width:320px;margin-left:auto;margin-right:auto;text-align:center">🔇 Voix indisponible — Chrome a perdu le moteur vocal.<br><button onclick="chromeReset()" style="margin-top:6px;padding:7px 12px;border:1px solid rgba(255,90,90,.6);border-radius:8px;background:rgba(255,90,90,.18);color:inherit;font-family:var(--font);font-size:12px">Redémarrer Chrome</button></div>
       </div>
@@ -522,8 +523,6 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
         <button onclick="clearSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Vider le journal</button>
       </div>
-      <button onclick="liveSelfTest(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--accent);border-radius:8px;background:var(--surface2);color:var(--accent);font-family:var(--font);font-size:12px;">Tester le flux en direct (1 min)</button>
-      <pre id="live-test-out" style="display:none;white-space:pre-wrap;font-size:11px;line-height:1.4;color:var(--text);background:var(--surface2);border-radius:8px;padding:10px;margin-top:8px;"></pre>
       <button onclick="sensorStopEverything(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Arrêter tout enregistrement en cours sur le capteur</button>
     </div>
     <div class="settings-section">
@@ -956,7 +955,7 @@ function tStop(){
   // Elliptique : rien n'est sauvegardé, on libère juste la console.
   if(ellipRecording){ellipRecording=false;ellipAfterSession=true;clearInterval(ellipAutoTimer);ellipAutoTimer=null;ellipSamples=[];ellipPhases=[];setTimeout(()=>{try{ellipDisconnect();}catch(e){}},1500);}
   try{localStorage.removeItem(SENSOR_STORAGE_KEY);localStorage.removeItem(ELLIP_PENDING);}catch(e){}
-  sensorBaseline=null;sensorPhaseLog=[];sensorRewindEvents=[];liveSession=null;
+  sensorBaseline=null;sensorPhaseLog=[];sensorRewindEvents=[];liveDispose();
   sensorActive=false;
   logAppend('Séance HIIT arrêtée par l\'utilisateur (non enregistrée).');
   tReset();
@@ -1660,7 +1659,6 @@ async function startAllRecordings(types = REC_TYPES) {
   for (const t of types) {
     const resp = await controlRequest(new Uint8Array([0x02, t.typeByte, ...t.settings]));
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} au demarrage`);
-    recStartedAtMs[t.name] = Date.now();
     logAppend(`  ${t.name}: enregistrement demarre (erreur=0)`);
   }
 }
@@ -1701,7 +1699,7 @@ async function stopStrayRecordings() {
 const SENSOR_NAME_PREFIXES = ['Polar Sense', 'Polar OH1'];
 const SENSOR_ID_LS = 'hiitSensorDeviceId';
 function sensorRequestOpts() {
-  return { filters: SENSOR_NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices: [PMD_SERVICE, PFTP_SERVICE] };
+  return { filters: SENSOR_NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices: [PMD_SERVICE, PFTP_SERVICE, 'heart_rate'] };
 }
 function isSensorName(name) { return !!name && SENSOR_NAME_PREFIXES.some(p => name.startsWith(p)); }
 function sensorLabel() { return device && device.name ? `« ${device.name} »` : 'le capteur'; }
@@ -1740,8 +1738,8 @@ function hookDisconnect(dev) {
   dev.addEventListener('gattserverdisconnected', () => {
     if (dev !== device || dev.gatt.connected) return; // événement tardif d'une ancienne connexion
     logAppend('Lien Bluetooth coupé.');
-    if (liveSession && !liveSession.lost) liveSession.lost = Date.now();
     onLinkDown('Lien Bluetooth coupé');
+    if (liveSession) liveOnLinkLost();
   });
 }
 function safeDisconnect() {
@@ -1870,38 +1868,41 @@ async function sensorStartRecording(types = REC_TYPES) {
 }
 
 
-// ======= Flux en direct pendant la séance HIIT (20/10) =======
-// L'enregistrement interne reste le filet de sécurité, mais le lien n'est plus coupé :
-// ACC/GYRO/MAG sont aussi diffusés en direct et gardés en mémoire. Si un flux couvre
-// toute la séance sans trou, son gros fichier n'est pas téléchargé à la fin — seul le
-// petit fichier FC l'est. Au moindre doute (refus du capteur, lien perdu, trou), on
-// retombe sur le téléchargement complet d'avant.
-let recStartedAtMs = {};   // heure téléphone du démarrage de chaque enregistrement interne
+// ======= Séance HIIT en direct (20/10) =======
+// La Verity Sense refuse le direct et l'enregistrement interne d'une même mesure en
+// même temps (code 6, testé dans les deux ordres). Le HIIT passe donc en direct :
+// ACC/GYRO/MAG par le canal PMD, FC par le service cardio standard (affichée à l'écran).
+// Rien à télécharger en fin de séance. Si le lien saute, reconnexion automatique ; le
+// passage manquant est comblé (dernier échantillon répété) pour garder l'alignement
+// temporel avec le déroulé des exercices — aucune rep n'y est comptée.
+// Si le service cardio n'est pas autorisé, la FC repasse en enregistrement interne
+// (petit fichier, quelques secondes de téléchargement à la fin).
 let liveSession = null;
-let liveLastRefusal = null;
-const PMD_ERR = { 1:'opcode invalide', 2:'type de mesure invalide', 3:'non supporté', 4:'longueur invalide', 5:'paramètre invalide', 6:'déjà dans cet état', 7:'résolution invalide', 8:'fréquence invalide', 9:'plage invalide', 10:'MTU invalide', 11:'nb de canaux invalide', 12:'état invalide', 13:'capteur sur chargeur' };
-const pmdErrTxt = (c) => `code ${c}${PMD_ERR[c] ? ' = ' + PMD_ERR[c] : ''}`;
 const LIVE_TYPES = [
   { name: 'ACC',  type: 0x02, frameType: 1, fs: 52 },
   { name: 'GYRO', type: 0x05, frameType: 0, fs: 52 },
   { name: 'MAG',  type: 0x06, frameType: 0, fs: 50 },
 ];
-const LIVE_GAP_TOL_S = 0.35;  // tolérance sur l'écart entre deux trames (horloge capteur)
+const LIVE_GAP_TOL_S = 0.35;
+const HR_REC = REC_TYPES.find(r => r.name === 'HR');
 
 function liveFactorFromAck(resp) {
-  // Réponse START : F0 02 type statut plus [TLV…] ; le facteur est le TLV de type 5 (float32).
   let off = 5;
   while (off + 2 <= resp.length) {
     const typ = resp[off], cnt = resp[off + 1]; off += 2;
     const fs = typ === 5 ? 4 : (typ === 4 ? 1 : 2);
-    if (typ === 5 && cnt >= 1 && off + 4 <= resp.length) {
-      return new DataView(resp.buffer, resp.byteOffset + off, 4).getFloat32(0, true);
-    }
+    if (typ === 5 && cnt >= 1 && off + 4 <= resp.length) return new DataView(resp.buffer, resp.byteOffset + off, 4).getFloat32(0, true);
     off += cnt * fs;
   }
   return 1.0;
 }
-
+function liveFill(st, n, why) {
+  if (n <= 0) return;
+  n = Math.min(n, st.fs * 900);
+  const last = st.samples.length ? st.samples[st.samples.length - 1] : [0, 0, 0];
+  for (let i = 0; i < n; i++) st.samples.push(last.slice());
+  if (st.name === 'ACC' && st.samples.length > n) liveSession.gaps.push({ atS: +((st.samples.length - n) / st.fs).toFixed(1), durS: +(n / st.fs).toFixed(1), why });
+}
 function liveOnData(dv) {
   const L = liveSession;
   if (!L || dv.byteLength <= 10) return;
@@ -1911,161 +1912,145 @@ function liveOnData(dv) {
   const ftb = bytes[9];
   if (!(ftb & 0x80) || (ftb & 0x7F) !== st.frameType) return;
   let dec;
-  try { dec = parseDeltaFramesAll(bytes.slice(10), 3, 16); }
-  catch (e) { st.broken = 'trame illisible'; return; }
+  try { dec = parseDeltaFramesAll(bytes.slice(10), 3, 16); } catch (e) { return; }
   if (!dec.length) return;
   const now = Date.now();
-  // Horodatage capteur (ns, uint64 LE) = instant du dernier échantillon de la trame.
   const ts = Number(new DataView(dv.buffer, dv.byteOffset + 1, 8).getBigUint64(0, true)) / 1e9;
-  if (st.lastTs == null) {
-    // Premier lot : on aligne l'échantillon 0 sur le début de l'enregistrement interne,
-    // exactement comme le fichier téléchargé (quelques centaines de ms de rembourrage).
-    const firstAt = now - dec.length / st.fs * 1000;
-    const pad = Math.max(0, Math.round((firstAt - (recStartedAtMs[st.name] || firstAt)) / 1000 * st.fs));
-    for (let i = 0; i < pad && i < st.fs * 5; i++) st.samples.push(dec[0].map(v => v * st.factor));
-    st.padded = pad;
-  } else {
+  if (st.needSync) {
+    // Début ou reprise après coupure : recalage sur l'horloge du téléphone.
+    const target = Math.round((now - dec.length / st.fs * 1000 - L.startedAt) / 1000 * st.fs);
+    liveFill(st, target - st.samples.length, 'coupure');
+    st.needSync = false;
+  } else if (st.lastTs != null) {
     const gap = ts - st.lastTs - dec.length / st.fs;
-    if (gap > LIVE_GAP_TOL_S && !st.broken) st.broken = `trou de ${gap.toFixed(1)} s`;
+    if (gap > LIVE_GAP_TOL_S) liveFill(st, Math.round(gap * st.fs), 'trames perdues');
   }
-  st.lastTs = ts; st.lastAt = now;
+  st.lastTs = ts;
   for (const smp of dec) st.samples.push(smp.map(v => v * st.factor));
 }
-
-// Lance les flux en direct alors que l'enregistrement interne tourne déjà. Ne lève
-// jamais : renvoie true si au moins l'ACC est en direct.
-async function liveStart() {
-  liveSession = { startedAt: Date.now(), lost: null, streams: {} };
-  liveLastRefusal = null;
-  try {
-    if (!dataChar) throw new Error('canal de données absent');
-    dataChar.oncharacteristicvaluechanged = (e) => liveOnData(e.target.value);
-    for (const t of LIVE_TYPES) {
-      const rec = REC_TYPES.find(r => r.name === t.name);
-      const resp = await controlRequest(new Uint8Array([0x02, t.type, ...rec.settings]));
-      if (resp[3] !== 0) {
-        liveLastRefusal = (liveLastRefusal ? liveLastRefusal + ' ; ' : '') + `${t.name} : ${pmdErrTxt(resp[3])}`;
-        logAppend(`  ${t.name}: flux direct refusé (${pmdErrTxt(resp[3])}) — téléchargement en fin de séance`);
-        if (t.name === 'ACC') throw new Error('ACC refusé en direct (code ' + resp[3] + ')');
-        continue;
-      }
-      liveSession.streams[t.type] = { name: t.name, frameType: t.frameType, fs: t.fs,
-        factor: liveFactorFromAck(resp), samples: [], lastTs: null, lastAt: null, broken: null, padded: 0 };
-      logAppend(`  ${t.name}: flux direct démarré (facteur ${liveSession.streams[t.type].factor})`);
+function liveOnHr(dv) {
+  const L = liveSession; if (!L) return;
+  const flags = dv.getUint8(0);
+  L.hr.latest = (flags & 1) ? dv.getUint16(1, true) : dv.getUint8(1);
+  L.hr.lastAt = Date.now();
+}
+function liveHrTick() {
+  const L = liveSession; if (!L) return;
+  const fresh = L.hr.lastAt && Date.now() - L.hr.lastAt < 4000;
+  if (L.hr.mode === 'live') L.hr.samples.push({ hr: fresh ? L.hr.latest : 0 });
+  const el = document.getElementById('t-hr');
+  if (el) {
+    el.style.display = 'block';
+    el.textContent = L.reconnecting ? '❤ … reconnexion capteur'
+      : L.hr.mode === 'live' ? (fresh && L.hr.latest ? `❤ ${L.hr.latest}` : '❤ --')
+      : '● capteur en direct';
+  }
+}
+async function liveStartStreams() {
+  const L = liveSession;
+  dataChar.oncharacteristicvaluechanged = (e) => liveOnData(e.target.value);
+  for (const t of LIVE_TYPES) {
+    const settings = REC_TYPES.find(r => r.name === t.name).settings;
+    let resp = await controlRequest(new Uint8Array([0x02, t.type, ...settings]));
+    if (resp[3] === 6) { // encore actif côté capteur : on relance proprement
+      await controlRequest(new Uint8Array([0x03, t.type]));
+      resp = await controlRequest(new Uint8Array([0x02, t.type, ...settings]));
     }
+    if (resp[3] !== 0) {
+      if (t.name === 'ACC') throw new Error(`ACC direct refusé (code ${resp[3]})`);
+      logAppend(`  ${t.name}: direct refusé (code ${resp[3]}), ignoré`);
+      continue;
+    }
+    const st = L.streams[t.type] || (L.streams[t.type] = { name: t.name, frameType: t.frameType, fs: t.fs, samples: [], lastTs: null });
+    st.factor = liveFactorFromAck(resp);
+    st.needSync = true; st.lastTs = null;
+    logAppend(`  ${t.name}: direct démarré`);
+  }
+}
+async function liveStartHr(first) {
+  const L = liveSession;
+  if (L.hr.mode === 'internal') return;
+  try {
+    const svc = await withTimeout(server.getPrimaryService('heart_rate'), 8000, 'service cardio');
+    const ch = await withTimeout(svc.getCharacteristic('heart_rate_measurement'), 8000, 'mesure cardio');
+    await withTimeout(ch.startNotifications(), 5000, 'abonnement cardio');
+    ch.oncharacteristicvaluechanged = (e) => liveOnHr(e.target.value);
+    L.hr.mode = 'live';
+    logAppend('  FC : direct démarré');
+  } catch (err) {
+    if (!first) { logError('FC directe non rétablie', err); return; }
+    logError('FC directe indisponible — enregistrement interne de la FC', err);
+    if (err && err.name === 'SecurityError') log('FC directe non autorisée : choisis le capteur une fois dans la liste (Réglages) pour l\'autoriser.');
+    await pftpEnsureReady();
+    L.hr.baseline = new Set((await listAllRecordings()).map(r => r.path));
+    await startAllRecordings([HR_REC]);
+    L.hr.mode = 'internal';
+  }
+}
+// Ne lève jamais : true si la séance tourne en direct.
+async function liveStart() {
+  try {
+    await withSensorRetry('Démarrage direct', async () => {
+      liveSession = { startedAt: Date.now(), streams: {}, gaps: [], links: 0, reconnecting: false,
+        hr: { mode: null, latest: null, lastAt: null, samples: [], baseline: null, timer: null } };
+      await stopStrayRecordings();
+      liveSession.startedAt = Date.now();
+      await liveStartStreams();
+      await liveStartHr(true);
+    }, 2);
+    liveSession.hr.timer = setInterval(liveHrTick, 1000);
     return true;
   } catch (err) {
-    logError('Flux direct indisponible', err);
-    if (!liveLastRefusal) liveLastRefusal = (err && err.message) || String(err);
-    liveSession = null;
+    logError('Direct indisponible, retour à l\'enregistrement interne', err);
+    liveDispose();
     return false;
   }
 }
-
-// Bilan en fin de séance : pour chaque flux, données complètes ou raison du rejet.
-function liveVerdict(endedAtMs) {
+function liveDispose() {
+  if (liveSession) clearInterval(liveSession.hr.timer);
+  liveSession = null;
+  const el = document.getElementById('t-hr'); if (el) el.style.display = 'none';
+}
+function liveOnLinkLost() {
   const L = liveSession;
-  const out = {};
-  if (!L) return out;
-  for (const st of Object.values(L.streams)) {
-    let why = st.broken;
-    if (!why && L.lost) why = 'lien perdu en séance';
-    if (!why && (!st.lastAt || st.lastAt < endedAtMs - 2000)) why = 'flux interrompu avant la fin';
-    if (!why && st.samples.length < st.fs * 30) why = 'trop peu de données';
-    out[st.name] = why ? { ok: false, why } : { ok: true, data: {
-      startTimeStr: new Date(L.startedAt).toISOString().slice(0, 19).replace('T', ' '),
-      settings: null, factor: st.factor, samples: st.samples, source: 'direct' } };
-  }
-  return out;
+  if (!L || L.reconnecting || tState === 'idle' || tState === 'done') return;
+  L.reconnecting = true; L.links++;
+  for (const st of Object.values(L.streams)) st.needSync = true;
+  (async () => {
+    while (liveSession === L && tState !== 'idle' && tState !== 'done') {
+      try {
+        await ensureConnected(2);
+        if (liveSession !== L) break;
+        await liveStartStreams();
+        await liveStartHr(false);
+        log('Capteur reconnecté, direct rétabli.');
+        break;
+      } catch (err) { logError('Reconnexion direct', err); await sleep(2000); }
+    }
+    L.reconnecting = false;
+  })();
 }
-
-
-// ---- Test du flux direct sans séance : 60 s d'enregistrement interne + direct, puis
-// téléchargement complet et comparaison échantillon par échantillon avec le direct.
-// Rien n'est enregistré dans l'historique. ----
-function liveCompare(live, file) {
-  if (!live.length || !file.length) return 'données vides';
-  const n = Math.min(600, live.length - 200, file.length - 200);
-  if (n < 100) return 'trop court pour comparer';
-  let best = null;
-  for (let lag = -150; lag <= 150; lag++) {
-    let err = 0, cnt = 0;
-    for (let i = 160; i < 160 + n; i++) {
-      const j = i + lag; if (j < 0 || j >= file.length) continue;
-      for (let c = 0; c < 3; c++) err += Math.abs(live[i][c] - file[j][c]);
-      cnt++;
-    }
-    if (cnt > 50 && (!best || err / cnt < best.err)) best = { lag, err: err / cnt };
-  }
-  let maxd = 0, same = 0, tot = 0;
-  for (let i = 0; i < live.length; i++) {
-    const j = i + best.lag; if (j < 0 || j >= file.length) continue;
-    const d = Math.max(...[0,1,2].map(c => Math.abs(live[i][c] - file[j][c])));
-    maxd = Math.max(maxd, d); tot++; if (d < 1e-6) same++;
-  }
-  return `direct ${live.length} / fichier ${file.length} éch., décalage ${best.lag} éch., identiques ${(100*same/tot).toFixed(1)} %, écart max ${maxd.toFixed(3)}`;
-}
-async function liveSelfTest(btn) {
-  const out = document.getElementById('live-test-out');
-  if (bleBusy || sensorStartBlocked() || (tState !== 'idle' && tState !== 'done')) { showToast('Capteur occupé ou séance en cours'); return; }
-  out.style.display = 'block'; out.textContent = '';
-  const say = (m) => { out.textContent += m + '\n'; logAppend('[test direct] ' + m); };
-  btn.disabled = true;
-  let started = false;
-  try {
-    dropWrongDevice();
-    if (!device) device = await navigator.bluetooth.requestDevice(sensorRequestOpts()); // 1er await : geste utilisateur
-    say('Connexion...');
-    if (!await sensorSilentConnect()) throw new Error(sensorLastError || 'connexion impossible');
-    const baseline = new Set(await sensorStartRecording());
-    started = true;
-    say('Enregistrement interne démarré.');
-    if (!await liveStart()) {
-      say('Direct refusé pendant l\'interne : ' + liveLastRefusal);
-      say('Essai dans l\'ordre inverse (direct puis interne)...');
-      await stopStrayRecordings(); await stopStrayRecordings();
-      started = false;
-      const acc = REC_TYPES.find(r => r.name === 'ACC');
-      const r1 = await controlRequest(new Uint8Array([0x02, 0x02, ...acc.settings]));
-      say('  ACC direct seul : ' + (r1[3] === 0 ? 'OK' : pmdErrTxt(r1[3])));
-      const r2 = await controlRequest(new Uint8Array([0x02, 0x82, ...acc.settings]));
-      say('  ACC interne pendant le direct : ' + (r2[3] === 0 ? 'OK ✓' : pmdErrTxt(r2[3])));
-      const hr = REC_TYPES.find(r => r.name === 'HR');
-      const r3 = await controlRequest(new Uint8Array([0x02, hr.typeByte]));
-      say('  FC interne pendant le direct : ' + (r3[3] === 0 ? 'OK ✓' : pmdErrTxt(r3[3])));
-      await stopStrayRecordings(); await stopStrayRecordings();
-      say('Diagnostic terminé. Envoie une capture de ce bloc à Claude.');
-      safeDisconnect(); sensorActive = false;
-      return;
-    }
-    say('Flux direct actif. Bouge le bras pendant 60 s...');
-    const t0 = Date.now();
-    while (Date.now() - t0 < 60000) {
-      await sleep(10000);
-      const parts = Object.values(liveSession.streams).map(st => `${st.name} ${st.samples.length}${st.broken ? ' (' + st.broken + ')' : ''}`);
-      say(`${Math.round((Date.now() - t0) / 1000)} s — ${parts.join(' · ')}${liveSession.lost ? ' — LIEN PERDU' : ''}`);
-    }
-    const verdict = liveVerdict(Date.now());
-    liveSession = null;
-    for (const [k, v] of Object.entries(verdict)) say(`${k} direct : ${v.ok ? 'complet ✓' : 'rejeté (' + v.why + ')'}`);
-    say('Téléchargement complet pour comparaison...');
-    const { ok, combined } = await retrieveAllSensorData(baseline, 3, REC_TYPES, new Set());
-    started = false;
-    if (!ok) throw new Error('téléchargement : ' + sensorLastError);
-    for (const [k, v] of Object.entries(verdict)) {
-      const f = combined[k.toLowerCase()];
-      if (!v.ok || !f) continue;
-      say(`${k} : ` + liveCompare(v.data.samples, f.samples));
-    }
-    say(combined.hr && combined.hr.samples ? `FC : ${combined.hr.samples.length} éch. téléchargés ✓` : 'FC : absente');
-    say('Terminé. Envoie une capture de ce bloc à Claude.');
-  } catch (err) {
-    logError('Test flux direct', err);
-    say('ÉCHEC : ' + ((err && err.message) || err));
-    liveSession = null;
-    if (started) { try { await withSensorRetry('Arrêt test', async () => { await stopStrayRecordings(); await stopStrayRecordings(); }); } catch (e) {} }
+async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
+  clearInterval(L.hr.timer);
+  const startTimeStr = new Date(L.startedAt).toISOString().slice(0, 19).replace('T', ' ');
+  const pick = (name) => {
+    const st = Object.values(L.streams).find(x => x.name === name);
+    return st && st.samples.length ? { startTimeStr, settings: null, factor: st.factor, samples: st.samples } : null;
+  };
+  const combined = { position: sensorPosition, phaseLog: null, acc: pick('ACC'), gyro: pick('GYRO'), mag: pick('MAG'), hr: null,
+    source: 'direct', liveGaps: L.gaps, liveReconnects: L.links };
+  if (L.gaps.length) log(`Direct : ${L.gaps.length} trou(s) comblé(s) — ` + L.gaps.map(g => `${g.durS} s à ${g.atS} s`).join(', '));
+  if (L.hr.mode === 'live') {
+    combined.hr = { startTimeStr, samples: L.hr.samples };
+    try { await stopAllRecordings(REC_TYPES.filter(r => r.name !== 'HR')); } catch (e) {}
+    safeDisconnect();
+    sensorActive = false;
+  } else if (L.hr.mode === 'internal') {
+    const r = await retrieveAllSensorData(L.hr.baseline, 3, [HR_REC]);
+    if (r.ok) combined.hr = r.combined.hr; else showToast('FC non récupérée — séance enregistrée sans FC');
     safeDisconnect(); sensorActive = false;
-  } finally { btn.disabled = false; sensorRefreshStartButtons(); }
+  }
+  return await sensorFinishCombined(combined, phaseLog, rewindEvents, endedAtMs);
 }
 
 // ======= HIIT app integration: sensor session lifecycle =======
@@ -2081,7 +2066,7 @@ let sensorRewindEvents = []; // ground truth for any tRewind() press during a re
 const SENSOR_STORAGE_KEY = 'hiitSensorPendingSession';
 
 function sensorSavePending() {
-  if (!device) return;
+  if (!device || liveSession) return;
   localStorage.setItem(SENSOR_STORAGE_KEY, JSON.stringify({
     deviceId: device.id, deviceName: device.name,
     baseline: Array.from(sensorBaseline || []),
@@ -2251,12 +2236,13 @@ function sensorModalSkip() {
 async function sensorOnSessionStart() {
   if (!sensorActive) return;
   try {
-    sensorBaseline = new Set(await sensorStartRecording());
     sensorPhaseLog = [];
     sensorRewindEvents = [];
+    if (await liveStart()) { sensorBaseline = null; log('Séance en direct : rien à télécharger à la fin.'); return; }
+    sensorBaseline = new Set(await sensorStartRecording());
     sensorSavePending();
-    if (await liveStart()) log('Enregistrement démarré + flux en direct (pas de téléchargement si tout passe).');
-    else { safeDisconnect(); log('Enregistrement démarré, capteur déconnecté (enregistre seul).'); }
+    safeDisconnect();
+    log('Enregistrement démarré, capteur déconnecté (enregistre seul).');
   } catch (err) {
     logError('Échec démarrage enregistrement', err);
     sensorActive = false;
@@ -2289,7 +2275,7 @@ function latestRecordingGroup(recordings) {
   return dated.filter(x => last - x.t <= 120000).map(x => x.r);
 }
 
-async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES, skipKinds = null) {
+async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPES) {
   // Shared by the Timer, Swim and Free flows: reconnect (with retries), stop recording,
   // list, diff against the baseline, download and decode every new file. Returns
   // {ok, combined} and never throws. Chaque étape passe par withSensorRetry : un lien
@@ -2301,9 +2287,6 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
       newRecordings = await withSensorRetry('Récupération', async () => {
         log('Arrêt de l\'enregistrement sur le capteur...');
         await stopAllRecordings(types);
-        // Flux direct + interne actifs : l'arrêt (octet de type nu) peut ne couper que l'un
-        // des deux. Un second passage coupe l'autre ; « déjà arrêté » est accepté.
-        if (skipKinds) await stopAllRecordings(types);
         await pftpEnsureReady();
         log('Lecture de la liste des fichiers...');
         const current = await listAllRecordings();
@@ -2317,12 +2300,6 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
       return { ok: false, combined: null };
     }
 
-    if (skipKinds && skipKinds.size) {
-      const kindOf = (r) => { const u = r.path.toUpperCase(); return u.includes('ACC') ? 'ACC' : u.includes('GYRO') ? 'GYRO' : u.includes('HR') ? 'HR' : 'MAG'; };
-      const skipped = newRecordings.filter(r => skipKinds.has(kindOf(r)));
-      newRecordings = newRecordings.filter(r => !skipKinds.has(kindOf(r)));
-      if (skipped.length) log(`Déjà reçu en direct : ${skipped.map(kindOf).join(', ')} — ${(skipped.reduce((a, r) => a + (r.size || 0), 0)/1024).toFixed(0)} ko de téléchargement évités.`);
-    }
     const totalBytes = newRecordings.reduce((a, r) => a + (r.size || 0), 0);
     log(`${newRecordings.length} fichier(s) trouvé(s)` + (totalBytes ? ` — ${(totalBytes/1024).toFixed(0)} ko au total` : ''));
     const combined = { position: sensorPosition, phaseLog: null, acc: null, gyro: null, mag: null, hr: null };
@@ -2375,13 +2352,12 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
   } finally { bleBusy--; }
 }
 
-async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5, endedAtMs = null, live = null) {
-  const skip = new Set(Object.entries(live || {}).filter(([k, v]) => v.ok).map(([k]) => k));
-  for (const [k, v] of Object.entries(live || {})) if (!v.ok) log(`${k} direct inutilisable (${v.why}) — téléchargement.`);
-  const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts, REC_TYPES, skip);
+async function sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents = [], maxAttempts = 5, endedAtMs = null) {
+  const { ok, combined } = await retrieveAllSensorData(baseline, maxAttempts);
   if (!ok) return false;
-  for (const k of skip) combined[k.toLowerCase()] = live[k].data;
-  if (skip.size) combined.liveSources = Array.from(skip);
+  return await sensorFinishCombined(combined, phaseLog, rewindEvents, endedAtMs);
+}
+async function sensorFinishCombined(combined, phaseLog, rewindEvents, endedAtMs) {
   combined.phaseLog = phaseLog;
   if (endedAtMs) combined.endedAtMs = endedAtMs;
   combined.rewindEvents = rewindEvents;
@@ -2457,13 +2433,13 @@ function sensorBannerHide() {
 }
 function sensorRefreshStartButtons() { try { if (tState === 'idle') tRenderControls(); } catch (e) {} }
 
-async function sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs, live = null) {
+async function sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs) {
   if (sensorRecoverBusy) return;
   sensorRecoverBusy = true;
   sensorBannerShow('busy');
   sensorRefreshStartButtons();
   let ok = false;
-  try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 3, endedAtMs, live); }
+  try { ok = await sensorRetrieveAndFinish(baseline, phaseLog, rewindEvents, 3, endedAtMs); }
   catch (err) { logError('Récupération', err); sensorLastError = (err && err.message) ? err.message : String(err); }
   sensorRecoverBusy = false;
   if (ok) { localStorage.removeItem(SENSOR_STORAGE_KEY); localStorage.removeItem(ELLIP_PENDING); sensorBannerHide(); }
@@ -2477,13 +2453,21 @@ function sensorOnSessionEnd() {
   const phaseLog = sensorPhaseLog;
   const rewindEvents = sensorRewindEvents;
   const endedAtMs = Date.now();
+  if (liveSession) {
+    const L = liveSession;
+    liveSession = null;
+    const el = document.getElementById('t-hr'); if (el) el.style.display = 'none';
+    sensorRecoverBusy = true;
+    sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs)
+      .catch(err => { logError('Fin de séance en direct', err); showToast('Erreur à l\'enregistrement de la séance (voir journal)'); })
+      .finally(() => { sensorRecoverBusy = false; sensorRefreshStartButtons(); });
+    return;
+  }
   try {
     const p = JSON.parse(localStorage.getItem(SENSOR_STORAGE_KEY) || 'null');
     if (p) { p.endedAtMs = endedAtMs; localStorage.setItem(SENSOR_STORAGE_KEY, JSON.stringify(p)); }
   } catch (e) {}
-  const live = liveVerdict(endedAtMs);
-  liveSession = null;
-  sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs, live);
+  sensorRunRecovery(baseline, phaseLog, rewindEvents, endedAtMs);
 }
 
 // Récupération manuelle (récupération auto échouée, ou onglet rechargé). Le tap fournit
