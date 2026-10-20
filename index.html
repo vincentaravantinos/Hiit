@@ -2734,9 +2734,10 @@ async function saveSessionData(combined, prefix = 'seance_') {
 }
 
 
-// ======= Ported from analysis/*.py — core_offline_algorithm, auto_axis_detect,
-// bayesian_boundary. Kept as close as possible to the validated Python for
-// straightforward cross-checking. FS assumes 52Hz ACC. =======
+// ======= Ported from analysis/*.py — core_offline_algorithm (tilt, comptage par seuils,
+// encore utilisés par la natation) et rep_template_chain (comptage des reps HIIT, v3).
+// Kept as close as possible to the validated Python for straightforward cross-checking.
+// FS assumes 52Hz ACC. =======
 const FS_ALGO = 52.0;
 
 function computeTilt(samplesXYZ, searchS = 3.0, winS = 0.6, smoothSigmaS = 0.20) {
@@ -2836,135 +2837,178 @@ function countRepsOnSignal(signal1d, gracesS = 0.5, lowPct = 20, highPct = 80, b
   return reps;
 }
 
-function detrendJS(sig, sigmaS) {
-  const tr = gaussianSmoothJS(sig, sigmaS*FS_ALGO);
-  return sig.map((v, i) => v - tr[i]);
-}
-
-// ---- auto_axis_detect.py port ----
-function periodicityScoreJS(signal) {
-  if (signal.length < FS_ALGO*1.5) return { cv: Infinity, n: 0 };
-  const smooth = gaussianSmoothJS(signal, 0.15*FS_ALGO);
-  const rng = Math.max(...smooth) - Math.min(...smooth);
-  if (rng < 1e-6) return { cv: Infinity, n: 0 };
-  const prom = Math.max(rng*0.15, 1e-6);
-  const peaks = findPeaksJS(smooth, prom);
-  if (peaks.length < 3) return { cv: Infinity, n: peaks.length };
-  const intervals = [];
-  for (let i=1;i<peaks.length;i++) intervals.push((peaks[i]-peaks[i-1])/FS_ALGO);
-  const mean = intervals.reduce((a,b)=>a+b,0)/intervals.length;
-  const variance = intervals.reduce((a,b)=>a+(b-mean)**2,0)/intervals.length;
-  const cv = Math.sqrt(variance) / Math.max(mean, 1e-6);
-  return { cv, n: peaks.length };
-}
-
-function autoAxisRecount(windowXYZ) {
-  const n = windowXYZ.length;
-  const xArr = windowXYZ.map(s=>s[0]), yArr = windowXYZ.map(s=>s[1]), zArr = windowXYZ.map(s=>s[2]);
-  const tiltArr = computeTilt(windowXYZ);
-  const candidates = { X: xArr, Y: yArr, Z: zArr, tilt: tiltArr };
-  const scores = {};
-  for (const name in candidates) scores[name] = periodicityScoreJS(candidates[name]);
-  let winner = null, bestCv = Infinity;
-  for (const name in scores) {
-    if (scores[name].cv !== Infinity && scores[name].cv < bestCv) { bestCv = scores[name].cv; winner = name; }
-  }
-  if (winner === null) return { reps: countRepsOnSignal(tiltArr), winner: 'tilt (fallback)', scores };
-  const chosenSignal = winner === 'tilt' ? tiltArr : gaussianSmoothJS(candidates[winner], 0.20*FS_ALGO);
-  // Dérive lente retirée avant les seuils : sinon les reps de faible amplitude ne
-  // franchissent plus la bande 20/80 (ex. squats 9 au lieu de 16 le 20/10).
-  return { reps: countRepsOnSignal(detrendJS(chosenSignal, 1.5)), winner, scores };
-}
-
-// ---- bayesian_boundary.py port ----
-function regularityScore(segment) {
-  if (segment.length < FS_ALGO*1.5) return 2.0;
-  const smooth = gaussianSmoothJS(segment, 0.15*FS_ALGO);
-  const rng = Math.max(...smooth) - Math.min(...smooth);
-  if (rng < 3) return 1.5;
-  const prom = Math.max(rng*0.15, 1e-6);
-  const peaks = findPeaksJS(smooth, prom);
-  if (peaks.length < 2) return 1.5;
-  const intervals = [];
-  for (let i=1;i<peaks.length;i++) intervals.push((peaks[i]-peaks[i-1])/FS_ALGO);
-  if (intervals.length < 2) return 1.0;
-  const mean = intervals.reduce((a,b)=>a+b,0)/intervals.length;
-  const variance = intervals.reduce((a,b)=>a+(b-mean)**2,0)/intervals.length;
-  return Math.sqrt(variance) / Math.max(mean, 1e-6);
-}
-
-function normLogPdf(x, loc, scale) {
-  return -0.5*Math.log(2*Math.PI) - Math.log(scale) - 0.5*((x-loc)/scale)**2;
-}
-
-function bayesianBoundary(tiltSignal, searchCenterS, searchRadiusS, priorMeanS, priorStdS, side, stepS=0.25, likelihoodWindowS=8.0, temperature=0.3) {
-  const candidates = [];
-  for (let c=-searchRadiusS; c<=searchRadiusS+1e-9; c+=stepS) candidates.push(c);
-  const logPrior = candidates.map(c => normLogPdf(c, side==='trailing' ? -priorMeanS : priorMeanS, priorStdS));
-
-  const winN = Math.round(likelihoodWindowS*FS_ALGO);
-  const logLikelihood = candidates.map(c => {
-    const boundaryIdx = Math.round((searchCenterS + c) * FS_ALGO);
-    const before = tiltSignal.slice(Math.max(0, boundaryIdx-winN), boundaryIdx);
-    const after = tiltSignal.slice(boundaryIdx, boundaryIdx+winN);
-    if (before.length < 10 || after.length < 10) return -10;
-    const fit = side === 'trailing' ? (regularityScore(after) - regularityScore(before)) : (regularityScore(before) - regularityScore(after));
-    return fit / temperature;
-  });
-
-  const logPost = logPrior.map((lp,i) => lp + logLikelihood[i]);
-  const maxLog = Math.max(...logPost);
-  const post = logPost.map(lp => Math.exp(lp - maxLog));
-  const postSum = post.reduce((a,b)=>a+b,0);
-  const postNorm = post.map(p => p/postSum);
-
-  let mapIdx = 0, maxP = -Infinity;
-  postNorm.forEach((p,i) => { if (p > maxP) { maxP = p; mapIdx = i; } });
-  const meanOffset = candidates.reduce((a,c,i) => a + c*postNorm[i], 0);
-  const stdOffset = Math.sqrt(candidates.reduce((a,c,i) => a + ((c-meanOffset)**2)*postNorm[i], 0));
-
-  return { mapOffsetS: candidates[mapIdx], meanOffsetS: meanOffset, stdOffsetS: stdOffset };
-}
-// ======= Analyse automatique des séances : comptage de reps (axe auto + frontières
-// bayésiennes) + affichage des résultats. Algorithmes explicitement exploratoires —
-// voir /analysis/ dans le repo pour le détail et le statut de validation. =======
-const REP_LEADING_PRIORS = {
-  'Rowing élastique': [0.5, 1.5],
-  'Pompes déclinées': [0.5, 1.5],
-  'Squats élastique': [3.0, 2.0],
-  'Pull ups': [5.0, 3.0],
+// ======= Comptage des reps v3 (20/10/2026) =======
+// Remplace axe auto (variance des intervalles) + frontières bayésiennes + seuils 20/80.
+// Principe, validé à la main sur les séances du 16 et du 20/10 (écart moyen < 1 rep) :
+//  1. Fenêtre large autour de l'exercice ; signaux candidats X, Y, Z, tilt et axe principal
+//     du mouvement (ACP) — ce dernier rend le comptage indépendant de l'orientation du capteur.
+//  2. Chaque signal est lissé (0,15 s) puis débarrassé de sa dérive lente (1,5 s).
+//  3. Le candidat le plus périodique au cœur de l'exercice (9–21 s, toujours actif) est retenu,
+//     avec sa période P (autocorrélation, 0,8–2,2 s).
+//  4. Pics détectés (distance 0,5·P, proéminence ≥ 25 % de l'amplitude du cœur) ; un gabarit de
+//     rep est tiré du cœur. On part du centre et on étend tant que chaque pic ressemble au
+//     gabarit (forme et amplitude) avec un écart normal — les mouvements de mise en place et de
+//     transition ne ressemblent pas au gabarit, ce qui délimite l'exercice sans a priori fin.
+const REP_EXERCISES = {           // début au plus tôt après le top (s) — garde-fou contre la mise en place
+  'Rowing élastique': 0.8,
+  'Pompes déclinées': 2.0,
+  'Squats élastique': 4.0,
+  'Pull ups': 3.5,
 };
-const REP_TRAILING_PRIOR = [4.5, 2.0]; // [mean, std], uniform across exercises
+const REP_WIN_BEFORE_S = 2, REP_WIN_AFTER_S = 34, REP_END_MAX_S = 28;
+const REP_CORE = [9, 21];
+
+function gaussFilterReflect(arr, sigmaSamples) {
+  // Équivalent scipy.ndimage.gaussian_filter1d (mode « reflect », troncature 4σ).
+  const n = arr.length, radius = Math.max(1, Math.round(4 * sigmaSamples));
+  const k = []; let sum = 0;
+  for (let i = -radius; i <= radius; i++) { const w = Math.exp(-(i * i) / (2 * sigmaSamples * sigmaSamples)); k.push(w); sum += w; }
+  for (let i = 0; i < k.length; i++) k[i] /= sum;
+  const refl = j => { const p = 2 * n; j = ((j % p) + p) % p; return j < n ? j : p - 1 - j; };
+  const out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let acc = 0;
+    for (let q = -radius; q <= radius; q++) acc += arr[refl(i + q)] * k[q + radius];
+    out[i] = acc;
+  }
+  return out;
+}
+function repPrep(x) {
+  const a = gaussFilterReflect(x, 0.15 * FS_ALGO), b = gaussFilterReflect(x, 1.5 * FS_ALGO);
+  return a.map((v, i) => v - b[i]);
+}
+function repTiltRaw(seg) {
+  const n = seg.length, u = seg.map(([x, y, z]) => { const m = Math.hypot(x, y, z) || 1e-6; return [x / m, y / m, z / m]; });
+  const W = Math.round(0.6 * FS_ALGO); let best = Infinity, bs = 0;
+  for (let s = 0; s < Math.max(1, Math.round(3 * FS_ALGO) - W); s++) {
+    const m = [0, 0, 0];
+    for (let i = s; i < s + W; i++) for (let c = 0; c < 3; c++) m[c] += u[i][c] / W;
+    let v = 0;
+    for (let i = s; i < s + W; i++) for (let c = 0; c < 3; c++) v += (u[i][c] - m[c]) ** 2 / W;
+    if (v < best) { best = v; bs = s; }
+  }
+  const r = [0, 0, 0];
+  for (let i = bs; i < bs + W; i++) for (let c = 0; c < 3; c++) r[c] += u[i][c];
+  const rn = Math.hypot(...r) || 1e-6;
+  return u.map(v => Math.acos(Math.max(-1, Math.min(1, (v[0] * r[0] + v[1] * r[1] + v[2] * r[2]) / rn))) * 180 / Math.PI);
+}
+function repCandidates(seg, c0, c1) {
+  const ax = [0, 1, 2].map(c => repPrep(seg.map(s => s[c])));
+  // Axe principal (ACP) des 3 axes filtrés, estimé sur le cœur de l'exercice.
+  const m = [0, 1, 2].map(c => { let s = 0; for (let i = c0; i < c1; i++) s += ax[c][i]; return s / (c1 - c0); });
+  const C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (let i = c0; i < c1; i++) for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[a][b] += (ax[a][i] - m[a]) * (ax[b][i] - m[b]);
+  let v = [0.577, 0.577, 0.577];
+  for (let it = 0; it < 100; it++) {
+    const w = [0, 1, 2].map(a => C[a][0] * v[0] + C[a][1] * v[1] + C[a][2] * v[2]);
+    const nn = Math.hypot(...w) || 1; v = w.map(x => x / nn);
+  }
+  const pca = ax[0].map((_, i) => ax[0][i] * v[0] + ax[1][i] * v[1] + ax[2][i] * v[2]);
+  return { X: ax[0], Y: ax[1], Z: ax[2], tilt: repPrep(repTiltRaw(seg)), pca };
+}
+function repAutocorrPeriod(x) {
+  const n = x.length, mean = x.reduce((a, b) => a + b, 0) / n, y = x.map(v => v - mean);
+  const v0 = y.reduce((a, b) => a + b * b, 0) + 1e-9;
+  let best = -1, bestL = Math.round(FS_ALGO);
+  for (let L = Math.floor(0.8 * FS_ALGO); L < Math.floor(2.2 * FS_ALGO) && L < n; L++) {
+    let s = 0; for (let i = 0; i + L < n; i++) s += y[i] * y[i + L];
+    const r = s / v0 * n / (n - L);
+    if (r > best) { best = r; bestL = L; }
+  }
+  return { r: best, P: bestL / FS_ALGO };
+}
+function repFindPeaks(x, distance, minProm) {
+  // Équivalent scipy.signal.find_peaks(distance=, prominence=) : maxima locaux (plateaux
+  // au milieu), filtre de distance par hauteur décroissante, puis proéminence.
+  const n = x.length, cand = [];
+  let i = 1;
+  while (i < n - 1) {
+    if (x[i - 1] < x[i]) {
+      let ahead = i + 1;
+      while (ahead < n - 1 && x[ahead] === x[i]) ahead++;
+      if (x[ahead] < x[i]) { cand.push((i + ahead - 1) >> 1); i = ahead; continue; }
+    }
+    i++;
+  }
+  const keep = new Array(cand.length).fill(true);
+  const order = cand.map((p, k) => k).sort((a, b) => x[cand[a]] - x[cand[b]]);
+  for (let o = order.length - 1; o >= 0; o--) {
+    const k = order[o]; if (!keep[k]) continue;
+    for (let j = k - 1; j >= 0 && cand[k] - cand[j] < distance; j--) keep[j] = false;
+    for (let j = k + 1; j < cand.length && cand[j] - cand[k] < distance; j++) keep[j] = false;
+  }
+  const out = [];
+  cand.forEach((p, k) => {
+    if (!keep[k]) return;
+    const v = x[p];
+    let lm = v; for (let j = p - 1; j >= 0 && x[j] <= v; j--) lm = Math.min(lm, x[j]);
+    let rm = v; for (let j = p + 1; j < n && x[j] <= v; j++) rm = Math.min(rm, x[j]);
+    if (v - Math.max(lm, rm) >= minProm) out.push(p);
+  });
+  return out;
+}
+function repMedian(a) { const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; }
+
+function countRepsWindow(seg, minStartS) {
+  const off = REP_WIN_BEFORE_S, FS = FS_ALGO;
+  const c0 = Math.floor((off + REP_CORE[0]) * FS), c1 = Math.floor((off + REP_CORE[1]) * FS);
+  if (seg.length < c1 + 10) return null;
+  const C = repCandidates(seg, c0, c1);
+  let k = null, best = null;
+  for (const name in C) { const a = repAutocorrPeriod(C[name].slice(c0, c1)); if (!best || a.r > best.r) { best = a; k = name; } }
+  const P = best.P;
+  let x = C[k];
+  const core = x.slice(c0, c1), cm = core.reduce((a, b) => a + b, 0) / core.length;
+  if (core.reduce((a, v) => a + (v - cm) ** 3, 0) < 0) x = x.map(v => -v);   // pics = sommets des reps
+  const cx = x.slice(c0, c1), ptp = Math.max(...cx) - Math.min(...cx);
+  const S = Math.floor((off + minStartS) * FS), E = Math.floor((off + REP_END_MAX_S) * FS);
+  const pk = repFindPeaks(x, Math.max(1, Math.floor(0.5 * P * FS)), ptp * 0.25).filter(p => p >= S && p <= E);
+  if (pk.length < 3) return { reps: pk.length, axis: k };
+  const H = Math.floor(0.5 * P * FS);
+  const win = p => { const w = []; for (let i = p - H; i <= p + H; i++) w.push(x[Math.min(x.length - 1, Math.max(0, i))]); const m = w.reduce((a, b) => a + b, 0) / w.length; return w.map(v => v - m); };
+  const cin = pk.filter(p => p >= c0 && p < c1);
+  if (cin.length < 3) return { reps: pk.length, axis: k };
+  const cw = cin.map(win), T = cw[0].map((_, i) => repMedian(cw.map(w => w[i])));
+  const ptpW = w => Math.max(...w) - Math.min(...w), hmed = repMedian(cw.map(ptpW));
+  const nT = Math.hypot(...T) + 1e-9;
+  const oks = pk.map(p => { const w = win(p), h = ptpW(w); const cr = w.reduce((a, v, i) => a + v * T[i], 0) / (Math.hypot(...w) * nT + 1e-9); return cr >= 0.6 && h >= 0.45 * hmed && h <= 1.5 * hmed; });
+  const centre = (c0 + c1) >> 1;
+  let j = 0; pk.forEach((p, i) => { if (Math.abs(p - centre) < Math.abs(pk[j] - centre)) j = i; });
+  const gapP = (a, b) => Math.abs(pk[b] - pk[a]) / (P * FS);
+  const step = (i, d) => {           // pas normal (ou un pic raté sans ressemblance, sauté)
+    const k1 = i + d; if (k1 < 0 || k1 >= pk.length) return null;
+    if (oks[k1] && gapP(i, k1) <= 1.7) return [k1, 1];
+    const k2 = i + 2 * d;
+    if (k2 >= 0 && k2 < pk.length && oks[k2] && gapP(i, k2) <= 2.7) return [k2, 2];
+    return null;
+  };
+  const bridge = (i, d) => {         // rep sans pic détecté, seulement si la série continue derrière
+    const k1 = i + d; if (k1 < 0 || k1 >= pk.length || !oks[k1]) return null;
+    const g = gapP(i, k1); if (!(g > 1.7 && g <= 2.7)) return null;
+    const a1 = step(k1, d); if (!a1 || a1[1] !== 1) return null;
+    const a2 = step(a1[0], d); if (!a2 || a2[1] !== 1) return null;
+    return [k1, 2];
+  };
+  let reps = 1;
+  for (const d of [-1, 1]) {
+    let i = j;
+    for (;;) { const r = step(i, d) || bridge(i, d); if (!r) break; i = r[0]; reps += r[1]; }
+  }
+  return { reps, axis: k };
+}
 
 function analyzeSessionReps(accSamples, phaseLog) {
   if (!accSamples || !phaseLog || accSamples.length < 20) return null;
-  const tilt = computeTilt(accSamples);
-  const durations = phaseLog.map((p, i) => {
-    const next = i+1 < phaseLog.length ? phaseLog[i+1].tElapsedStart : p.tElapsedStart + 30;
-    return next - p.tElapsedStart;
-  });
-
   const results = [];
-  phaseLog.forEach((p, i) => {
-    const prior = REP_LEADING_PRIORS[p.name];
-    if (!prior) return; // not a rep-based exercise we have a prior for (e.g. warmup, sprint, rest, legraises)
-    const [leadMean, leadStd] = prior;
-    const [trailMean, trailStd] = REP_TRAILING_PRIOR;
-
-    const nominalStart = p.tElapsedStart;
-    const nominalEnd = nominalStart + durations[i];
-
-    const leadRes = bayesianBoundary(tilt, nominalStart, Math.min(10, leadMean+3*leadStd), leadMean, leadStd, 'leading');
-    const trailRes = bayesianBoundary(tilt, nominalEnd, Math.min(16, trailMean+3*trailStd), trailMean, trailStd, 'trailing');
-
-    let startS = nominalStart + leadRes.meanOffsetS;
-    let endS = nominalEnd + trailRes.meanOffsetS;
-    if (endS <= startS + 2) endS = nominalEnd - trailMean;
-
-    const window = accSamples.slice(Math.round(startS*FS_ALGO), Math.round(endS*FS_ALGO));
-    if (window.length < 20) return;
-    const { reps, winner } = autoAxisRecount(window);
-    results.push({ name: p.name, round: p.round || 1, reps, axis: winner });
+  phaseLog.forEach(p => {
+    const minStart = REP_EXERCISES[p.name];
+    if (minStart == null) return; // échauffement, sprint, repos, levées de jambes : pas de comptage
+    const s0 = p.tElapsedStart;
+    const seg = accSamples.slice(Math.max(0, Math.round((s0 - REP_WIN_BEFORE_S) * FS_ALGO)), Math.round((s0 + REP_WIN_AFTER_S) * FS_ALGO));
+    if (s0 - REP_WIN_BEFORE_S < 0) return;
+    const r = countRepsWindow(seg, minStart);
+    if (!r) return;
+    results.push({ name: p.name, round: p.round || 1, reps: r.reps, axis: r.axis });
   });
   return results;
 }
@@ -3769,7 +3813,7 @@ function hiitZoneOpts(combined) {
 // NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
-const REP_ALGO_VERSION = 'v2-detrend';
+const REP_ALGO_VERSION = 'v3-gabarit';
 
 async function updateExistingSessionFile(filename, combined) {
   // Writes a recomputed analysis back to the existing GitHub file (same name, in

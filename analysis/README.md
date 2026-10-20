@@ -5,7 +5,19 @@ séparé de l'app réelle (`index.html`, en JavaScript). Voir la mémoire du pro
 (`/projects/.../areas/polar-rep-counting.md`) pour le contexte complet — protocole
 BLE, historique, statut général.
 
-## Statut actuel (20/09/2026)
+## Statut actuel (20/10/2026)
+
+- **`rep_template_chain.py`** — comptage v3 utilisé par l'app (`analyzeSessionReps`, version
+  `v3-gabarit`) : axe le plus périodique parmi X/Y/Z/tilt/ACP (indépendant de l'orientation du
+  capteur), signal sans dérive lente, délimitation de l'exercice par ressemblance des reps à un
+  gabarit tiré du cœur de l'exercice. Erreur moyenne 0,8 rep sur 32 fenêtres comptées à la main
+  (16 et 20/10), contre 2,2 pour v1. Remplace `auto_axis_detect.py` + `bayesian_boundary.py`
+  dans l'app (gardés ici pour l'historique).
+- Constats du 20/10 : le capteur est porté dans deux orientations selon les jours (tourné de
+  180° les 14 et 16/10) ; Vincent démarre désormais rowing et pompes ~3 s après le top, squats et
+  tractions ~5 s ; les reps s'arrêtent vers 24–27 s.
+
+## Statut précédent (20/09/2026)
 
 - **`core_offline_algorithm.py`** — l'algorithme "précis" actuellement utilisé par
   l'app réelle (tilt accéléromètre + seuils par percentile). Validé à 11/14 sur le
