@@ -1958,9 +1958,16 @@ function liveHrTick() {
   const el = document.getElementById('t-hr');
   if (el) {
     el.style.display = 'block';
-    el.textContent = L.reconnecting ? '❤ … reconnexion capteur'
+    let zone = '';
+    if (!L.reconnecting && L.hr.mode === 'live' && fresh && L.hr.latest) {
+      // Mêmes zones que les stats de fin de séance (% de la FC max des Réglages).
+      const r = L.hr.latest / getHrMax();
+      const z = r >= HR_ZONES[0].lo ? (HR_ZONES.find(z => r >= z.lo && r < z.hi) || HR_ZONES[HR_ZONES.length - 1]) : null;
+      if (z) zone = ` <span style="display:inline-block;margin-left:8px;padding:1px 9px;border-radius:8px;background:${z.color};color:#111;font-size:15px;vertical-align:2px">${z.name}</span>`;
+    }
+    el.innerHTML = (L.reconnecting ? '❤ … reconnexion capteur'
       : L.hr.mode === 'live' ? (fresh && L.hr.latest ? `❤ ${L.hr.latest}` : '❤ --')
-      : '● capteur en direct';
+      : '● capteur en direct') + zone;
   }
 }
 async function liveStartStreams() {
