@@ -61,9 +61,31 @@
       },
       "warmup": {
         "enabled": true,
-        "name": "Échauffement : genoux, jumping jacks, écartés, squats",
-        "spoken": "Échauffement ! Montées de genoux, puis jumping jacks, écartés élastique et squats, trente secondes chacun.",
-        "duration": 120
+        "name": "Échauffement",
+        "spoken": "Échauffement !",
+        "duration": 120,
+        "steps": [
+          {
+            "name": "Montées de genoux",
+            "spoken": "Échauffement ! Montées de genoux.",
+            "duration": 30
+          },
+          {
+            "name": "Jumping jacks",
+            "spoken": "Jumping jacks !",
+            "duration": 30
+          },
+          {
+            "name": "Écartés élastique + cercles de bras",
+            "spoken": "Écartés élastique et cercles de bras !",
+            "duration": 30
+          },
+          {
+            "name": "Squats au poids du corps",
+            "spoken": "Squats au poids du corps !",
+            "duration": 30
+          }
+        ]
       },
       "rounds": 4,
       "skip_last_rest": true,
