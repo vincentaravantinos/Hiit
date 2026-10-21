@@ -518,6 +518,8 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
         <button id="pos-biceps" onclick="setSensorPosition('Biceps')">BICEPS</button>
       </div>
+      <div class="setting-row"><div><div class="setting-name">Décompte des reps en direct</div><div class="setting-sub">La voix compte tes reps (expérimental). S'arrête dès « Prochainement » / « 3, 2, 1 »</div></div><div class="toggle" id="livecount-toggle" onclick="toggleLiveOpt('livecount')"></div></div>
+      <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
       <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
       <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
       <div style="display:flex;gap:8px;">
@@ -975,7 +977,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -2023,6 +2025,7 @@ async function liveStart() {
       await liveStartHr(true);
     }, 2);
     liveSession.hr.timer = setInterval(liveHrTick, 1000);
+    liveRepStart();
     return true;
   } catch (err) {
     logError('Direct indisponible, retour à l\'enregistrement interne', err);
@@ -2031,6 +2034,7 @@ async function liveStart() {
   }
 }
 function liveDispose() {
+  liveRepStop();
   if (liveSession) clearInterval(liveSession.hr.timer);
   liveSession = null;
   const el = document.getElementById('t-hr'); if (el) el.style.display = 'none';
@@ -2076,6 +2080,107 @@ async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
   }
   return await sensorFinishCombined(combined, phaseLog, rewindEvents, endedAtMs);
 }
+
+
+// ======= Reps en direct : décompte vocal et ding de record (21/10, expérimental) =======
+// Même algo v3 que le compte final, rejoué sur les seules données reçues jusqu'ici (cœur
+// = les 12 dernières secondes tant que la fenêtre 9–21 s n'est pas complète). Évalué sur
+// 12 séances : retard ~1 s, compte à la fin identique au final dans 99,5 % des cas,
+// ~7 % d'exercices avec une rep de trop transitoire (d'où la confirmation de 1 s).
+const LIVE_OPT_LS = { livecount: 'hiitLiveCount', recding: 'hiitRecordDing' };
+function liveOptOn(k) { try { return localStorage.getItem(LIVE_OPT_LS[k]) === '1'; } catch (e) { return false; } }
+function toggleLiveOpt(k) { try { localStorage.setItem(LIVE_OPT_LS[k], liveOptOn(k) ? '0' : '1'); } catch (e) {} liveOptsRender(); }
+function liveOptsRender() { for (const k in LIVE_OPT_LS) { const el = document.getElementById(k + '-toggle'); if (el) el.classList.toggle('on', liveOptOn(k)); } }
+
+function countRepsGen(seg, minStartS, coreS, coreE, endS) {
+  // countRepsWindow avec cœur et fin paramétrables (identique pour 9/21/28 — vérifié sur 192 exercices).
+  const off = REP_WIN_BEFORE_S, FS = FS_ALGO;
+  const c0 = Math.floor((off + coreS) * FS), c1 = Math.floor((off + coreE) * FS);
+  if (c1 > seg.length) return null;
+  const C = repCandidates(seg, c0, c1);
+  let k = null, best = null;
+  for (const name in C) { const a = repAutocorrPeriod(C[name].slice(c0, c1)); if (!best || a.r > best.r) { best = a; k = name; } }
+  const P = best.P; let x = C[k];
+  const core = x.slice(c0, c1), cm = core.reduce((a, b) => a + b, 0) / core.length;
+  if (core.reduce((a, v) => a + (v - cm) ** 3, 0) < 0) x = x.map(v => -v);
+  const cx = x.slice(c0, c1), ptp = Math.max(...cx) - Math.min(...cx);
+  const S = Math.floor((off + minStartS) * FS), E = Math.min(Math.floor((off + endS) * FS), seg.length - 1);
+  const pk = repFindPeaks(x, Math.max(1, Math.floor(0.5 * P * FS)), ptp * 0.25).filter(p => p >= S && p <= E);
+  if (pk.length < 3) return pk.length;
+  const H = Math.floor(0.5 * P * FS);
+  const win = p => { const w = []; for (let i = p - H; i <= p + H; i++) w.push(x[Math.min(x.length - 1, Math.max(0, i))]); const m = w.reduce((a, b) => a + b, 0) / w.length; return w.map(v => v - m); };
+  const cin = pk.filter(p => p >= c0 && p < c1);
+  if (cin.length < 3) return pk.length;
+  const cw = cin.map(win), T = cw[0].map((_, i) => repMedian(cw.map(w => w[i])));
+  const ptpW = w => Math.max(...w) - Math.min(...w), hmed = repMedian(cw.map(ptpW)), nT = Math.hypot(...T) + 1e-9;
+  const oks = pk.map(p => { const w = win(p), h = ptpW(w); const cr = w.reduce((a, v, i) => a + v * T[i], 0) / (Math.hypot(...w) * nT + 1e-9); return cr >= 0.6 && h >= 0.45 * hmed && h <= 1.5 * hmed; });
+  const centre = (c0 + c1) >> 1; let j = 0; pk.forEach((p, i) => { if (Math.abs(p - centre) < Math.abs(pk[j] - centre)) j = i; });
+  const gapP = (a, b) => Math.abs(pk[b] - pk[a]) / (P * FS);
+  const step = (i, d) => { const k1 = i + d; if (k1 < 0 || k1 >= pk.length) return null; if (oks[k1] && gapP(i, k1) <= 1.7) return [k1, 1]; const k2 = i + 2 * d; if (k2 >= 0 && k2 < pk.length && oks[k2] && gapP(i, k2) <= 2.7) return [k2, 2]; return null; };
+  const bridge = (i, d) => { const k1 = i + d; if (k1 < 0 || k1 >= pk.length || !oks[k1]) return null; const g = gapP(i, k1); if (!(g > 1.7 && g <= 2.7)) return null; const a1 = step(k1, d); if (!a1 || a1[1] !== 1) return null; const a2 = step(a1[0], d); if (!a2 || a2[1] !== 1) return null; return [k1, 2]; };
+  let reps = 1;
+  for (const d of [-1, 1]) { let i = j; for (;;) { const r = step(i, d) || bridge(i, d); if (!r) break; i = r[0]; reps += r[1]; } }
+  return reps;
+}
+function liveRepsAt(acc, s0, minStart, t) {
+  const seg = acc.slice(Math.max(0, Math.round((s0 - REP_WIN_BEFORE_S) * FS_ALGO)), Math.round((s0 + t) * FS_ALGO));
+  let cs, ce;
+  if (t - 0.3 >= REP_CORE[1]) { cs = REP_CORE[0]; ce = REP_CORE[1]; }
+  else { ce = t - 0.3; cs = Math.max(minStart + 0.5, ce - 12); }
+  if (ce - cs < 4) return null;
+  return countRepsGen(seg, minStart, cs, ce, Math.min(REP_END_MAX_S, t));
+}
+
+let liveRep = null;      // exercice en cours de suivi
+let liveRepTimer = null, liveRepBusy = false, liveRepCostMs = 0;
+function liveRepTick() {
+  if (liveRepBusy) return;
+  const L = liveSession;
+  if (!L || tState !== 'running' || (!liveOptOn('livecount') && !liveOptOn('recding'))) return;
+  const accSt = Object.values(L.streams).find(x => x.name === 'ACC');
+  if (!accSt) return;
+  // Nouvel exercice compté ? (le précédent reste suivi jusqu'à 31,5 s pour un record de dernière seconde)
+  const cur = SEQ[tIdx];
+  const ms = cur && cur.type === 'work' ? REP_EXERCISES[cur.name] : null;
+  const last = sensorPhaseLog[sensorPhaseLog.length - 1];
+  if (ms != null && last && last.name === cur.name && (!liveRep || liveRep.s0 !== last.tElapsedStart)) {
+    liveRep = { name: cur.name, round: cur.round || 1, s0: last.tElapsedStart, ms, idx: tIdx,
+      target: lastRepsFor(cur.name, cur.round), hist: [], said: 0, dinged: false };
+  }
+  const R = liveRep; if (!R) return;
+  const t = accSt.samples.length / FS_ALGO - R.s0;
+  if (t > 31.5) { liveRep = null; return; }
+  liveRepBusy = true;
+  const t0 = performance.now();
+  let n = null;
+  try { n = liveRepsAt(accSt.samples, R.s0, R.ms, t); } catch (e) { logError('Reps en direct', e); }
+  liveRepCostMs = 0.8 * liveRepCostMs + 0.2 * (performance.now() - t0);
+  liveRepBusy = false;
+  R.hist.push(n || 0); if (R.hist.length > 2) R.hist.shift();
+  const confirmed = R.hist.length === 2 ? Math.min(...R.hist) : 0;   // tenu ~1 s
+  if (confirmed <= R.said) return;
+  R.said = confirmed;
+  // Décompte vocal : uniquement pendant l'exercice, et jamais par-dessus une annonce.
+  const nx = SEQ[R.idx + 1];
+  const cutoff = nx && nx.type !== 'rest' ? 7 : 3;
+  if (liveOptOn('livecount') && tIdx === R.idx && tLeft > cutoff && !(window.speechSynthesis && speechSynthesis.speaking)) {
+    speak(String(confirmed), { rate: 1.2, hold: 400 });
+  }
+  if (liveOptOn('recding') && !R.dinged && R.target != null && confirmed > R.target) {
+    R.dinged = true;
+    beep(1568, .09, 1.0, 600); setTimeout(() => beep(2093, .16, 1.0, 600), 110);
+    logAppend(`Record en direct : ${R.name} tour ${R.round} — ${confirmed} > ${R.target}`);
+  }
+}
+function liveRepStart() {
+  clearInterval(liveRepTimer); liveRep = null;
+  liveRepTimer = setInterval(() => {
+    liveRepTick();
+    // Téléphone trop lent : on espace les évaluations (une sur deux).
+    if (liveRepCostMs > 220 && !liveRepStart.slow) { liveRepStart.slow = true; clearInterval(liveRepTimer); liveRepTimer = setInterval(liveRepTick, 1000); log(`Reps en direct : ${Math.round(liveRepCostMs)} ms par calcul, évaluation chaque seconde.`); }
+  }, 500);
+}
+function liveRepStop() { clearInterval(liveRepTimer); liveRepTimer = null; liveRep = null; liveRepStart.slow = false; }
 
 // ======= HIIT app integration: sensor session lifecycle =======
 let sensorActive = false;
@@ -2480,6 +2585,7 @@ function sensorOnSessionEnd() {
   if (liveSession) {
     const L = liveSession;
     liveSession = null;
+    liveRepStop();
     const el = document.getElementById('t-hr'); if (el) el.style.display = 'none';
     sensorRecoverBusy = true;
     sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs)
