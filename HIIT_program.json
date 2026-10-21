@@ -53,30 +53,30 @@
   ],
   "variants": {
     "hotel": {
-      "label": "Hôtel (test)",
-      "until": "2026-10-11",
+      "label": "Hôtel",
+      "until": "2026-10-23",
       "sensors": {
         "polar": true,
         "elliptical": false
       },
       "warmup": {
         "enabled": true,
-        "name": "Jumping jacks",
-        "spoken": "Échauffement, jumping jacks !",
+        "name": "Échauffement : genoux, jumping jacks, écartés, squats",
+        "spoken": "Échauffement ! Montées de genoux, puis jumping jacks, écartés élastique et squats, trente secondes chacun.",
         "duration": 120
       },
       "rounds": 4,
       "skip_last_rest": true,
       "exercises": [
         {
-          "name": "Squats",
-          "spoken": "Squats !",
+          "name": "Mountain climbers",
+          "spoken": "Mountain climbers !",
           "duration": 30,
           "type": "work"
         },
         {
-          "name": "Pompes",
-          "spoken": "Pompes !",
+          "name": "Pompes déclinées",
+          "spoken": "Pompes déclinées !",
           "duration": 30,
           "type": "work"
         },
@@ -87,20 +87,20 @@
           "type": "work"
         },
         {
-          "name": "Fentes alternées",
-          "spoken": "Fentes alternées !",
+          "name": "Tirage vertical à genoux",
+          "spoken": "Tirage vertical !",
           "duration": 30,
           "type": "work"
         },
         {
-          "name": "Mountain climbers",
-          "spoken": "Mountain climbers !",
+          "name": "Relevés de jambes au sol",
+          "spoken": "Relevés de jambes !",
           "duration": 30,
           "type": "work"
         },
         {
-          "name": "Gainage",
-          "spoken": "Gainage !",
+          "name": "Squats élastique",
+          "spoken": "Squats élastique !",
           "duration": 30,
           "type": "work"
         },
