@@ -564,7 +564,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         </div>
         <details id="hcex-details" style="font-size:12px;">
           <summary style="color:var(--muted);cursor:pointer;">Activités détectées (Oura…) — 30 jours</summary>
-          <div class="setting-sub" style="margin:8px 0;">Loggée Intense : ≥ 20 min et (≥ 10 min au-dessus de 80 % FC max, ou FC moy. ≥ 75 % FC max). Loggée Récup : un sport (pas marche, tâches, « autre ») ≥ 30 min. Le reste est ignoré. Seules les activités des 7 derniers jours sont loggées automatiquement, une seule fois.</div>
+          <div class="setting-sub" style="margin:8px 0;">Loggée Intense : ≥ 20 min et (≥ 10 min au-dessus de 80 % FC max, ou FC moy. ≥ 75 % FC max). Tout le reste est ignoré (coaching, marche, tâches…) — un Récup se met à la main si besoin. Seules les activités des 7 derniers jours sont loggées automatiquement, une seule fois.</div>
           <div id="hcex-list"></div>
         </details>
       </div>
@@ -5799,12 +5799,11 @@ function freeApplyClass(dayKey, prevType, cls) {
 
 // ======= Activités Health Connect (Oura…) : détection et log automatique =======
 // Le pont exporte chaque activité (type Health Connect, titre, FC minute par minute).
-// Même règle Intense que l'activité libre ; Récup seulement pour un vrai sport assez long.
+// Même règle Intense que l'activité libre ; rien d'autre n'est loggé (pas de Récup automatique :
+// le coaching des petits ne doit pas compter).
 const HCEX_SEEN_LS = 'hiitHcExSeen';
 const HCEX_AUTO_DAYS = 7;
-const HCEX_RECUP_MIN_S = 30 * 60;
 const HCEX_NAMES = {0:'Autre',2:'Badminton',4:'Baseball',5:'Basket',8:'Vélo',9:'Vélo d\'appartement',10:'Boot camp',11:'Boxe',13:'Calisthenics',14:'Cricket',16:'Danse',25:'Elliptique',26:'Cours collectif',27:'Escrime',28:'Football américain',29:'Football australien',31:'Frisbee',32:'Golf',33:'Respiration guidée',34:'Gymnastique',35:'Handball',36:'HIIT',37:'Randonnée',38:'Hockey sur glace',39:'Patinage',44:'Arts martiaux',46:'Pagaie',47:'Parapente',48:'Pilates',50:'Racquetball',51:'Escalade',52:'Roller hockey',53:'Aviron',54:'Rameur',55:'Rugby',56:'Course',57:'Tapis de course',58:'Voile',59:'Plongée',60:'Patin',61:'Ski',62:'Snowboard',63:'Raquettes',64:'Football',65:'Softball',66:'Squash',68:'Escaliers',69:'Stepper',70:'Musculation',71:'Étirements',72:'Surf',73:'Nage en eau libre',74:'Natation',75:'Tennis de table',76:'Tennis',78:'Volley',79:'Marche',80:'Water-polo',81:'Haltérophilie',82:'Fauteuil',83:'Yoga'};
-const HCEX_NOT_SPORT = new Set([0, 33, 71, 79, 82]); // autre (tâches ménagères…), respiration, étirements, marche
 function hcExName(e) { return HCEX_NAMES[e.type] || (e.title || 'Activité'); }
 function hcExSeen() { try { return new Set(JSON.parse(localStorage.getItem(HCEX_SEEN_LS) || '[]')); } catch (err) { return new Set(); } }
 function hcExAll() {
@@ -5820,7 +5819,7 @@ function hcExClassify(e) {
   const highS = hr.filter(v => v >= 0.8 * hrMax).length * 60;
   const avg = hr.length ? hr.reduce((a, v) => a + v, 0) / hr.length : 0;
   const intense = dur >= FREE_INTENSE_MIN_S && hr.length >= 5 && (highS >= FREE_INTENSE_HIGH_S || avg >= FREE_INTENSE_AVG * hrMax);
-  const cls = intense ? 'I' : (!HCEX_NOT_SPORT.has(e.type) && dur >= HCEX_RECUP_MIN_S) ? 'R' : null;
+  const cls = intense ? 'I' : null;
   return { cls, durMin: Math.round(dur / 60), avg: Math.round(avg), avgPct: hr.length ? Math.round(100 * avg / hrMax) : null, highMin: Math.round(highS / 60) };
 }
 function hcExProcess() {
