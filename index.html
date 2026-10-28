@@ -562,6 +562,11 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
           <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Synchroniser maintenant</button>
         </div>
+        <details id="hcex-details" style="font-size:12px;">
+          <summary style="color:var(--muted);cursor:pointer;">Activités détectées (Oura…) — 30 jours</summary>
+          <div class="setting-sub" style="margin:8px 0;">Loggée Intense : ≥ 20 min et (≥ 10 min au-dessus de 80 % FC max, ou FC moy. ≥ 75 % FC max). Loggée Récup : un sport (pas marche, tâches, « autre ») ≥ 30 min. Le reste est ignoré. Seules les activités des 7 derniers jours sont loggées automatiquement, une seule fois.</div>
+          <div id="hcex-list"></div>
+        </details>
       </div>
     </div>
     <div class="settings-section">
@@ -985,7 +990,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -5320,6 +5325,7 @@ async function refreshHealthData(force = false) {
     const h = await decryptMaybe(env);
     localStorage.setItem(HEALTH_CACHE_LS, JSON.stringify(h));
     renderHealthCard();
+    hcExProcess();
   } catch (err) { logError('Lecture forme du jour', err); }
 }
 function hcCurrentWeight() {
@@ -5789,6 +5795,65 @@ function freeApplyClass(dayKey, prevType, cls) {
   workouts.sort((a,b) => b.date.localeCompare(a.date));
   S.set(KEYS.workouts, workouts);
   renderDashboard();
+}
+
+// ======= Activités Health Connect (Oura…) : détection et log automatique =======
+// Le pont exporte chaque activité (type Health Connect, titre, FC minute par minute).
+// Même règle Intense que l'activité libre ; Récup seulement pour un vrai sport assez long.
+const HCEX_SEEN_LS = 'hiitHcExSeen';
+const HCEX_AUTO_DAYS = 7;
+const HCEX_RECUP_MIN_S = 30 * 60;
+const HCEX_NAMES = {0:'Autre',2:'Badminton',4:'Baseball',5:'Basket',8:'Vélo',9:'Vélo d\'appartement',10:'Boot camp',11:'Boxe',13:'Calisthenics',14:'Cricket',16:'Danse',25:'Elliptique',26:'Cours collectif',27:'Escrime',28:'Football américain',29:'Football australien',31:'Frisbee',32:'Golf',33:'Respiration guidée',34:'Gymnastique',35:'Handball',36:'HIIT',37:'Randonnée',38:'Hockey sur glace',39:'Patinage',44:'Arts martiaux',46:'Pagaie',47:'Parapente',48:'Pilates',50:'Racquetball',51:'Escalade',52:'Roller hockey',53:'Aviron',54:'Rameur',55:'Rugby',56:'Course',57:'Tapis de course',58:'Voile',59:'Plongée',60:'Patin',61:'Ski',62:'Snowboard',63:'Raquettes',64:'Football',65:'Softball',66:'Squash',68:'Escaliers',69:'Stepper',70:'Musculation',71:'Étirements',72:'Surf',73:'Nage en eau libre',74:'Natation',75:'Tennis de table',76:'Tennis',78:'Volley',79:'Marche',80:'Water-polo',81:'Haltérophilie',82:'Fauteuil',83:'Yoga'};
+const HCEX_NOT_SPORT = new Set([0, 33, 71, 79, 82]); // autre (tâches ménagères…), respiration, étirements, marche
+function hcExName(e) { return HCEX_NAMES[e.type] || (e.title || 'Activité'); }
+function hcExSeen() { try { return new Set(JSON.parse(localStorage.getItem(HCEX_SEEN_LS) || '[]')); } catch (err) { return new Set(); } }
+function hcExAll() {
+  const h = healthData(); if (!h || !h.days) return [];
+  const out = [];
+  for (const d of Object.keys(h.days)) for (const e of (h.days[d].exercises || [])) out.push({ ...e, day: d });
+  return out.sort((a, b) => b.start - a.start);
+}
+function hcExClassify(e) {
+  const hrMax = getHrMax();
+  const dur = (e.end - e.start) / 1000;
+  const hr = (e.hrMin || []).filter(v => v > 0);
+  const highS = hr.filter(v => v >= 0.8 * hrMax).length * 60;
+  const avg = hr.length ? hr.reduce((a, v) => a + v, 0) / hr.length : 0;
+  const intense = dur >= FREE_INTENSE_MIN_S && hr.length >= 5 && (highS >= FREE_INTENSE_HIGH_S || avg >= FREE_INTENSE_AVG * hrMax);
+  const cls = intense ? 'I' : (!HCEX_NOT_SPORT.has(e.type) && dur >= HCEX_RECUP_MIN_S) ? 'R' : null;
+  return { cls, durMin: Math.round(dur / 60), avg: Math.round(avg), avgPct: hr.length ? Math.round(100 * avg / hrMax) : null, highMin: Math.round(highS / 60) };
+}
+function hcExProcess() {
+  const seen = hcExSeen();
+  const limit = ds(new Date(Date.now() - HCEX_AUTO_DAYS * 86400000));
+  const logged = [];
+  for (const e of hcExAll()) {
+    if (seen.has(e.id)) continue;
+    seen.add(e.id);
+    if (e.day < limit) continue;
+    const c = hcExClassify(e);
+    if (!c.cls) continue;
+    const prev = getEntry(e.day);
+    freeApplyClass(e.day, prev ? prev.type : null, c.cls);
+    logged.push(`${hcExName(e)} ${c.cls === 'I' ? 'Intense' : 'Récup'}`);
+    log(`Health Connect : ${hcExName(e)} du ${e.day} (${c.durMin} min, ${c.highMin} min Z4-Z5, FC moy. ${c.avg}) loggé ${c.cls === 'I' ? 'Intense' : 'Récup'}.`);
+  }
+  try { localStorage.setItem(HCEX_SEEN_LS, JSON.stringify([...seen])); } catch (err) {}
+  if (logged.length) showToast(`Détecté via Oura : ${logged.join(', ')} ✓`);
+  hcExRender();
+}
+function hcExRender() {
+  const el = document.getElementById('hcex-list'); if (!el) return;
+  const all = hcExAll();
+  if (!all.length) { el.innerHTML = '<div class="setting-sub">Aucune activité reçue pour l\'instant — mets à jour HIIT Bridge, puis « Synchroniser maintenant » et accepte la permission « Exercice ».</div>'; return; }
+  el.innerHTML = all.map(e => {
+    const c = hcExClassify(e);
+    const v = c.cls === 'I' ? '<b style="color:var(--green,#3c3)">Intense</b>' : c.cls === 'R' ? '<b>Récup</b>' : '<span style="color:var(--muted)">ignorée</span>';
+    const t = new Date(e.start);
+    const hrTxt = c.avgPct != null ? ` · FC ${c.avg} (${c.avgPct} %) · ${c.highMin} min Z4-5` : ' · pas de FC';
+    const ttl = e.title && e.title !== hcExName(e) ? ` « ${e.title} »` : '';
+    return `<div style="padding:6px 0;border-bottom:1px solid var(--border2);"><div>${e.day.slice(8)}/${e.day.slice(5,7)} ${String(t.getHours()).padStart(2,'0')}h${String(t.getMinutes()).padStart(2,'0')} — ${hcExName(e)}${ttl} → ${v}</div><div style="color:var(--muted);">${c.durMin} min${hrTxt}</div></div>`;
+  }).join('');
 }
 
 function showFreeResultsModal(combined, filename, live = null) {

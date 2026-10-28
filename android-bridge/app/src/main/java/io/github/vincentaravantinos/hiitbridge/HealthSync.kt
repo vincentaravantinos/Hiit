@@ -3,6 +3,7 @@ package io.github.vincentaravantinos.hiitbridge
 import android.content.Context
 import android.util.Base64
 import androidx.health.connect.client.HealthConnectClient
+import androidx.health.connect.client.records.ExerciseSessionRecord
 import androidx.health.connect.client.records.HeartRateRecord
 import androidx.health.connect.client.records.HeartRateVariabilityRmssdRecord
 import androidx.health.connect.client.records.Record
@@ -13,6 +14,7 @@ import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
@@ -68,7 +70,9 @@ object HealthSync {
 
         val cache = prefs.getString("cache", null)?.let { JSONObject(it) } ?: JSONObject()
         // Première fois : 30 jours (limite d'historique Health Connect) ; ensuite les 4 derniers.
-        val back = if (cache.length() == 0) 30L else 4L
+        // Idem la première fois que les activités sont lues (rattrapage des 30 jours).
+        val exBackfill = !prefs.getBoolean("exV1", false)
+        val back = if (cache.length() == 0 || exBackfill) 30L else 4L
         val from = today.minusDays(back).atStartOfDay(zone).minusHours(12).toInstant()
         val to = Instant.now()
 
@@ -122,11 +126,35 @@ object HealthSync {
             .groupBy { it.time.atZone(zone).toLocalDate() }
             .forEach { (d, l) -> day(d).put("weightKg", (l.maxBy { it.time }.weight.inKilograms * 10).roundToInt() / 10.0) }
 
+        // Activités des autres apps (Oura…) : type, titre, durée, FC minute par minute — la PWA
+        // les classe elle-même avec sa FC max. Nos propres séances sont ignorées.
+        var exOk = false
+        try {
+            val exs = readAll(client, ExerciseSessionRecord::class, from, to)
+                .filter { it.metadata.dataOrigin.packageName != ctx.packageName }
+            for (e in exs) {
+                val hr = readAll(client, HeartRateRecord::class, e.startTime, e.endTime)
+                    .flatMap { it.samples }.filter { !it.time.isBefore(e.startTime) && !it.time.isAfter(e.endTime) }
+                val perMin = hr.groupBy { Duration.between(e.startTime, it.time).toMinutes() }
+                val nMin = Duration.between(e.startTime, e.endTime).toMinutes()
+                val hrMin = JSONArray()
+                for (m in 0..nMin) perMin[m]?.let { l -> hrMin.put(l.map { it.beatsPerMinute }.average().roundToInt()) } ?: hrMin.put(0)
+                val o = JSONObject()
+                    .put("id", e.metadata.id).put("type", e.exerciseType)
+                    .put("title", e.title ?: "").put("src", e.metadata.dataOrigin.packageName)
+                    .put("start", e.startTime.toEpochMilli()).put("end", e.endTime.toEpochMilli())
+                    .put("hrMin", hrMin)
+                val d = day(e.startTime.atZone(zone).toLocalDate())
+                (d.optJSONArray("exercises") ?: JSONArray().also { d.put("exercises", it) }).put(o)
+            }
+            exOk = true
+        } catch (e: SecurityException) { /* permission activités pas (encore) accordée */ }
+
         // Fusion avec le cache (les jours relus remplacent les anciens), purge > 60 jours.
         for ((d, o) in days) cache.put(d.toString(), o)
         val oldest = today.minusDays(KEEP_DAYS).toString()
         cache.keys().asSequence().toList().filter { it < oldest }.forEach { cache.remove(it) }
-        prefs.edit().putString("cache", cache.toString()).apply()
+        prefs.edit().putString("cache", cache.toString()).also { if (exOk) it.putBoolean("exV1", true) }.apply()
 
         val doc = JSONObject().put("v", 1).put("updatedAt", System.currentTimeMillis())
             .put("tz", zone.id).put("days", cache)

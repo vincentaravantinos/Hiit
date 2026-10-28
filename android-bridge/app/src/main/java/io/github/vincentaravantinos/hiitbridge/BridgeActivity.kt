@@ -35,7 +35,7 @@ class BridgeActivity : ComponentActivity() {
     )
     private var backgroundAvailable = false
     private val wanted: Set<String>
-        get() = writePermissions + readPermissions +
+        get() = writePermissions + readPermissions + HealthPermission.getReadPermission(ExerciseSessionRecord::class) +
             (if (backgroundAvailable) setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND) else emptySet())
 
     private lateinit var requestPermissions: ActivityResultLauncher<Set<String>>
