@@ -445,7 +445,6 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <label style="display:flex;align-items:center;gap:6px">Squats <input type="number" id="load-squats" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
           <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="16" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
         </div>
-        <div class="sensor-status" id="sensor-status"></div>
         <div class="sensor-status" id="ellip-status" onclick="ellipStatusTap()" style="cursor:pointer"></div>
       </div>
     </div>
@@ -1091,9 +1090,10 @@ function logAppend(msg) {
     try { localStorage.setItem(SENSOR_LOG_KEY, JSON.stringify(sensorLogHistory)); } catch (e2) {}
   }
 }
+// Les étapes techniques vont au journal (Réglages → Exporter le journal), plus sous le
+// programme (28/10). Seuls le bandeau de récupération et le statut natation / activité
+// libre pendant un téléchargement les reprennent, pour montrer que ça avance.
 function sensorDisplay(msg) {
-  const el = document.getElementById('sensor-status');
-  if (el) el.textContent = msg;
   const d = document.getElementById('sensor-banner-detail');
   if (d) d.textContent = msg;
   if (sensorProgressExtraEl) sensorProgressExtraEl.textContent = msg;
@@ -3986,8 +3986,8 @@ async function ellipStatusTap() {
 }
 function ellipRenderStatus() {
   let skip = false; try { skip = localStorage.getItem(ELLIP_SKIP_LS) === '1'; } catch (e) {}
-  const txt = ellipConnected ? `Elliptique connecté${ellipDev && ellipDev.name ? ` (${ellipDev.name})` : ''}`
-    : (ellipConnecting || ellipAutoBusy) ? 'Elliptique : connexion…'
+  // Seul l'état qui demande une action reste affiché sous le programme (28/10).
+  const txt = (ellipConnected || ellipConnecting || ellipAutoBusy) ? ''
     : ellipDev ? 'Elliptique : en attente — pédale pour réveiller la console (ou touche ici)' : '';
   const el = document.getElementById('ellip-status');
   if (el) el.textContent = txt;
