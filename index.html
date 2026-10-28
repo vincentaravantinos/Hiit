@@ -5819,7 +5819,17 @@ function hcExAll() {
   const h = healthData(); if (!h || !h.days) return [];
   const out = [];
   for (const d of Object.keys(h.days)) for (const e of (h.days[d].exercises || [])) out.push({ ...e, day: d });
-  return out.sort((a, b) => b.start - a.start);
+  // Doublons : Oura (ou une app qui recopie) écrit parfois la même séance deux fois avec des
+  // identifiants différents. Même sport + chevauchement > 50 % → on garde celle qui a le plus de FC.
+  const nHr = e => (e.hrMin || []).filter(v => v > 0).length;
+  out.sort((a, b) => nHr(b) - nHr(a) || (b.end - b.start) - (a.end - a.start));
+  const kept = [];
+  for (const e of out) {
+    const dup = kept.some(k => k.id === e.id || (k.type === e.type &&
+      Math.min(k.end, e.end) - Math.max(k.start, e.start) > 0.5 * Math.min(k.end - k.start, e.end - e.start)));
+    if (!dup) kept.push(e);
+  }
+  return kept.sort((a, b) => b.start - a.start);
 }
 function hcExClassify(e) {
   const hrMax = getHrMax();
@@ -5873,7 +5883,7 @@ function showHcExDetail(e) {
   const stat = (v, l) => `<div style="flex:1;text-align:center;"><div style="font-size:20px;font-weight:bold;">${v}</div><div style="font-size:11px;color:var(--muted);">${l}</div></div>`;
   box.innerHTML = `
     <h3 style="text-align:center;margin-bottom:2px;">${freeIcon(hcExName(e))} ${hcExName(e).toUpperCase()}</h3>
-    <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:14px;">${e.day.slice(8)}/${e.day.slice(5,7)} · ${hm(e.start)} → ${hm(e.end)} · via Oura${e.title && e.title !== hcExName(e) ? ` · « ${e.title} »` : ''}</div>
+    <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:14px;">${e.day.slice(8)}/${e.day.slice(5,7)} · ${hm(e.start)} → ${hm(e.end)} · via ${e.src === 'com.ouraring.oura' ? 'Oura' : (e.src || 'Health Connect')}${e.title && e.title !== hcExName(e) ? ` · « ${e.title} »` : ''}</div>
     <div style="display:flex;gap:6px;margin-bottom:14px;">${stat(c.durMin + ' min', 'Durée')}${stat(hr.length ? c.avg : '–', 'FC moy.')}${stat(hr.length ? Math.max(...hr) : '–', 'FC max')}${stat(c.highMin + ' min', 'Z4-Z5')}</div>
     <div style="margin-bottom:14px;">${renderHrChartSvg(e.hrMin.map(v => ({ hr: v })))}</div>
     ${hr.length ? `<div style="margin-bottom:14px;">${zones.map(z => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:4px;"><span style="width:22px;">${z.n}</span><div style="flex:1;height:10px;background:var(--surface2);border-radius:5px;overflow:hidden;"><div style="width:${100 * z.min / zMax}%;height:100%;background:${z.col};"></div></div><span style="width:44px;text-align:right;color:var(--muted);">${z.min} min</span></div>`).join('')}</div>` : ''}
