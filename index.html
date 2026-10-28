@@ -681,9 +681,9 @@ function renderDashboard(){
     const dot=document.createElement('div');
     let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=entry.type==='I'?' done':' done-recup';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
     dot.className=cls;dot.textContent=isDone?'✓':'';
-    const histEntries=getHistoryEntries(dstr);
+    const histEntries=getHistoryEntries(dstr);const hcEx=hcExForDay(dstr);
     if(isClickable){
-      if(histEntries.length){dot.onclick=()=>showDayActionMenu(dstr,histEntries,entry);dot.title='Voir les options';}
+      if(histEntries.length||hcEx.length){dot.onclick=()=>showDayActionMenu(dstr,histEntries,entry,hcEx);dot.title='Voir les options';}
       else{dot.onclick=()=>toggleDay(dstr);dot.title=!isDone?'Ajouter Intense':entry.type==='I'?'Passer en Récup':'Retirer la séance';}
     }
     const lbl=document.createElement('div');lbl.className='day-label';lbl.textContent=DAYS[i];
@@ -3012,7 +3012,7 @@ async function sessionModalDelete(btn) {
   btn.closest('.sensor-modal-backdrop').remove();
 }
 
-function showDayActionMenu(dstr, histEntries, entry) {
+function showDayActionMenu(dstr, histEntries, entry, hcEx = []) {
   const modal = document.createElement('div');
   modal.className = 'sensor-modal-backdrop';
   modal.style.display = 'flex';
@@ -3042,6 +3042,15 @@ function showDayActionMenu(dstr, histEntries, entry) {
     row.style.cssText = 'display:flex;gap:8px;margin-bottom:8px;';
     row.append(btn, del);
     box.appendChild(row);
+  });
+
+  hcEx.forEach(e => {
+    const btn = document.createElement('button');
+    btn.className = 'btn-connect';
+    btn.style.marginBottom = '8px';
+    btn.textContent = `${freeIcon(hcExName(e))} Voir ${hcExName(e)} (Oura)`;
+    btn.onclick = () => { modal.remove(); showHcExDetail(e); };
+    box.appendChild(btn);
   });
 
   const toggleBtn = document.createElement('button');
@@ -5841,6 +5850,44 @@ function hcExProcess() {
   if (logged.length) showToast(`Détecté via Oura : ${logged.join(', ')} ✓`);
   hcExRender();
 }
+// Activités Oura d'un jour qui comptent dans le Suivi (celles classées Intense).
+function hcExForDay(dstr) { try { return hcExAll().filter(e => e.day === dstr && hcExClassify(e).cls); } catch (err) { return []; } }
+function showHcExDetail(e) {
+  const hrMax = getHrMax();
+  const c = hcExClassify(e);
+  const hr = (e.hrMin || []).filter(v => v > 0);
+  const hm = t => { const d = new Date(t); return String(d.getHours()).padStart(2,'0') + 'h' + String(d.getMinutes()).padStart(2,'0'); };
+  const zones = [['Z1', 0, .6, '#7f8c8d'], ['Z2', .6, .7, '#3498db'], ['Z3', .7, .8, '#2ecc71'], ['Z4', .8, .9, '#f39c12'], ['Z5', .9, 9, '#e74c3c']]
+    .map(([n, lo, hi, col]) => ({ n, col, min: hr.filter(v => v >= lo * hrMax && v < hi * hrMax).length }));
+  const zMax = Math.max(1, ...zones.map(z => z.min));
+  const verdict = c.cls === 'I' ? 'Intense' : c.cls === 'R' ? 'Récup' : 'Ignorée';
+  const why = c.cls === 'I'
+    ? (c.highMin >= FREE_INTENSE_HIGH_S / 60 ? `${c.highMin} min au-dessus de 80 % FC max (seuil 10)` : `FC moy. ${c.avgPct} % FC max (seuil 75 %)`)
+    : (hr.length < 5 ? 'pas assez de FC enregistrée' : c.durMin < 20 ? 'moins de 20 min' : `${c.highMin} min Z4-Z5 (< 10) et FC moy. ${c.avgPct} % (< 75 %)`);
+  const modal = document.createElement('div');
+  modal.className = 'sensor-modal-backdrop';
+  modal.style.display = 'flex';
+  const box = document.createElement('div');
+  box.className = 'sensor-modal';
+  box.style.cssText = 'max-width:360px;max-height:85vh;overflow-y:auto;text-align:left;';
+  const stat = (v, l) => `<div style="flex:1;text-align:center;"><div style="font-size:20px;font-weight:bold;">${v}</div><div style="font-size:11px;color:var(--muted);">${l}</div></div>`;
+  box.innerHTML = `
+    <h3 style="text-align:center;margin-bottom:2px;">${freeIcon(hcExName(e))} ${hcExName(e).toUpperCase()}</h3>
+    <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:14px;">${e.day.slice(8)}/${e.day.slice(5,7)} · ${hm(e.start)} → ${hm(e.end)} · via Oura${e.title && e.title !== hcExName(e) ? ` · « ${e.title} »` : ''}</div>
+    <div style="display:flex;gap:6px;margin-bottom:14px;">${stat(c.durMin + ' min', 'Durée')}${stat(hr.length ? c.avg : '–', 'FC moy.')}${stat(hr.length ? Math.max(...hr) : '–', 'FC max')}${stat(c.highMin + ' min', 'Z4-Z5')}</div>
+    <div style="margin-bottom:14px;">${renderHrChartSvg(e.hrMin.map(v => ({ hr: v })))}</div>
+    ${hr.length ? `<div style="margin-bottom:14px;">${zones.map(z => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:4px;"><span style="width:22px;">${z.n}</span><div style="flex:1;height:10px;background:var(--surface2);border-radius:5px;overflow:hidden;"><div style="width:${100 * z.min / zMax}%;height:100%;background:${z.col};"></div></div><span style="width:44px;text-align:right;color:var(--muted);">${z.min} min</span></div>`).join('')}</div>` : ''}
+    <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">Classée <b style="color:var(--text);">${verdict}</b> : ${why}. FC max de référence ${hrMax} bpm.</div>`;
+  const close = document.createElement('button');
+  close.className = 'btn-connect';
+  close.textContent = 'Fermer';
+  close.onclick = () => modal.remove();
+  box.appendChild(close);
+  modal.appendChild(box);
+  modal.addEventListener('click', ev => { if (ev.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
 function hcExRender() {
   const el = document.getElementById('hcex-list'); if (!el) return;
   const all = hcExAll();
@@ -5851,7 +5898,7 @@ function hcExRender() {
     const t = new Date(e.start);
     const hrTxt = c.avgPct != null ? ` · FC ${c.avg} (${c.avgPct} %) · ${c.highMin} min Z4-5` : ' · pas de FC';
     const ttl = e.title && e.title !== hcExName(e) ? ` « ${e.title} »` : '';
-    return `<div style="padding:6px 0;border-bottom:1px solid var(--border2);"><div>${e.day.slice(8)}/${e.day.slice(5,7)} ${String(t.getHours()).padStart(2,'0')}h${String(t.getMinutes()).padStart(2,'0')} — ${hcExName(e)}${ttl} → ${v}</div><div style="color:var(--muted);">${c.durMin} min${hrTxt}</div></div>`;
+    return `<div onclick="showHcExDetail(hcExAll().find(x => x.id === '${e.id}'))" style="padding:6px 0;border-bottom:1px solid var(--border2);cursor:pointer;"><div>${e.day.slice(8)}/${e.day.slice(5,7)} ${String(t.getHours()).padStart(2,'0')}h${String(t.getMinutes()).padStart(2,'0')} — ${hcExName(e)}${ttl} → ${v}</div><div style="color:var(--muted);">${c.durMin} min${hrTxt}</div></div>`;
   }).join('');
 }
 
