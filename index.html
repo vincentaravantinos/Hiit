@@ -149,6 +149,10 @@ body {
 .sensor-modal button { width: 100%; padding: 14px; margin: 6px 0; border: none; border-radius: 10px; font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 1px; cursor: pointer; }
 .sensor-modal .btn-connect { background: var(--accent); color: #111; }
 .sensor-modal .btn-skip { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); }
+.batt-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; margin-bottom: 12px; border: 1px solid var(--border2); border-radius: 12px; background: var(--surface2); color: var(--muted); font-family: var(--font); font-size: 12px; cursor: pointer; text-align: left; }
+.batt-card .batt-val { color: var(--text); font-weight: 600; text-align: right; }
+.batt-val[data-level="mid"] { color: #ffb454 !important; }
+.batt-val[data-level="low"] { color: #ff6b6b !important; }
 .sensor-status { font-size: 11px; color: var(--muted); text-align: center; margin-top: 6px; letter-spacing: 1px; min-height: 14px; }
 .position-toggle { display: flex; gap: 8px; justify-content: center; margin-top: 8px; }
 .position-toggle button { flex: 1; max-width: 130px; padding: 8px; border: 1px solid var(--border2); border-radius: 8px; background: var(--surface2); color: var(--muted); font-family: var(--font); font-size: 11px; letter-spacing: 1px; cursor: pointer; }
@@ -400,6 +404,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     <div id="top-streaks"></div>
   </div>
   <div id="tab-activity" class="tab-panel">
+    <button class="batt-card" onclick="sensorBatteryCheck()"><span>🔋 Capteur Polar</span><span class="batt-val"></span></button>
     <button class="act-card" id="act-card-timer" onclick="openActivity('timer')"><span class="ico">⏱️</span><span><div class="ttl">HIIT</div><div class="sub">Circuit minuté, comptage des répétitions</div></span></button>
     <button class="act-card" id="act-card-swim" onclick="openActivity('swim')"><span class="ico">🏊</span><span><div class="ttl">Natation</div><div class="sub">Contre-courant, analyse des mouvements</div></span></button>
     <button class="act-card" id="act-card-free" onclick="openActivity('free')"><span class="ico">🧗</span><span><div class="ttl">Activité libre</div><div class="sub">Escalade, vélo… FC seule, classée en fin de séance</div></span></button>
@@ -513,6 +518,8 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     </div>
     <div class="settings-section">
       <div class="settings-label">Capteur Polar</div>
+      <div class="setting-row"><div><div class="setting-name">Batterie</div><div class="setting-sub batt-val"></div></div><div style="display:flex;gap:6px"><button onclick="sensorBatteryCheck()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Vérifier</button><button onclick="sensorPowerOffNow(this)" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Éteindre</button></div></div>
+      <div class="setting-row"><div><div class="setting-name">Éteindre en fin de séance</div><div class="setting-sub">Une fois les données récupérées. Sinon (ou en cas d'échec), un rappel s'affiche</div></div><div class="toggle" id="autooff-toggle" onclick="toggleSensorAutoOff()"></div></div>
       <div class="setting-row"><div><div class="setting-name">Position du bracelet</div><div class="setting-sub">Enregistrée avec les données de chaque séance</div></div></div>
       <div class="position-toggle" id="position-toggle" style="margin-bottom:14px">
         <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
@@ -520,7 +527,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
       </div>
       <div class="setting-row"><div><div class="setting-name">Décompte des reps en direct</div><div class="setting-sub">La voix compte tes reps (expérimental). S'arrête dès « Prochainement » / « 3, 2, 1 »</div></div><div class="toggle" id="livecount-toggle" onclick="toggleLiveOpt('livecount')"></div></div>
       <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
-      <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
+      <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct et la batterie</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
       <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
       <div style="display:flex;gap:8px;">
         <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
@@ -979,7 +986,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -1704,7 +1711,7 @@ async function stopStrayRecordings() {
 const SENSOR_NAME_PREFIXES = ['Polar Sense', 'Polar OH1'];
 const SENSOR_ID_LS = 'hiitSensorDeviceId';
 function sensorRequestOpts() {
-  return { filters: SENSOR_NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices: [PMD_SERVICE, PFTP_SERVICE, 'heart_rate'] };
+  return { filters: SENSOR_NAME_PREFIXES.map(p => ({ namePrefix: p })), optionalServices: [PMD_SERVICE, PFTP_SERVICE, 'heart_rate', 'battery_service'] };
 }
 function isSensorName(name) { return !!name && SENSOR_NAME_PREFIXES.some(p => name.startsWith(p)); }
 function sensorLabel() { return device && device.name ? `« ${device.name} »` : 'le capteur'; }
@@ -1802,6 +1809,7 @@ async function ensureConnected(maxAttempts = 4) {
       log(`Connecté, lecture des services... ${n}`);
       await connectPmd();
       try { localStorage.setItem(SENSOR_ID_LS, device.id); } catch (e) {}
+      await sensorReadBattery('connexion'); // ne lève jamais d'erreur
       return;
     } catch (err) {
       lastErr = err;
@@ -1884,9 +1892,226 @@ async function sensorSettingsPick() {
   device = picked;
   try { localStorage.setItem(SENSOR_ID_LS, device.id); } catch (e) {}
   const sub = document.getElementById('sensor-pick-sub');
-  if (sub) sub.textContent = `${device.name || 'Capteur'} choisi — FC en direct autorisée`;
-  log(`Capteur choisi dans la liste : ${sensorLabel()} (services : PMD, PFTP, cardio).`);
+  if (sub) sub.textContent = `${device.name || 'Capteur'} choisi — FC en direct et batterie autorisées`;
+  log(`Capteur choisi dans la liste : ${sensorLabel()} (services : PMD, PFTP, cardio, batterie).`);
   showToast('✓ Capteur choisi');
+  battDenied = false; battRender();
+}
+
+// ======= Batterie du capteur + extinction en fin de séance (28/10) =======
+// Batterie : service standard « battery_service », lu à chaque connexion et juste avant
+// l'extinction. La dernière valeur connue reste affichée (onglet Activité, Réglages) avec
+// son ancienneté : le capteur n'a pas besoin d'être allumé pour la voir.
+// Extinction : même commande que turnDeviceOff() du SDK Polar officiel — notification
+// PFTP RESET (id 2) avec PbPFtpFactoryResetParams { sleep: true, do_factory_defaults:
+// false } envoyée sur la caractéristique H2D. do_factory_defaults vaut true par défaut
+// dans le proto : il est donc écrit explicitement à false (sinon remise à zéro usine).
+// Vérification : après la commande, plus aucune annonce Bluetooth = capteur éteint ;
+// sinon (ou si la commande échoue) un rappel s'affiche.
+const PFTP_D2H = 'fb005c52-02e7-f387-1cad-8acd2d8df0c8';
+const PFTP_H2D = 'fb005c53-02e7-f387-1cad-8acd2d8df0c8';
+const SENSOR_BATT_LS = 'hiitSensorBattery';
+const SENSOR_AUTOOFF_LS = 'hiitSensorAutoOff';
+const SENSOR_OFF_REMIND_LS = 'hiitSensorOffReminder';
+let battDenied = false;   // service batterie non autorisé (capteur choisi avant cette version)
+let battChecking = false;
+
+function battGet() { try { return JSON.parse(localStorage.getItem(SENSOR_BATT_LS) || 'null'); } catch (e) { return null; } }
+function battAgo(at) {
+  const m = Math.floor((Date.now() - at) / 60000);
+  if (m < 2) return 'à l\'instant';
+  if (m < 60) return `il y a ${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `il y a ${h} h`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'hier' : `il y a ${d} j`;
+}
+function battRender() {
+  const b = battGet();
+  let txt, cls = '';
+  if (battChecking) txt = 'Recherche du capteur...';
+  else if (battDenied && !b) txt = 'Non autorisée — Réglages → Bracelet Polar → Choisir';
+  else if (!b) txt = 'Inconnue — appuie pour vérifier';
+  else {
+    txt = `${b.pct} % · ${battAgo(b.at)}`;
+    if (b.pct <= 15) { cls = 'low'; txt += ' · à recharger'; }
+    else if (b.pct <= 30) cls = 'mid';
+  }
+  document.querySelectorAll('.batt-val').forEach(el => { el.textContent = txt; el.dataset.level = cls; });
+  const t = document.getElementById('autooff-toggle'); if (t) t.classList.toggle('on', sensorAutoOffOn());
+}
+setInterval(battRender, 60000);
+
+async function sensorReadBattery(why) {
+  if (!device || !server || !device.gatt.connected) return null;
+  try {
+    const svc = await withTimeout(server.getPrimaryService('battery_service'), 3000, 'service batterie');
+    const ch = await withTimeout(svc.getCharacteristic('battery_level'), 3000, 'caractéristique batterie');
+    const v = await withTimeout(ch.readValue(), 3000, 'lecture batterie');
+    const pct = v.getUint8(0);
+    try { localStorage.setItem(SENSOR_BATT_LS, JSON.stringify({ pct, at: Date.now() })); } catch (e) {}
+    battDenied = false;
+    logAppend(`Batterie du capteur : ${pct} % (${why}).`);
+    battRender();
+    return pct;
+  } catch (err) {
+    if (err && err.name === 'SecurityError') battDenied = true;
+    logError('Lecture batterie (' + why + ')', err);
+    battRender();
+    return null;
+  }
+}
+
+function sensorAutoOffOn() { try { return localStorage.getItem(SENSOR_AUTOOFF_LS) !== '0'; } catch (e) { return true; } }
+function toggleSensorAutoOff() { try { localStorage.setItem(SENSOR_AUTOOFF_LS, sensorAutoOffOn() ? '0' : '1'); } catch (e) {} battRender(); }
+
+// Commande d'extinction (lien déjà établi). Le capteur coupe le lien de lui-même ensuite.
+async function sensorSendPowerOff() {
+  if (!device || !server || !device.gatt.connected) throw new Error('Capteur non connecté');
+  const svc = await withTimeout(server.getPrimaryService(PFTP_SERVICE), 5000, 'getPrimaryService(PFTP)');
+  const d2h = await withTimeout(svc.getCharacteristic(PFTP_D2H), 5000, 'getCharacteristic(D2H)');
+  try { await withTimeout(d2h.startNotifications(), 5000, 'abonnement D2H'); } catch (e) { logError('Abonnement D2H (on continue)', e); }
+  const h2d = await withTimeout(svc.getCharacteristic(PFTP_H2D), 5000, 'getCharacteristic(H2D)');
+  // [id notification RESET=2] + protobuf : champ 1 sleep=true (08 01), champ 2 do_factory_defaults=false (10 00)
+  const frames = buildRfc76Frames(new Uint8Array([0x02, 0x08, 0x01, 0x10, 0x00]));
+  for (const f of frames) {
+    try { await withTimeout(h2d.writeValueWithoutResponse(f), 5000, 'écriture H2D'); }
+    catch (e) {
+      if (!device.gatt.connected) return; // lien déjà coupé par le capteur : il s'éteint
+      await withTimeout(h2d.writeValueWithResponse(f), 5000, 'écriture H2D (avec réponse)');
+    }
+  }
+  logAppend('Commande d\'extinction envoyée au capteur.');
+}
+
+// Plus aucune annonce pendant 8 s (4 s après la commande) = éteint. Tourne en arrière-plan.
+async function sensorVerifyOff(dev) {
+  await sleep(4000);
+  if (device !== dev || bleBusy || sensorConnecting) return;
+  try {
+    await waitForOneAdvertisement(8000);
+    logAppend('Capteur encore visible après la demande d\'extinction.');
+    sensorOffReminderShow('still-on');
+  } catch (e) {
+    if (/indisponible|watchAdvertisements/.test((e && e.message) || '')) { sensorOffReminderShow('unknown'); return; }
+    logAppend('Capteur éteint ✓ (plus aucune annonce).');
+    showToast('✓ Capteur éteint');
+    sensorOffReminderHide();
+  }
+}
+
+// Fin d'utilisation du capteur (séance terminée, données récupérées) : batterie, extinction
+// si activée, sinon rappel. Ne lève jamais d'erreur.
+async function sensorWrapUp() {
+  const dev = device;
+  try { await sensorReadBattery('fin de séance'); } catch (e) {}
+  if (!sensorAutoOffOn()) { safeDisconnect(); sensorOffReminderShow('manual'); return; }
+  let sent = false;
+  try { await sensorSendPowerOff(); sent = true; } catch (err) { logError('Extinction automatique du capteur', err); }
+  safeDisconnect();
+  if (sent) sensorVerifyOff(dev); else sensorOffReminderShow('failed');
+}
+
+// Sélection du capteur depuis un tap (geste utilisateur exigé par requestDevice).
+async function sensorDeviceFromTap() {
+  dropWrongDevice();
+  if (device) return device;
+  let found = null;
+  if (typeof navigator.bluetooth?.getDevices === 'function') {
+    const known = await navigator.bluetooth.getDevices().catch(() => []);
+    found = pickKnownSensor(known);
+  }
+  device = found || await navigator.bluetooth.requestDevice(sensorRequestOpts());
+  return device;
+}
+function sensorIdleForCheck() {
+  return !bleBusy && !sensorRecoverBusy && !sensorConnecting && (typeof runningActivity !== 'function' || !runningActivity());
+}
+
+async function sensorBatteryCheck() {
+  if (battChecking) return;
+  if (device && device.gatt.connected && controlChar && !bleBusy) {
+    bleBusy++; try { await sensorReadBattery('vérification'); } finally { bleBusy--; }
+    return;
+  }
+  if (!sensorIdleForCheck()) { showToast('Capteur occupé — réessaie après la séance'); return; }
+  try { await sensorDeviceFromTap(); } catch (err) { logError('Vérification batterie : capteur non choisi', err); return; }
+  battChecking = true; battRender();
+  bleBusy++;
+  let ok = false;
+  try { await ensureConnected(1); ok = true; }
+  catch (err) { logError('Vérification batterie', err); }
+  finally {
+    bleBusy--; battChecking = false;
+    if (!sensorActive) safeDisconnect();
+    battRender();
+  }
+  if (!ok) showToast('Capteur injoignable — éteint ou trop loin ?');
+  else if (battDenied) showToast('Batterie non autorisée : Réglages → Bracelet Polar → Choisir');
+}
+
+async function sensorPowerOffNow(btn) {
+  if (!sensorIdleForCheck()) { showToast('Capteur occupé — réessaie dans un instant'); return; }
+  try { await sensorDeviceFromTap(); } catch (err) { logError('Extinction : capteur non choisi', err); return; }
+  const label = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Extinction...'; }
+  bleBusy++;
+  const dev = device;
+  let sent = false;
+  try {
+    await ensureConnected(1);
+    try { await sensorSendPowerOff(); sent = true; } catch (err) { logError('Extinction manuelle', err); }
+  } catch (err) {
+    logError('Extinction : capteur injoignable', err);
+    showToast('Capteur injoignable — déjà éteint ? Si oui, touche « C\'est fait »');
+  } finally {
+    bleBusy--;
+    safeDisconnect(); sensorActive = false;
+    if (btn) { btn.disabled = false; btn.textContent = label; }
+  }
+  if (sent) { showToast('Extinction demandée...'); sensorVerifyOff(dev); }
+}
+
+// ---- Rappel « éteins le capteur » : bandeau persistant (survit au rechargement) ----
+const OFF_REMIND_TEXT = {
+  manual: 'Pense à éteindre le capteur Polar.',
+  failed: 'Le capteur n\'a pas pu être éteint automatiquement — pense à l\'éteindre.',
+  'still-on': 'Le capteur semble encore allumé — pense à l\'éteindre.',
+  unknown: 'Extinction demandée, sans confirmation possible — vérifie que le capteur est éteint.',
+};
+function sensorOffReminderShow(kind) {
+  try { localStorage.setItem(SENSOR_OFF_REMIND_LS, JSON.stringify({ kind, at: Date.now() })); } catch (e) {}
+  sensorOffReminderRender();
+  try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {}
+  try {
+    if (document.hidden && 'Notification' in window && Notification.permission === 'granted')
+      new Notification('Capteur Polar', { body: OFF_REMIND_TEXT[kind] || OFF_REMIND_TEXT.manual });
+  } catch (e) {}
+}
+function sensorOffReminderHide() {
+  try { localStorage.removeItem(SENSOR_OFF_REMIND_LS); } catch (e) {}
+  const box = document.getElementById('off-banner'); if (box) box.remove();
+}
+function sensorOffReminderRender() {
+  let r = null; try { r = JSON.parse(localStorage.getItem(SENSOR_OFF_REMIND_LS) || 'null'); } catch (e) {}
+  let box = document.getElementById('off-banner');
+  if (!r) { if (box) box.remove(); return; }
+  if (!box) {
+    const anchor = document.getElementById('update-banner');
+    if (!anchor) return;
+    box = document.createElement('div');
+    box.id = 'off-banner';
+    box.style.cssText = 'position:relative;z-index:998;background:#2a2417;border-bottom:2px solid #ffb454;padding:10px 14px;font-family:var(--font);text-align:center';
+    box.innerHTML = '<div id="off-banner-text" style="font-size:13px;color:#fff;line-height:1.35"></div>'
+      + '<div style="font-size:11px;color:#c9b998;margin-top:3px">Appui long sur le bouton du capteur, ou :</div>'
+      + '<div style="display:flex;gap:8px;margin-top:8px">'
+      + '<button id="off-banner-btn" style="flex:1;padding:10px;border:none;border-radius:9px;background:#ffb454;color:#111;font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">Éteindre maintenant</button>'
+      + '<button id="off-banner-done" style="flex:1;padding:10px;border:1px solid #6b5a38;border-radius:9px;background:none;color:#e8dcc4;font-family:var(--font);font-size:13px;cursor:pointer">C\'est fait</button></div>';
+    anchor.insertAdjacentElement('afterend', box);
+    document.getElementById('off-banner-btn').onclick = (e) => sensorPowerOffNow(e.currentTarget);
+    document.getElementById('off-banner-done').onclick = () => sensorOffReminderHide();
+  }
+  document.getElementById('off-banner-text').textContent = '🔋 ' + (OFF_REMIND_TEXT[r.kind] || OFF_REMIND_TEXT.manual);
 }
 
 // ======= Séance HIIT en direct (20/10) =======
@@ -2073,7 +2298,7 @@ async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
   if (L.hr.mode === 'live') {
     combined.hr = { startTimeStr, samples: L.hr.samples };
     try { await stopAllRecordings(REC_TYPES.filter(r => r.name !== 'HR')); } catch (e) {}
-    safeDisconnect();
+    await sensorWrapUp(); // batterie, extinction (ou rappel), puis lien coupé
     sensorActive = false;
   } else if (L.hr.mode === 'internal') {
     const r = await retrieveAllSensorData(L.hr.baseline, 3, [HR_REC]);
@@ -2477,7 +2702,7 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
       }
     }
     log('Données du capteur récupérées ✓');
-    safeDisconnect(); // lien inutile désormais : on libère le capteur
+    await sensorWrapUp(); // batterie, extinction (ou rappel), puis lien coupé
     sensorActive = false;
     return { ok: true, combined };
   } finally { bleBusy--; }
