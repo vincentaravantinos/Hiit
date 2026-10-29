@@ -29,7 +29,7 @@ object OuraSync {
             "grant_type" to "authorization_code", "code" to code, "redirect_uri" to redirect,
             "client_id" to cid, "client_secret" to secret,
         ))
-        prefs(ctx).edit().putString("cid", cid).putString("secret", secret).apply()
+        prefs(ctx).edit().putString("cid", cid.trim()).putString("secret", secret.trim()).apply()
         saveTokens(ctx, resp)
     }
 
@@ -106,10 +106,21 @@ object OuraSync {
         return out
     }
 
+    /** Identifiants client d'abord dans le corps ; si Oura répond invalid_client, nouvel essai en
+     *  HTTP Basic (l'échec d'authentification client ne consomme pas le code d'autorisation). */
     private fun tokenRequest(form: Map<String, String>): JSONObject {
-        val body = form.entries.joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
-        val (code, resp) = http("POST", TOKEN_URL, mapOf("Content-Type" to "application/x-www-form-urlencoded"), body)
-        if (code != 200) throw IllegalStateException("Oura (jeton) a répondu $code : ${resp.take(160)}")
+        val f = form.mapValues { it.value.trim() }
+        val ct = "Content-Type" to "application/x-www-form-urlencoded"
+        fun encode(m: Map<String, String>) = m.entries.joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
+        var (code, resp) = http("POST", TOKEN_URL, mapOf(ct), encode(f))
+        if (code == 401 || resp.contains("invalid_client")) {
+            val basic = android.util.Base64.encodeToString(
+                "${f["client_id"]}:${f["client_secret"]}".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+            val r2 = http("POST", TOKEN_URL, mapOf(ct, "Authorization" to "Basic $basic"),
+                encode(f - "client_id" - "client_secret"))
+            code = r2.first; resp = r2.second
+        }
+        if (code != 200) throw IllegalStateException("Oura (jeton) a répondu $code : ${resp.take(200)}")
         return JSONObject(resp)
     }
 
