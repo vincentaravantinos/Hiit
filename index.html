@@ -567,7 +567,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <div class="setting-sub" style="margin:8px 0;">Crée une application sur cloud.ouraring.com (Developer) avec l'URL de redirection <b>https://vincentaravantinos.github.io/Hiit/</b> et le scope « daily », puis colle ici son Client ID et son Client Secret. Ils restent sur ce téléphone et dans HIIT Bridge.</div>
           <div style="display:flex;flex-direction:column;gap:8px;">
             <input type="text" id="oura-cid-input" placeholder="Client ID" autocomplete="off" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
-            <input type="password" id="oura-secret-input" placeholder="Client Secret" autocomplete="off" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
+            <input type="text" id="oura-secret-input" name="oura-app-secret" placeholder="Client Secret" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" style="-webkit-text-security:disc;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
             <button onclick="connectOura()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Connecter Oura</button>
           </div>
         </details>
@@ -5414,6 +5414,12 @@ function connectOura() {
   saveOuraCreds();
   const cid = lsGet(OURA_CID_LS);
   if (!cid || !lsGet(OURA_SECRET_LS)) { showToast('Renseigne le Client ID et le Client Secret Oura'); return; }
+  const sec = lsGet(OURA_SECRET_LS);
+  if (/^(github_pat_|ghp_|gho_)/.test(sec) || sec === (localStorage.getItem('hiitGithubToken') || '')) {
+    showToast('Le champ Client Secret contient ton token GitHub (remplissage auto) : recolle le secret Oura');
+    const el = document.getElementById('oura-secret-input'); if (el) { el.value = ''; el.focus(); }
+    lsSet(OURA_SECRET_LS, ''); return;
+  }
   const state = 'oura-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
   lsSet(OURA_STATE_LS, state);
   location.href = 'https://cloud.ouraring.com/oauth/authorize?response_type=code'
