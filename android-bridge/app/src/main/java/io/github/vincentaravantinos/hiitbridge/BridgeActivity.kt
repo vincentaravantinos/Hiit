@@ -41,6 +41,8 @@ class BridgeActivity : ComponentActivity() {
             (if (backgroundAvailable) setOf(HealthPermission.PERMISSION_READ_HEALTH_DATA_IN_BACKGROUND) else emptySet())
 
     private lateinit var requestPermissions: ActivityResultLauncher<Set<String>>
+    private lateinit var requestBtConnect: ActivityResultLauncher<String>
+    private lateinit var enableBt: ActivityResultLauncher<Intent>
     private var pending: SessionPayload? = null
     private var setupOnly = false
     private var spotify: SpotifyStarter? = null
@@ -65,6 +67,14 @@ class BridgeActivity : ComponentActivity() {
             if (granted.containsAll(writePermissions) || pending == null) proceed(granted)
             else done("Permissions Health Connect refusées — rien n'a été écrit.")
         }
+        requestBtConnect = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+        ) { ok -> if (ok) askEnableBt() else openBtSettings() }
+        enableBt = registerForActivityResult(
+            androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+        ) { r ->
+            if (r.resultCode == RESULT_OK) done("✓ Bluetooth activé") else finish()
+        }
         handle(intent)
     }
 
@@ -73,7 +83,40 @@ class BridgeActivity : ComponentActivity() {
         handle(intent)
     }
 
+    private fun btAdapter(): android.bluetooth.BluetoothAdapter? =
+        (getSystemService(BLUETOOTH_SERVICE) as? android.bluetooth.BluetoothManager)?.adapter
+
+    // Fenêtre système « HIIT Bridge veut activer le Bluetooth » : un seul tap sur Autoriser.
+    @Suppress("MissingPermission")
+    private fun askEnableBt() {
+        try { enableBt.launch(Intent(android.bluetooth.BluetoothAdapter.ACTION_REQUEST_ENABLE)) }
+        catch (e: Exception) { openBtSettings() }
+    }
+    // Repli : l'écran Bluetooth des paramètres, directement.
+    private fun openBtSettings() {
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_BLUETOOTH_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            Toast.makeText(this, "Active le Bluetooth, puis reviens à l'app HIIT", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Impossible d'ouvrir les réglages Bluetooth : ${e.message}", Toast.LENGTH_LONG).show()
+        }
+        finish()
+    }
+
     private fun handle(intent: Intent?) {
+        // hiitbridge://bluetooth : allumer le Bluetooth du téléphone (29/10).
+        if (intent?.data?.host == "bluetooth") {
+            val a = btAdapter()
+            when {
+                a == null -> done("Ce téléphone n'a pas de Bluetooth.")
+                a.isEnabled -> done("✓ Bluetooth déjà activé")
+                android.os.Build.VERSION.SDK_INT >= 31 &&
+                    checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != android.content.pm.PackageManager.PERMISSION_GRANTED ->
+                    requestBtConnect.launch(android.Manifest.permission.BLUETOOTH_CONNECT)
+                else -> askEnableBt()
+            }
+            return
+        }
         // hiitbridge://chrome-reset?pkg=… : ouvrir la fiche système de Chrome (bouton « Forcer l'arrêt »).
         // Android 14+ interdit à une app d'arrêter une autre app : c'est le plus court chemin possible.
         if (intent?.data?.host == "chrome-reset") {

@@ -607,6 +607,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     <h3 id="sensor-modal-title">CAPTEUR NON TROUVÉ</h3>
     <p id="sensor-modal-text">Impossible de se connecter au bracelet Polar. Continuer sans capteur, ou réessayer ?</p>
     <p id="sensor-error-detail" style="font-size:11px;color:var(--muted);opacity:0.7;margin-top:-10px;margin-bottom:18px;word-break:break-word;"></p>
+    <button class="btn-connect" id="sensor-modal-bt" onclick="btEnableNow()" style="display:none">Activer le Bluetooth</button>
     <button class="btn-connect" id="sensor-modal-retry" onclick="sensorModalRetry()">Réessayer</button>
     <button class="btn-skip" id="sensor-modal-pick" onclick="sensorModalRetry(true)" style="display:none">Choisir un autre capteur</button>
     <button class="btn-skip" id="sensor-modal-skip" onclick="sensorModalSkip()">Continuer sans capteur</button>
@@ -1799,6 +1800,23 @@ async function waitForOneAdvertisement(timeoutMs) {
 const BT_OFF_MSG = 'Bluetooth désactivé sur le téléphone — active-le puis réessaie';
 function btOffError() { const e = fatalError(BT_OFF_MSG); e.btOff = true; return e; }
 function isBtOffMsg(m) { return m === BT_OFF_MSG || /adapter|bluetooth (is )?(off|disabled|turned off|not available)|radio/i.test(m || ''); }
+// Un tap : le pont Android ouvre la fenêtre système « Activer le Bluetooth ? » (ou, à
+// défaut, l'écran Bluetooth des paramètres). Au retour dans l'app, nouvel essai automatique.
+let btEnableAsked = false;
+function btEnableNow() {
+  btEnableAsked = true;
+  location.href = `intent://bluetooth#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
+}
+document.addEventListener('visibilitychange', async () => {
+  if (document.hidden || !btEnableAsked) return;
+  btEnableAsked = false;
+  await sleep(800); // laisse le Bluetooth finir de démarrer
+  if (await btAdapterOff()) return;
+  sensorLastError = null;
+  const m = document.getElementById('sensor-modal');
+  if (m && m.style.display !== 'none' && device) sensorModalRetry(false);
+  else showToast('✓ Bluetooth activé');
+});
 async function btAdapterOff(err) {
   if (err && isBtOffMsg(err.message)) return true;
   try {
@@ -2551,13 +2569,14 @@ function sensorModalOpen() {
   const btOff = isBtOffMsg(sensorLastError);
   document.getElementById('sensor-modal-title').textContent = btOff ? 'BLUETOOTH DÉSACTIVÉ' : has ? 'CAPTEUR INJOIGNABLE' : 'CHOISIR LE CAPTEUR';
   document.getElementById('sensor-modal-text').textContent = btOff
-    ? 'Le Bluetooth du téléphone est coupé. Active-le, puis touche Réessayer.'
+    ? 'Le Bluetooth du téléphone est coupé. La connexion reprend toute seule une fois activé.'
     : has ? `Connexion à ${sensorLabel()} impossible. Vérifie qu'il est allumé et tout près du téléphone.`
     : 'Allume le capteur, puis sélectionne « Polar Sense … » dans la liste.';
   document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
   document.getElementById('sensor-modal-retry').textContent = has ? 'Réessayer' : 'Choisir le capteur';
-  document.getElementById('sensor-modal-retry').style.display = '';
-  document.getElementById('sensor-modal-pick').style.display = has ? '' : 'none';
+  document.getElementById('sensor-modal-bt').style.display = btOff ? '' : 'none';
+  document.getElementById('sensor-modal-retry').style.display = btOff ? 'none' : '';
+  document.getElementById('sensor-modal-pick').style.display = has && !btOff ? '' : 'none';
   document.getElementById('sensor-modal-skip').textContent = 'Continuer sans capteur';
   document.getElementById('sensor-modal').style.display = 'flex';
 }
@@ -2566,6 +2585,7 @@ function sensorModalConnecting() {
   document.getElementById('sensor-modal-title').textContent = 'CONNEXION AU CAPTEUR...';
   document.getElementById('sensor-modal-text').textContent = 'Recherche du capteur en cours. La séance démarre dès qu\'il est connecté.';
   document.getElementById('sensor-error-detail').textContent = '';
+  document.getElementById('sensor-modal-bt').style.display = 'none';
   document.getElementById('sensor-modal-retry').style.display = 'none';
   document.getElementById('sensor-modal-pick').style.display = 'none';
   document.getElementById('sensor-modal-skip').textContent = 'Démarrer sans capteur';
