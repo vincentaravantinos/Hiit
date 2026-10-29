@@ -1793,6 +1793,21 @@ async function waitForOneAdvertisement(timeoutMs) {
   }
 }
 
+// Bluetooth du téléphone coupé (29/10) : sans ce test, l'échec ressemblait à un capteur
+// éteint. getAvailability() suffit sur certains navigateurs ; sinon on reconnaît le
+// message d'erreur de Chrome (« Bluetooth adapter not available / is off… »).
+const BT_OFF_MSG = 'Bluetooth désactivé sur le téléphone — active-le puis réessaie';
+function btOffError() { const e = fatalError(BT_OFF_MSG); e.btOff = true; return e; }
+function isBtOffMsg(m) { return m === BT_OFF_MSG || /adapter|bluetooth (is )?(off|disabled|turned off|not available)|radio/i.test(m || ''); }
+async function btAdapterOff(err) {
+  if (err && isBtOffMsg(err.message)) return true;
+  try {
+    if (typeof navigator.bluetooth?.getAvailability === 'function'
+        && !(await withTimeout(navigator.bluetooth.getAvailability(), 2000, 'getAvailability'))) return true;
+  } catch (e) {}
+  return false;
+}
+
 // Garantit un lien utilisable (GATT connecté + service PMD prêt). Chaque essai repart
 // d'un état propre, tente d'abord l'écoute d'annonce puis, à défaut, une connexion
 // directe. Tous les appels sont bornés par un timeout.
@@ -1804,6 +1819,7 @@ async function ensureConnected(maxAttempts = 4) {
   }
   hookDisconnect(device);
   if (device.gatt.connected && controlChar) return;
+  if (await btAdapterOff()) { log(BT_OFF_MSG); throw btOffError(); }
   let lastErr = null, step = '';
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const n = `(essai ${attempt}/${maxAttempts})`;
@@ -1814,7 +1830,7 @@ async function ensureConnected(maxAttempts = 4) {
       log(`Recherche de ${sensorLabel()}... ${n}`);
       let seen = false;
       try { await waitForOneAdvertisement(8000); seen = true; }
-      catch (e) { logError('Annonce non reçue', e); }
+      catch (e) { logError('Annonce non reçue', e); if (await btAdapterOff(e)) throw btOffError(); }
       if (bleCancelled) throw fatalError('Connexion annulée');
       step = 'connexion';
       log(seen ? `Capteur détecté, connexion... ${n}` : `Capteur non détecté (éteint ou trop loin ?), connexion directe... ${n}`);
@@ -1828,6 +1844,8 @@ async function ensureConnected(maxAttempts = 4) {
     } catch (err) {
       lastErr = err;
       logError(`Connexion essai ${attempt}/${maxAttempts} échouée (${step}) [${(err && err.name) || '?'}]`, err);
+      if (err && err.btOff) { safeDisconnect(); throw err; }
+      if (await btAdapterOff(err)) { safeDisconnect(); log(BT_OFF_MSG); throw btOffError(); }
       // Connecté mais sans les services du capteur, sur un appareil sans nom reconnu :
       // ce n'est pas le bon appareil, inutile d'insister.
       const wrong = step === 'lecture des services' && err && (err.name === 'NotFoundError' || err.name === 'SecurityError') && !isSensorName(device.name);
@@ -1986,8 +2004,12 @@ async function sensorSendPowerOff() {
   const d2h = await withTimeout(svc.getCharacteristic(PFTP_D2H), 5000, 'getCharacteristic(D2H)');
   try { await withTimeout(d2h.startNotifications(), 5000, 'abonnement D2H'); } catch (e) { logError('Abonnement D2H (on continue)', e); }
   const h2d = await withTimeout(svc.getCharacteristic(PFTP_H2D), 5000, 'getCharacteristic(H2D)');
-  // [id notification RESET=2] + protobuf : champ 1 sleep=true (08 01), champ 2 do_factory_defaults=false (10 00)
-  const frames = buildRfc76Frames(new Uint8Array([0x02, 0x08, 0x01, 0x10, 0x00]));
+  // [id notification RESET=2] + protobuf : champ 1 sleep=true (08 01), champ 2
+  // do_factory_defaults=false (10 00), champ 4 hibernate=true (20 01).
+  // 29/10 : sans hibernate (= turnDeviceOff du SDK), le capteur passait en « mode
+  // stockage » (batterie déconnectée) et ne se rallumait plus que posé sur son chargeur.
+  // Essai avec setHibernateMode du SDK (veille basse conso, garde l'heure).
+  const frames = buildRfc76Frames(new Uint8Array([0x02, 0x08, 0x01, 0x10, 0x00, 0x20, 0x01]));
   for (const f of frames) {
     try { await withTimeout(h2d.writeValueWithoutResponse(f), 5000, 'écriture H2D'); }
     catch (e) {
@@ -2054,13 +2076,13 @@ async function sensorBatteryCheck() {
   bleBusy++;
   let ok = false;
   try { await ensureConnected(1); ok = true; }
-  catch (err) { logError('Vérification batterie', err); }
+  catch (err) { logError('Vérification batterie', err); if (err && err.btOff) sensorLastError = BT_OFF_MSG; }
   finally {
     bleBusy--; battChecking = false;
     if (!sensorActive) safeDisconnect();
     battRender();
   }
-  if (!ok) showToast('Capteur injoignable — éteint ou trop loin ?');
+  if (!ok) showToast(isBtOffMsg(sensorLastError) ? '📵 Active le Bluetooth du téléphone' : 'Capteur injoignable — éteint ou trop loin ?');
   else if (battDenied) showToast('Batterie non autorisée : Réglages → Bracelet Polar → Choisir');
 }
 
@@ -2077,7 +2099,7 @@ async function sensorPowerOffNow(btn) {
     try { await sensorSendPowerOff(); sent = true; } catch (err) { logError('Extinction manuelle', err); }
   } catch (err) {
     logError('Extinction : capteur injoignable', err);
-    showToast('Capteur injoignable — déjà éteint ? Si oui, touche « C\'est fait »');
+    if (err && err.btOff) showToast('📵 Active le Bluetooth du téléphone'); else showToast('Capteur injoignable — déjà éteint ? Si oui, touche « C\'est fait »');
   } finally {
     bleBusy--;
     safeDisconnect(); sensorActive = false;
@@ -2526,9 +2548,11 @@ async function sensorPromptThenStart(btn) {
 // sinon de réessayer, et toujours de changer de capteur ou de continuer sans.
 function sensorModalOpen() {
   const has = !!device;
-  document.getElementById('sensor-modal-title').textContent = has ? 'CAPTEUR INJOIGNABLE' : 'CHOISIR LE CAPTEUR';
-  document.getElementById('sensor-modal-text').textContent = has
-    ? `Connexion à ${sensorLabel()} impossible. Vérifie qu'il est allumé et tout près du téléphone.`
+  const btOff = isBtOffMsg(sensorLastError);
+  document.getElementById('sensor-modal-title').textContent = btOff ? 'BLUETOOTH DÉSACTIVÉ' : has ? 'CAPTEUR INJOIGNABLE' : 'CHOISIR LE CAPTEUR';
+  document.getElementById('sensor-modal-text').textContent = btOff
+    ? 'Le Bluetooth du téléphone est coupé. Active-le, puis touche Réessayer.'
+    : has ? `Connexion à ${sensorLabel()} impossible. Vérifie qu'il est allumé et tout près du téléphone.`
     : 'Allume le capteur, puis sélectionne « Polar Sense … » dans la liste.';
   document.getElementById('sensor-error-detail').textContent = sensorLastError || '';
   document.getElementById('sensor-modal-retry').textContent = has ? 'Réessayer' : 'Choisir le capteur';
