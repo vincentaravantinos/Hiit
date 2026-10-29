@@ -119,7 +119,13 @@ class BridgeActivity : ComponentActivity() {
                         "Connexion Oura impossible : ${e.message ?: e.javaClass.simpleName}"
                     }
                 }
-                done(msg)
+                // Fenêtre plutôt qu'un toast : le message d'erreur d'Oura doit être lisible en entier.
+                android.app.AlertDialog.Builder(this@BridgeActivity)
+                    .setTitle("Oura")
+                    .setMessage(msg)
+                    .setPositiveButton("OK") { _, _ -> finish() }
+                    .setOnCancelListener { finish() }
+                    .show()
             }
             return
         }
