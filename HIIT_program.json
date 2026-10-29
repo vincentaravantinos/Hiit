@@ -9,14 +9,8 @@
   "skip_last_rest": true,
   "exercises": [
     {
-      "name": "Vélo elliptique Sprint",
-      "spoken": "Sprint vélo elliptique !",
-      "duration": 30,
-      "type": "work"
-    },
-    {
-      "name": "Rowing élastique",
-      "spoken": "Rowing élastique !",
+      "name": "Pull ups",
+      "spoken": "Tractions !",
       "duration": 30,
       "type": "work"
     },
@@ -33,14 +27,20 @@
       "type": "work"
     },
     {
-      "name": "Pull ups",
-      "spoken": "Tractions !",
+      "name": "Levée de jambes suspendu",
+      "spoken": "Levée de jambes !",
       "duration": 30,
       "type": "work"
     },
     {
-      "name": "Levée de jambes suspendu",
-      "spoken": "Levée de jambes !",
+      "name": "Rowing élastique",
+      "spoken": "Rowing élastique !",
+      "duration": 30,
+      "type": "work"
+    },
+    {
+      "name": "Vélo elliptique Sprint",
+      "spoken": "Sprint vélo elliptique !",
       "duration": 30,
       "type": "work"
     },
