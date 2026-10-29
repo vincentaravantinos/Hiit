@@ -16,7 +16,13 @@ import java.time.LocalDate
  */
 object OuraSync {
     private const val PREFS = "hiit-bridge-oura"
-    private const val TOKEN_URL = "https://api.ouraring.com/oauth/token"
+    // Nouveau serveur d'autorisation (apps créées sur le portail développeur actuel) ; l'ancien
+    // reste en repli pour les apps historiques. Un échec d'authentification client ne consomme
+    // pas le code d'autorisation, on peut donc tenter l'un puis l'autre.
+    private val TOKEN_URLS = listOf(
+        "https://moi.ouraring.com/oauth/v2/ext/oauth-token",
+        "https://api.ouraring.com/oauth/token",
+    )
     private const val API = "https://api.ouraring.com/v2/usercollection"
 
     fun isConnected(ctx: Context) = prefs(ctx).getString("refresh", null) != null
@@ -106,22 +112,26 @@ object OuraSync {
         return out
     }
 
-    /** Identifiants client d'abord dans le corps ; si Oura répond invalid_client, nouvel essai en
-     *  HTTP Basic (l'échec d'authentification client ne consomme pas le code d'autorisation). */
+    /** Pour chaque serveur : identifiants dans le corps, puis en HTTP Basic si invalid_client. */
     private fun tokenRequest(form: Map<String, String>): JSONObject {
         val f = form.mapValues { it.value.trim() }
         val ct = "Content-Type" to "application/x-www-form-urlencoded"
         fun encode(m: Map<String, String>) = m.entries.joinToString("&") { "${enc(it.key)}=${enc(it.value)}" }
-        var (code, resp) = http("POST", TOKEN_URL, mapOf(ct), encode(f))
-        if (code == 401 || resp.contains("invalid_client")) {
-            val basic = android.util.Base64.encodeToString(
-                "${f["client_id"]}:${f["client_secret"]}".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
-            val r2 = http("POST", TOKEN_URL, mapOf(ct, "Authorization" to "Basic $basic"),
-                encode(f - "client_id" - "client_secret"))
-            code = r2.first; resp = r2.second
+        val basic = android.util.Base64.encodeToString(
+            "${f["client_id"]}:${f["client_secret"]}".toByteArray(Charsets.UTF_8), android.util.Base64.NO_WRAP)
+        val errors = mutableListOf<String>()
+        for (url in TOKEN_URLS) {
+            var (code, resp) = http("POST", url, mapOf(ct), encode(f))
+            if (code == 401 || resp.contains("invalid_client")) {
+                val r2 = http("POST", url, mapOf(ct, "Authorization" to "Basic $basic"), encode(f - "client_id" - "client_secret"))
+                code = r2.first; resp = r2.second
+            }
+            if (code == 200) return JSONObject(resp)
+            errors += "${url.substringAfter("//").substringBefore("/")} $code : ${resp.take(150)}"
+            // Code d'autorisation consommé ou refusé pour une autre raison : inutile d'insister ailleurs.
+            if (resp.contains("invalid_grant")) break
         }
-        if (code != 200) throw IllegalStateException("Oura (jeton) a répondu $code : ${resp.take(200)}")
-        return JSONObject(resp)
+        throw IllegalStateException("Oura (jeton) a refusé — " + errors.joinToString(" | "))
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
