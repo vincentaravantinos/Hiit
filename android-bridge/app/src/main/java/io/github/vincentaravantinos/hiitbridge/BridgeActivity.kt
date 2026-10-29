@@ -17,7 +17,9 @@ import androidx.health.connect.client.records.RestingHeartRateRecord
 import androidx.health.connect.client.records.SleepSessionRecord
 import androidx.health.connect.client.records.WeightRecord
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class BridgeActivity : ComponentActivity() {
 
@@ -92,6 +94,33 @@ class BridgeActivity : ComponentActivity() {
             if (cid.isNullOrBlank() || uri.isNullOrBlank()) { done("Spotify : réglages incomplets."); return }
             spotify?.cancel()
             spotify = SpotifyStarter(this, cid, uri) { spotify = null; finish() }.also { it.start() }
+            return
+        }
+        // hiitbridge://oura?cid=…&secret=…&code=…&redirect=… : fin de l'autorisation Oura (OAuth).
+        if (intent?.data?.host == "oura") {
+            val q = intent.data!!
+            val cid = q.getQueryParameter("cid"); val secret = q.getQueryParameter("secret")
+            val code = q.getQueryParameter("code"); val redirect = q.getQueryParameter("redirect")
+            if (cid.isNullOrBlank() || secret.isNullOrBlank() || code.isNullOrBlank() || redirect.isNullOrBlank()) {
+                done("Oura : paramètres incomplets."); return
+            }
+            lifecycleScope.launch {
+                val msg = withContext(Dispatchers.IO) {
+                    try {
+                        OuraSync.connect(this@BridgeActivity, cid, secret, code, redirect)
+                        try {
+                            HealthSync.run(this@BridgeActivity)
+                            val err = getSharedPreferences("hiit-bridge", MODE_PRIVATE).getString("ouraErr", null)
+                            if (err == null) "✓ Oura connecté — scores synchronisés" else "Oura connecté, mais lecture impossible : $err"
+                        } catch (e: Exception) {
+                            "✓ Oura connecté (synchro à la prochaine ouverture : ${e.message ?: e.javaClass.simpleName})"
+                        }
+                    } catch (e: Exception) {
+                        "Connexion Oura impossible : ${e.message ?: e.javaClass.simpleName}"
+                    }
+                }
+                done(msg)
+            }
             return
         }
         val d = intent?.data?.getQueryParameter("d")

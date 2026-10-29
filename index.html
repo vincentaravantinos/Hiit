@@ -562,6 +562,15 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
           <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Synchroniser maintenant</button>
         </div>
+        <details id="oura-details" style="font-size:12px;">
+          <summary style="color:var(--muted);cursor:pointer;">API Oura — score de préparation <span id="oura-status"></span></summary>
+          <div class="setting-sub" style="margin:8px 0;">Crée une application sur cloud.ouraring.com (Developer) avec l'URL de redirection <b>https://vincentaravantinos.github.io/Hiit/</b> et le scope « daily », puis colle ici son Client ID et son Client Secret. Ils restent sur ce téléphone et dans HIIT Bridge.</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <input type="text" id="oura-cid-input" placeholder="Client ID" autocomplete="off" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
+            <input type="password" id="oura-secret-input" placeholder="Client Secret" autocomplete="off" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
+            <button onclick="connectOura()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Connecter Oura</button>
+          </div>
+        </details>
         <details id="hcex-details" style="font-size:12px;">
           <summary style="color:var(--muted);cursor:pointer;">Activités détectées (Oura…) — 30 jours</summary>
           <div class="setting-sub" style="margin:8px 0;">Loggée Intense : ≥ 20 min et (≥ 10 min au-dessus de 80 % FC max, ou FC moy. ≥ 75 % FC max). Tout le reste est ignoré (coaching, marche, tâches…) — un Récup se met à la main si besoin. Seules les activités des 7 derniers jours sont loggées automatiquement, une seule fois.</div>
@@ -990,7 +999,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -5385,6 +5394,59 @@ function healthAssessment(h) {
   out.points = out.metrics.reduce((a, m) => a + (m.st === 'bad' ? 2 : m.st === 'meh' ? 1 : 0), 0);
   return out;
 }
+// ======= API Oura (OAuth) : le pont échange le code et lit préparation / sommeil / résilience =======
+const OURA_REDIRECT = 'https://vincentaravantinos.github.io/Hiit/';
+const OURA_CID_LS = 'hiitOuraCid', OURA_SECRET_LS = 'hiitOuraSecret', OURA_STATE_LS = 'hiitOuraState', OURA_CODE_SS = 'hiitOuraCode';
+function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function lsSet(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} }
+function saveOuraCreds() {
+  lsSet(OURA_CID_LS, document.getElementById('oura-cid-input').value.trim());
+  lsSet(OURA_SECRET_LS, document.getElementById('oura-secret-input').value.trim());
+}
+function ouraInitUi() {
+  const c = document.getElementById('oura-cid-input'), sct = document.getElementById('oura-secret-input');
+  if (c) c.value = lsGet(OURA_CID_LS);
+  if (sct) sct.value = lsGet(OURA_SECRET_LS);
+  const st = document.getElementById('oura-status');
+  if (st) { const h = healthData(); const on = h && h.days && Object.values(h.days).some(d => d.oura); st.textContent = on ? '✓' : ''; }
+}
+function connectOura() {
+  saveOuraCreds();
+  const cid = lsGet(OURA_CID_LS);
+  if (!cid || !lsGet(OURA_SECRET_LS)) { showToast('Renseigne le Client ID et le Client Secret Oura'); return; }
+  const state = 'oura-' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+  lsSet(OURA_STATE_LS, state);
+  location.href = 'https://cloud.ouraring.com/oauth/authorize?response_type=code'
+    + '&client_id=' + encodeURIComponent(cid) + '&redirect_uri=' + encodeURIComponent(OURA_REDIRECT)
+    + '&scope=daily&state=' + encodeURIComponent(state);
+}
+// Retour d'Oura (…/Hiit/?code=…&state=…) : Chrome exige un tap pour ouvrir le pont, d'où le bouton.
+function ouraHandleCallback() {
+  const q = new URLSearchParams(location.search);
+  const state = q.get('state'), code = q.get('code'), err = q.get('error');
+  if (!state || !state.startsWith('oura-')) return;
+  history.replaceState(null, '', location.pathname);
+  const expected = lsGet(OURA_STATE_LS); lsSet(OURA_STATE_LS, '');
+  if (err) { showToast('Oura : autorisation refusée (' + err + ')'); return; }
+  if (!code || state !== expected) { showToast('Oura : retour d\'autorisation invalide, réessaie'); return; }
+  const bd = document.createElement('div');
+  bd.className = 'sensor-modal-backdrop';
+  bd.innerHTML = `<div class="sensor-modal"><h3>OURA AUTORISÉ</h3>
+    <p>Dernière étape : HIIT Bridge finalise la connexion et récupère tes scores.</p>
+    <div style="display:flex;gap:8px;"><button id="oura-finish-btn" style="flex:1;padding:12px;border:none;border-radius:10px;background:var(--green);color:#000;font-family:var(--font);font-weight:700;">Finaliser</button></div></div>`;
+  document.body.appendChild(bd);
+  document.getElementById('oura-finish-btn').onclick = () => {
+    bd.remove();
+    healthLastFetch = 0;
+    const p = new URLSearchParams({ cid: lsGet(OURA_CID_LS), secret: lsGet(OURA_SECRET_LS), code, redirect: OURA_REDIRECT });
+    location.href = `intent://oura?${p.toString()}#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
+  };
+}
+const OURA_CONTRIB_FR = { activity_balance: 'équilibre activité', body_temperature: 'température', hrv_balance: 'équilibre HRV',
+  previous_day_activity: 'activité de la veille', previous_night: 'nuit', recovery_index: 'récupération',
+  resting_heart_rate: 'FC repos', sleep_balance: 'équilibre sommeil' };
+const OURA_RES_FR = { limited: 'limitée', adequate: 'correcte', solid: 'solide', strong: 'forte', exceptional: 'exceptionnelle' };
+
 function renderHealthCard() {
   const el = document.getElementById('health-card');
   if (!el) return;
@@ -5393,11 +5455,23 @@ function renderHealthCard() {
   el.style.display = 'block';
   const a = healthAssessment(h);
   const color = { ok: 'var(--green)', meh: '#d9b45a', bad: '#d77a6b' };
+  const RECO = { ok: 'Feu vert Intense', meh: 'Intense, sans forcer', bad: 'Récup conseillée' };
+  const oura = (h.days[todayStr()] || {}).oura;
   let reco;
-  if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore synchronisée</div>`;
-  else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">Récup conseillée</div>`;
-  else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">Intense, sans forcer</div>`;
-  else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">Feu vert Intense</div>`;
+  if (oura && oura.readiness != null) {
+    // Préparation Oura : ≥ 70 bon, 60-69 moyen, < 60 récup (repères Oura : 85+ optimal, < 70 « attention »).
+    const sc = oura.readiness, st = sc >= 70 ? 'ok' : sc >= 60 ? 'meh' : 'bad';
+    const weak = st === 'ok' ? [] : Object.entries(oura.contrib || {}).filter(([, v]) => v < 70).sort((x, y) => x[1] - y[1]).slice(0, 2)
+      .map(([k, v]) => `${OURA_CONTRIB_FR[k] || k} ${v}`);
+    const sub = [`Préparation Oura <b style="color:${color[st]};">${sc}</b>`];
+    if (oura.resilience) sub.push(`résilience ${OURA_RES_FR[oura.resilience] || oura.resilience}`);
+    reco = `<div style="font-size:17px;font-weight:700;color:${color[st]};">${RECO[st]}</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:3px;">${sub.join(' · ')}${weak.length ? `<br>À surveiller : ${weak.join(', ')}` : ''}</div>`;
+  }
+  else if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore synchronisée</div>`;
+  else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">${RECO.bad}</div>`;
+  else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">${RECO.meh}</div>`;
+  else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">${RECO.ok}</div>`;
   const chips = a.metrics.map(m => `<div style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border2);text-align:center;">
       <div style="font-size:11px;color:var(--muted);">${m.label}</div>
       <div style="font-size:15px;font-weight:700;color:${color[m.st]};">${m.val}</div></div>`).join('');

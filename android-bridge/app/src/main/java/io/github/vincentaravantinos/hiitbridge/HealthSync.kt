@@ -150,6 +150,21 @@ object HealthSync {
             exOk = true
         } catch (e: SecurityException) { /* permission activités pas (encore) accordée */ }
 
+        // Scores Oura (API Oura, pas Health Connect) : préparation, sommeil, résilience.
+        // En cas d'échec, on garde ceux déjà en cache pour ne pas effacer la carte du matin.
+        val ouraBackfill = !prefs.getBoolean("ouraV1", false)
+        var ouraOk = false
+        try {
+            OuraSync.fetch(ctx, today.minusDays(if (ouraBackfill) 30L else back), today)?.let { m ->
+                for ((d, o) in m) day(LocalDate.parse(d)).put("oura", o)
+                ouraOk = true
+            }
+        } catch (e: Exception) {
+            prefs.edit().putString("ouraErr", e.message ?: e.javaClass.simpleName).apply()
+        }
+        if (ouraOk) prefs.edit().putBoolean("ouraV1", true).remove("ouraErr").apply()
+        else for ((d, o) in days) if (!o.has("oura")) cache.optJSONObject(d.toString())?.optJSONObject("oura")?.let { o.put("oura", it) }
+
         // Fusion avec le cache (les jours relus remplacent les anciens), purge > 60 jours.
         for ((d, o) in days) cache.put(d.toString(), o)
         val oldest = today.minusDays(KEEP_DAYS).toString()
