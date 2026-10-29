@@ -5471,20 +5471,24 @@ function renderHealthCard() {
   const oura = (h.days[todayStr()] || {}).oura;
   let reco;
   if (oura && oura.readiness != null) {
-    // Préparation Oura : ≥ 70 bon, 60-69 moyen, < 60 récup (repères Oura : 85+ optimal, < 70 « attention »).
-    const sc = oura.readiness, st = sc >= 70 ? 'ok' : sc >= 60 ? 'meh' : 'bad';
-    const weak = st === 'ok' ? [] : Object.entries(oura.contrib || {}).filter(([, v]) => v < 70).sort((x, y) => x[1] - y[1]).slice(0, 2)
+    // Grille du service client Oura : ≥ 85 intense ; 70-84 modéré ; < 70 récup. Filtre : équilibre
+    // HRV en « Prudence » (< 70) → modéré même au-dessus de 85 (système nerveux encore sous tension).
+    const sc = oura.readiness, c = oura.contrib || {};
+    const hrvCaution = c.hrv_balance != null && c.hrv_balance < 70;
+    const st = sc >= 85 ? (hrvCaution ? 'meh' : 'ok') : sc >= 70 ? 'meh' : 'bad';
+    const weak = st === 'ok' ? [] : Object.entries(c).filter(([, v]) => v < 70).sort((x, y) => x[1] - y[1]).slice(0, 2)
       .map(([k, v]) => `${OURA_CONTRIB_FR[k] || k} ${v}`);
     const sub = [`Préparation Oura <b style="color:${color[st]};">${sc}</b>`];
     if (oura.resilience) sub.push(`résilience ${OURA_RES_FR[oura.resilience] || oura.resilience}`);
     reco = `<div style="font-size:17px;font-weight:700;color:${color[st]};">${RECO[st]}</div>
-      <div style="font-size:12px;color:var(--muted);margin-top:3px;">${sub.join(' · ')}${weak.length ? `<br>À surveiller : ${weak.join(', ')}` : ''}</div>`;
+      <div style="font-size:12px;color:var(--muted);margin-top:3px;">${sub.join(' · ')}${weak.length ? `<br>En prudence : ${weak.join(', ')}` : ''}</div>`;
   }
   else if (!a.hasToday) reco = `<div style="color:var(--muted);font-size:14px;">Nuit pas encore synchronisée</div>`;
   else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">${RECO.bad}</div>`;
   else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">${RECO.meh}</div>`;
   else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">${RECO.ok}</div>`;
-  const chips = a.metrics.map(m => `<div style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border2);text-align:center;">
+  // Avec le score Oura, les pastilles maison (sommeil / HRV / FC) ne servent que de secours.
+  const chips = (oura && oura.readiness != null) ? '' : a.metrics.map(m => `<div style="flex:1;padding:6px 8px;border-radius:8px;border:1px solid var(--border2);text-align:center;">
       <div style="font-size:11px;color:var(--muted);">${m.label}</div>
       <div style="font-size:15px;font-weight:700;color:${color[m.st]};">${m.val}</div></div>`).join('');
   el.innerHTML = `${reco}
