@@ -131,7 +131,10 @@ object OuraSync {
             // Code d'autorisation consommé ou refusé pour une autre raison : inutile d'insister ailleurs.
             if (resp.contains("invalid_grant")) break
         }
-        throw IllegalStateException("Oura (jeton) a refusé — " + errors.joinToString(" | "))
+        // Aperçu masqué de ce qui a été envoyé, à comparer avec le portail Oura (jamais le secret entier).
+        fun peek(v: String?) = v.orEmpty().let { if (it.length <= 8) "${it.length} car." else "${it.take(4)}…${it.takeLast(4)} (${it.length} car.)" }
+        throw IllegalStateException("Oura (jeton) a refusé — " + errors.joinToString(" | ") +
+            "\n\nEnvoyé : Client ID ${peek(f["client_id"])}, Secret ${peek(f["client_secret"])}")
     }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
