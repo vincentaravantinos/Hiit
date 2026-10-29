@@ -540,7 +540,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
         <button onclick="document.getElementById('session-import-input').click()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Importer une séance téléchargée (envoi GitHub échoué)</button>
         <input type="file" id="session-import-input" accept=".json,application/json" multiple style="display:none" onchange="importSessionFiles(this)">
-        <input type="password" id="github-token-input" placeholder="ghp_..." style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()">
+        <div style="display:flex;gap:8px;"><input type="text" id="github-token-input" name="hiit-gh-token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" placeholder="ghp_..." style="flex:1;min-width:0;-webkit-text-security:disc;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()"><button type="button" onclick="toggleReveal('github-token-input',this)" aria-label="Afficher" style="padding:0 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;">👁</button></div>
         <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
       </div>
     </div>
@@ -567,7 +567,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <div class="setting-sub" style="margin:8px 0;">Crée une application sur cloud.ouraring.com (Developer) avec l'URL de redirection <b>https://vincentaravantinos.github.io/Hiit/</b> et le scope « daily », puis colle ici son Client ID et son Client Secret. Ils restent sur ce téléphone et dans HIIT Bridge.</div>
           <div style="display:flex;flex-direction:column;gap:8px;">
             <input type="text" id="oura-cid-input" placeholder="Client ID" autocomplete="off" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
-            <input type="text" id="oura-secret-input" name="oura-app-secret" placeholder="Client Secret" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" style="-webkit-text-security:disc;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
+            <div style="display:flex;gap:8px;"><input type="text" id="oura-secret-input" name="oura-app-secret" placeholder="Client Secret" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" style="flex:1;min-width:0;-webkit-text-security:disc;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()"><button type="button" onclick="toggleReveal('oura-secret-input',this)" aria-label="Afficher" style="padding:0 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;">👁</button></div>
             <button onclick="connectOura()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Connecter Oura</button>
           </div>
         </details>
@@ -5399,6 +5399,12 @@ const OURA_REDIRECT = 'https://vincentaravantinos.github.io/Hiit/';
 const OURA_CID_LS = 'hiitOuraCid', OURA_SECRET_LS = 'hiitOuraSecret', OURA_STATE_LS = 'hiitOuraState', OURA_CODE_SS = 'hiitOuraCode';
 function lsGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
 function lsSet(k, v) { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) {} }
+function toggleReveal(id, btn) {
+  const el = document.getElementById(id); if (!el) return;
+  const hidden = el.style.webkitTextSecurity !== 'none';
+  el.style.webkitTextSecurity = hidden ? 'none' : 'disc';
+  if (btn) btn.style.opacity = hidden ? '0.5' : '1';
+}
 function saveOuraCreds() {
   lsSet(OURA_CID_LS, document.getElementById('oura-cid-input').value.trim());
   lsSet(OURA_SECRET_LS, document.getElementById('oura-secret-input').value.trim());
