@@ -3649,9 +3649,13 @@ function renderHrChartSvg(hrSamples, opts = {}) {
   const pts = hrSamples.map((s, i) => ({ t: Math.round(i * dt), hr: s.hr })).filter(p => p.hr > 0);
   if (pts.length < 2) return none;
   const values = pts.map(p => p.hr);
+  // (30/10) Séance précédente en rouge très pâle, sur la même échelle de temps.
+  const tEnd = pts[pts.length - 1].t;
+  const prev = (opts.prev || []).filter(q => q[1] > 0 && q[0] <= tEnd);
+  const prevVals = prev.map(q => q[1]);
   const w = 320, h = 160, padL = 28, padR = 10, padT = 22, padB = 22;
-  const minHr = Math.min(...values) - 5, maxHr = Math.max(...values) + 5;
-  const tMax = Math.max(pts[pts.length - 1].t, 1);
+  const minHr = Math.min(...values, ...prevVals) - 5, maxHr = Math.max(...values, ...prevVals) + 5;
+  const tMax = Math.max(tEnd, 1);
   const X = t => padL + (t / tMax) * (w - padL - padR);
   const Y = v => h - padB - ((v - minHr) / (maxHr - minHr)) * (h - padB - padT);
   // Tours (HIIT) : début de chaque round, échauffement et récupération.
@@ -3679,15 +3683,61 @@ function renderHrChartSvg(hrSamples, opts = {}) {
   svg += `<text x="4" y="${Y(minHr + 5) + 3}" fill="var(--muted)" font-size="10">${Math.round(minHr + 5)}</text>`;
   svg += `<text x="${padL}" y="${h - 6}" fill="var(--muted)" font-size="10">0:00</text>`;
   svg += `<text x="${w - padR}" y="${h - 6}" fill="var(--muted)" font-size="10" text-anchor="end">${hrcFmt(tMax)}</text>`;
+  if (prev.length > 1) svg += `<polyline points="${prev.map(q => X(q[0]).toFixed(1) + ',' + Y(q[1]).toFixed(1)).join(' ')}" fill="none" stroke="#e74c3c" stroke-width="1.5" stroke-linejoin="round" opacity=".2"/>`;
   svg += `<polyline points="${pts.map(p => X(p.t).toFixed(1) + ',' + Y(p.hr).toFixed(1)).join(' ')}" fill="none" stroke="#e74c3c" stroke-width="2" stroke-linejoin="round"/>`;
   svg += `<line class="hrc-v" x1="0" x2="0" y1="${padT}" y2="${h - padB}" stroke="var(--text)" stroke-width="1" opacity=".5" style="display:none"/>`;
   svg += `<circle class="hrc-dot" r="4" fill="#e74c3c" stroke="var(--text)" stroke-width="1.5" style="display:none"/>`;
   svg += `</svg>`;
-  const data = { w, pts: pts.map(p => [p.t, p.hr, +X(p.t).toFixed(1), +Y(p.hr).toFixed(1)]), segs: segs.map(sg => [sg.label, sg.t0, sg.t1]) };
+  const data = { w, pts: pts.map(p => [p.t, p.hr, +X(p.t).toFixed(1), +Y(p.hr).toFixed(1)]), segs: segs.map(sg => [sg.label, sg.t0, sg.t1]), prev };
   let html = `<div class="hrc" data-hrc='${JSON.stringify(data)}' style="position:relative;touch-action:pan-y;user-select:none;-webkit-user-select:none;">${svg}`;
   html += `<div class="hrc-tip" style="display:none;position:absolute;top:0;transform:translateX(-50%);padding:4px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:12px;font-weight:600;white-space:nowrap;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div></div>`;
-  html += `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px;"><span>Moy. ${avgHr} bpm</span><span style="opacity:.7;">Glisse le doigt sur la courbe</span><span>Max ${maxHrActual} bpm</span></div>`;
+  html += `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px;"><span>Moy. ${avgHr} bpm</span><span style="opacity:.7;">${prev.length > 1 ? 'Pâle : ' + (opts.prevLabel || 'séance précédente') : 'Glisse le doigt sur la courbe'}</span><span>Max ${maxHrActual} bpm</span></div>`;
   return html;
+}
+// Courbes FC compactes (1 point / 2 s) gardées en local par fichier de séance, pour
+// superposer la séance précédente sans retélécharger son gros fichier capteurs.
+const HR_CURVES_KEY = 'hiitHrCurves';
+function hrCurveFrom(combined) {
+  const tl = hrTimeline(combined), out = [];
+  let last = -9;
+  for (const p of tl) if (p.t - last >= 2) { out.push([Math.round(p.t), p.hr]); last = p.t; }
+  return out;
+}
+function hrCurveGet(filename) {
+  try { return (JSON.parse(localStorage.getItem(HR_CURVES_KEY) || '{}'))[filename] || null; } catch (e) { return null; }
+}
+function hrCurvePut(filename, curve) {
+  if (!filename || !curve || curve.length < 2) return;
+  try {
+    const m = JSON.parse(localStorage.getItem(HR_CURVES_KEY) || '{}');
+    m[filename] = curve;
+    const keys = Object.keys(m).sort();
+    while (keys.length > 30) delete m[keys.shift()];
+    localStorage.setItem(HR_CURVES_KEY, JSON.stringify(m));
+  } catch (e) {}
+}
+// Séance HIIT précédente (même programme) et sa courbe ; la télécharge en arrière-plan
+// si elle n'est pas encore en cache, puis appelle onReady.
+function hiitPrevHrCurve(combined, filename, onReady) {
+  const hist = getHiitHistory(filename, combined.variant || null).filter(e => e.savedToGithub && e.filename);
+  const pe = hist[hist.length - 1];
+  if (!pe) return null;
+  const m = /(\d{4})-(\d{2})-(\d{2})/.exec(pe.date || pe.filename);
+  const label = m ? 'séance du ' + new Date(+m[1], +m[2] - 1, +m[3]).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) : 'séance précédente';
+  const cached = hrCurveGet(pe.filename);
+  if (cached) return { curve: cached, label };
+  const token = localStorage.getItem('hiitGithubToken');
+  if (token && onReady) (async () => {
+    try {
+      let c = hiitSessionCache.get(pe.filename);
+      if (!c) { c = await fetchSessionFile(pe.filename, token); hiitCachePut(pe.filename, c); }
+      const curve = hrCurveFrom(c);
+      if (curve.length < 2) return;
+      hrCurvePut(pe.filename, curve);
+      onReady({ curve, label });
+    } catch (e) { logError('Courbe FC de la séance précédente', e); }
+  })();
+  return null;
 }
 function hrcFmt(t) { t = Math.round(t); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
 function hrcMove(el, clientX) {
@@ -3703,7 +3753,9 @@ function hrcMove(el, clientX) {
   v.setAttribute('x1', x); v.setAttribute('x2', x); v.style.display = '';
   dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.style.display = '';
   const sg = d.segs.find(s => t >= s[1] && t < s[2]) || (d.segs.length && t >= d.segs[d.segs.length - 1][1] ? d.segs[d.segs.length - 1] : null);
-  tip.textContent = `${hrcFmt(t)} · ${hr} bpm${sg ? ' · ' + sg[0] : ''}`;
+  let pv = null;
+  if (d.prev && d.prev.length) { let q = d.prev[0]; for (const c of d.prev) if (Math.abs(c[0] - t) < Math.abs(q[0] - t)) q = c; if (Math.abs(q[0] - t) <= 5) pv = q[1]; }
+  tip.textContent = `${hrcFmt(t)} · ${hr} bpm${pv != null ? ' (préc. ' + pv + ')' : ''}${sg ? ' · ' + sg[0] : ''}`;
   tip.style.display = 'block';
   const scale = r.width / d.w, px = x * scale, half = tip.offsetWidth / 2;
   tip.style.left = Math.min(r.width - half, Math.max(half, px)) + 'px';
@@ -4576,7 +4628,14 @@ function showSessionResultsModal(combined, filename) {
   document.body.appendChild(modal);
 
   function renderInto(results) {
-    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null, { dt: hrSampleDt(combined), phaseLog: combined.phaseLog });
+    const hrOpts = { dt: hrSampleDt(combined), phaseLog: combined.phaseLog };
+    if (filename && combined.hr) hrCurvePut(filename, hrCurveFrom(combined));
+    const prevHr = combined.hr ? hiitPrevHrCurve(combined, filename, pr => {
+      const wrap = box.isConnected && box.querySelector('.hrc-wrap');
+      if (wrap) wrap.innerHTML = renderHrChartSvg(combined.hr.samples, { ...hrOpts, prev: pr.curve, prevLabel: pr.label });
+    }) : null;
+    if (prevHr) { hrOpts.prev = prevHr.curve; hrOpts.prevLabel = prevHr.label; }
+    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null, hrOpts);
     const hist = getHiitHistory(filename, combined.variant || null);
     const repsHtml = renderSprintsHtml(combined, hist) + (combined.noSensor
       ? '<p style="color:var(--muted);font-size:13px;">Séance sans capteur Polar : pas de comptage des reps ni de FC.</p>'
@@ -4590,7 +4649,7 @@ function showSessionResultsModal(combined, filename) {
       <div style="margin-bottom:16px;">${repsHtml}</div>
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
-      <div style="margin-bottom:16px;">${hrHtml}</div>
+      <div class="hrc-wrap" style="margin-bottom:16px;">${hrHtml}</div>
       <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;width:auto;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   }
   box._hc = { combined, kind: 'hiit', filename, openedAt: Date.now() };
