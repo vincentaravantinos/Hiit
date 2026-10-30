@@ -3973,6 +3973,16 @@ function ellipTargetLevel() {
   const v = l && l[ELLIP_EX];
   return v >= 1 ? Math.round(v) : null;
 }
+// (30/10) Pendant l'échauffement, résistance à la moitié du niveau de sprint (8 → 4, arrondi,
+// minimum 1) ; le niveau de sprint est remis dès la fin de l'échauffement.
+function ellipInWarmup() {
+  return typeof SEQ !== 'undefined' && SEQ.length && SEQ[tIdx] && SEQ[tIdx].phase === 'WARMUP';
+}
+function ellipDesiredLevel() {
+  const l = ellipTargetLevel();
+  if (!l) return null;
+  return ellipInWarmup() ? Math.max(1, Math.round(l / 2)) : l;
+}
 function ellipLevelNow() { return ellipCur && ellipCur.r != null ? ellipCur.r : ellipTargetLevel(); }
 
 // Réglage de la résistance (validé le 08/10). La console ignore les commandes FTMS de
@@ -4027,22 +4037,31 @@ async function ellipIcStart(server) {
 }
 function ellipIcStop() { clearInterval(ellipIcPoll); ellipIcPoll = null; ellipIcReady = false; ellipIcTx = null; ellipIc = null; ellipIntegAt = null; }
 
+var ellipLevelAgain = false;
 async function ellipApplyLevel() {
-  const lvl = ellipTargetLevel();
-  if (!lvl || !ellipConnected || !ellipIcReady || ellipLevelBusy) return;
+  if (!ellipDesiredLevel() || !ellipConnected || !ellipIcReady) return;
+  if (ellipLevelBusy) { ellipLevelAgain = true; return; }
   ellipLevelBusy = true;
+  let lvl = null;
   try {
+    let ok = false;
     for (let i = 0; i < 3 && ellipConnected; i++) {
+      lvl = ellipDesiredLevel();
+      if (!lvl) return;
+      if (ellipCur && ellipCur.r === lvl) { ok = true; break; }
       await icSend(icFrame(0xA6, Math.min(16, Math.max(1, lvl)) + 1));
       await sleep(1500);
       const rep = ellipCur ? ellipCur.r : null;
-      log(`Elliptique : niveau ${lvl} demandé, niveau lu ${rep}`);
-      if (rep === lvl) { showToast(`🚲 Résistance réglée : niveau ${lvl}`); return; }
+      log(`Elliptique : niveau ${lvl} demandé${ellipInWarmup() ? ' (échauffement)' : ''}, niveau lu ${rep}`);
+      if (rep === lvl && ellipDesiredLevel() === lvl) { ok = true; showToast(`🚲 Résistance réglée : niveau ${lvl}`); break; }
     }
-    showToast(`🚲 Niveau ${lvl} non confirmé par la console`);
+    if (!ok && lvl && ellipDesiredLevel() === lvl) showToast(`🚲 Niveau ${lvl} non confirmé par la console`);
   } catch (e) {
     logError('Réglage de résistance elliptique', e);
-  } finally { ellipLevelBusy = false; }
+  } finally {
+    ellipLevelBusy = false;
+    if (ellipLevelAgain || (lvl && ellipDesiredLevel() !== lvl)) { ellipLevelAgain = false; setTimeout(ellipApplyLevel, 0); }
+  }
 }
 
 // Tap sur « Elliptique : en attente » : liste Bluetooth (le geste permet un vrai scan, qui
@@ -4113,6 +4132,7 @@ function ellipOnPhaseChange() {
     log(`Elliptique : sprint R${prev.round || 1} = ${Math.round(ellipCur.odo - ellipPhaseOdo)} m (vitesse ${ellipSpeedNow(Date.now())} km/h, niveau ${ellipCur.r})`);
   ellipPhases.push({ name: p.name, type: p.type, round: p.round, phase: p.phase, tElapsedStart: tElapsed, atMs: Date.now() });
   ellipPhaseOdo = ellipCur ? ellipCur.odo : null;
+  if (ellipConnected && ellipCur && ellipDesiredLevel() && ellipCur.r !== ellipDesiredLevel()) ellipApplyLevel();
   const s = p.name === ELLIP_EX ? lastSprintFor(p.round || 1, ellipLevelNow()) : null;
   ellipRef = s ? s.d : null;
   ellipRenderLive();
