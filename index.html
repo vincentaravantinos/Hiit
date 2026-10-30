@@ -3639,27 +3639,88 @@ function analyzeSessionReps(accSamples, phaseLog) {
   return results;
 }
 
-function renderHrChartSvg(hrSamples) {
-  if (!hrSamples || hrSamples.length < 2) return '<p style="color:var(--muted);font-size:13px;">Pas de données de fréquence cardiaque.</p>';
-  const values = hrSamples.map(s => s.hr).filter(v => v > 0);
-  if (values.length < 2) return '<p style="color:var(--muted);font-size:13px;">Pas de données de fréquence cardiaque.</p>';
-  const w = 320, h = 140, pad = 28;
+// (30/10) Courbe FC interactive : glisser le doigt sur la courbe affiche une bulle
+// « 4:30 · 165 bpm » (et le tour), et les tours R1…R4 sont marqués sur le graphe.
+// opts : { dt: pas en s entre deux mesures (1 par défaut), phaseLog: déroulé HIIT }.
+function renderHrChartSvg(hrSamples, opts = {}) {
+  const none = '<p style="color:var(--muted);font-size:13px;">Pas de données de fréquence cardiaque.</p>';
+  if (!hrSamples || hrSamples.length < 2) return none;
+  const dt = opts.dt > 0 ? opts.dt : 1;
+  const pts = hrSamples.map((s, i) => ({ t: Math.round(i * dt), hr: s.hr })).filter(p => p.hr > 0);
+  if (pts.length < 2) return none;
+  const values = pts.map(p => p.hr);
+  const w = 320, h = 160, padL = 28, padR = 10, padT = 22, padB = 22;
   const minHr = Math.min(...values) - 5, maxHr = Math.max(...values) + 5;
-  const points = values.map((v, i) => {
-    const x = pad + (i/(values.length-1)) * (w - pad - 10);
-    const y = h - pad - ((v - minHr)/(maxHr - minHr)) * (h - pad - 10);
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ');
-  const avgHr = Math.round(values.reduce((a,b)=>a+b,0)/values.length);
+  const tMax = Math.max(pts[pts.length - 1].t, 1);
+  const X = t => padL + (t / tMax) * (w - padL - padR);
+  const Y = v => h - padB - ((v - minHr) / (maxHr - minHr)) * (h - padB - padT);
+  // Tours (HIIT) : début de chaque round, échauffement et récupération.
+  const marks = [];
+  (opts.phaseLog || []).forEach(p => {
+    if (p.tElapsedStart == null) return;
+    let label = null;
+    if (p.phase === 'CIRCUIT' && !marks.some(m => m.label === 'R' + (p.round || 1))) label = 'R' + (p.round || 1);
+    else if (p.phase === 'RECOVERY' && !marks.some(m => m.label === 'Récup')) label = 'Récup';
+    if (label && p.tElapsedStart <= tMax) marks.push({ label, t: p.tElapsedStart });
+  });
+  marks.sort((a, b) => a.t - b.t);
+  const segs = marks.map((m, i) => ({ label: m.label, t0: m.t, t1: i + 1 < marks.length ? marks[i + 1].t : tMax }));
+  const avgHr = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
   const maxHrActual = Math.max(...values);
-  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;">`;
-  svg += `<text x="4" y="${pad-14}" fill="var(--muted)" font-size="10">${Math.round(maxHr-5)}</text>`;
-  svg += `<text x="4" y="${h-pad+14}" fill="var(--muted)" font-size="10">${Math.round(minHr+5)}</text>`;
-  svg += `<polyline points="${points}" fill="none" stroke="#e74c3c" stroke-width="2"/>`;
+  let svg = `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:auto;display:block;">`;
+  segs.forEach((sg, i) => {
+    if (/^R\d/.test(sg.label) && i % 2 === 0)
+      svg += `<rect x="${X(sg.t0).toFixed(1)}" y="${padT}" width="${(X(sg.t1) - X(sg.t0)).toFixed(1)}" height="${h - padT - padB}" fill="currentColor" opacity=".06"/>`;
+    svg += `<line x1="${X(sg.t0).toFixed(1)}" x2="${X(sg.t0).toFixed(1)}" y1="${padT - 4}" y2="${h - padB}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3" opacity=".7"/>`;
+    const lx = Math.min(w - padR - sg.label.length * 3, (X(sg.t0) + X(sg.t1)) / 2);
+    svg += `<text x="${lx.toFixed(1)}" y="${padT - 8}" fill="var(--muted)" font-size="10" text-anchor="middle">${sg.label}</text>`;
+  });
+  svg += `<text x="4" y="${Y(maxHr - 5) + 3}" fill="var(--muted)" font-size="10">${Math.round(maxHr - 5)}</text>`;
+  svg += `<text x="4" y="${Y(minHr + 5) + 3}" fill="var(--muted)" font-size="10">${Math.round(minHr + 5)}</text>`;
+  svg += `<text x="${padL}" y="${h - 6}" fill="var(--muted)" font-size="10">0:00</text>`;
+  svg += `<text x="${w - padR}" y="${h - 6}" fill="var(--muted)" font-size="10" text-anchor="end">${hrcFmt(tMax)}</text>`;
+  svg += `<polyline points="${pts.map(p => X(p.t).toFixed(1) + ',' + Y(p.hr).toFixed(1)).join(' ')}" fill="none" stroke="#e74c3c" stroke-width="2" stroke-linejoin="round"/>`;
+  svg += `<line class="hrc-v" x1="0" x2="0" y1="${padT}" y2="${h - padB}" stroke="var(--text)" stroke-width="1" opacity=".5" style="display:none"/>`;
+  svg += `<circle class="hrc-dot" r="4" fill="#e74c3c" stroke="var(--text)" stroke-width="1.5" style="display:none"/>`;
   svg += `</svg>`;
-  svg += `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px;"><span>Moy. ${avgHr} bpm</span><span>Max ${maxHrActual} bpm</span></div>`;
-  return svg;
+  const data = { w, pts: pts.map(p => [p.t, p.hr, +X(p.t).toFixed(1), +Y(p.hr).toFixed(1)]), segs: segs.map(sg => [sg.label, sg.t0, sg.t1]) };
+  let html = `<div class="hrc" data-hrc='${JSON.stringify(data)}' style="position:relative;touch-action:pan-y;user-select:none;-webkit-user-select:none;">${svg}`;
+  html += `<div class="hrc-tip" style="display:none;position:absolute;top:0;transform:translateX(-50%);padding:4px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:12px;font-weight:600;white-space:nowrap;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div></div>`;
+  html += `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px;"><span>Moy. ${avgHr} bpm</span><span style="opacity:.7;">Glisse le doigt sur la courbe</span><span>Max ${maxHrActual} bpm</span></div>`;
+  return html;
 }
+function hrcFmt(t) { t = Math.round(t); return Math.floor(t / 60) + ':' + String(t % 60).padStart(2, '0'); }
+function hrcMove(el, clientX) {
+  let d = el._hrc;
+  if (!d) { try { d = el._hrc = JSON.parse(el.dataset.hrc); } catch (e) { return; } }
+  const svgEl = el.querySelector('svg'); const r = svgEl.getBoundingClientRect();
+  if (!r.width) return;
+  const vx = (clientX - r.left) / r.width * d.w;
+  let best = d.pts[0];
+  for (const p of d.pts) if (Math.abs(p[2] - vx) < Math.abs(best[2] - vx)) best = p;
+  const [t, hr, x, y] = best;
+  const v = el.querySelector('.hrc-v'), dot = el.querySelector('.hrc-dot'), tip = el.querySelector('.hrc-tip');
+  v.setAttribute('x1', x); v.setAttribute('x2', x); v.style.display = '';
+  dot.setAttribute('cx', x); dot.setAttribute('cy', y); dot.style.display = '';
+  const sg = d.segs.find(s => t >= s[1] && t < s[2]) || (d.segs.length && t >= d.segs[d.segs.length - 1][1] ? d.segs[d.segs.length - 1] : null);
+  tip.textContent = `${hrcFmt(t)} · ${hr} bpm${sg ? ' · ' + sg[0] : ''}`;
+  tip.style.display = 'block';
+  const scale = r.width / d.w, px = x * scale, half = tip.offsetWidth / 2;
+  tip.style.left = Math.min(r.width - half, Math.max(half, px)) + 'px';
+  tip.style.top = Math.max(0, y * scale - tip.offsetHeight - 10) + 'px';
+}
+function hrcHide(el) { el.querySelectorAll('.hrc-v,.hrc-dot,.hrc-tip').forEach(n => n.style.display = 'none'); }
+(function hrcBind() {
+  let active = null;
+  document.addEventListener('pointerdown', e => { const el = e.target.closest && e.target.closest('.hrc'); if (!el) return; active = el; hrcMove(el, e.clientX); });
+  document.addEventListener('pointermove', e => {
+    const el = active || (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.hrc'));
+    if (el) hrcMove(el, e.clientX);
+  });
+  const end = () => { if (active) { hrcHide(active); active = null; } };
+  document.addEventListener('pointerup', end); document.addEventListener('pointercancel', end);
+  document.addEventListener('pointerout', e => { if (e.pointerType === 'mouse' && e.target.closest && e.target.closest('.hrc') && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('.hrc'))) hrcHide(e.target.closest('.hrc')); });
+})();
 
 // ======= Charges des exercices à élastique =======
 const LOAD_EXERCISES = { 'Rowing élastique': 'load-rowing', 'Squats élastique': 'load-squats', 'Vélo elliptique Sprint': 'load-ellip' };
@@ -4515,7 +4576,7 @@ function showSessionResultsModal(combined, filename) {
   document.body.appendChild(modal);
 
   function renderInto(results) {
-    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
+    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null, { dt: hrSampleDt(combined), phaseLog: combined.phaseLog });
     const hist = getHiitHistory(filename, combined.variant || null);
     const repsHtml = renderSprintsHtml(combined, hist) + (combined.noSensor
       ? '<p style="color:var(--muted);font-size:13px;">Séance sans capteur Polar : pas de comptage des reps ni de FC.</p>'
@@ -5254,7 +5315,7 @@ function showSwimResultsModal(combined, filename) {
   document.body.appendChild(modal);
 
   function renderInto(segments) {
-    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null);
+    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null, { dt: hrSampleDt(combined) });
     const swimHtml = renderSwimResultsHtml(segments);
     const isCc = true;
     const ccHtml = isCc ? `<div style="margin-bottom:16px;">${renderCcKpiHtml(combined, filename)}</div>` : '';
@@ -6039,7 +6100,7 @@ function showHcExDetail(e) {
     <h3 style="text-align:center;margin-bottom:2px;">${freeIcon(hcExName(e))} ${hcExName(e).toUpperCase()}</h3>
     <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:14px;">${e.day.slice(8)}/${e.day.slice(5,7)} · ${hm(e.start)} → ${hm(e.end)} · via ${e.src === 'com.ouraring.oura' ? 'Oura' : (e.src || 'Health Connect')}${e.title && e.title !== hcExName(e) ? ` · « ${e.title} »` : ''}</div>
     <div style="display:flex;gap:6px;margin-bottom:14px;">${stat(c.durMin + ' min', 'Durée')}${stat(hr.length ? c.avg : '–', 'FC moy.')}${stat(hr.length ? Math.max(...hr) : '–', 'FC max')}${stat(c.highMin + ' min', 'Z4-Z5')}</div>
-    <div style="margin-bottom:14px;">${renderHrChartSvg(e.hrMin.map(v => ({ hr: v })))}</div>
+    <div style="margin-bottom:14px;">${renderHrChartSvg(e.hrMin.map(v => ({ hr: v })), { dt: 60 })}</div>
     ${hr.length ? `<div style="margin-bottom:14px;">${zones.map(z => `<div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:4px;"><span style="width:22px;">${z.n}</span><div style="flex:1;height:10px;background:var(--surface2);border-radius:5px;overflow:hidden;"><div style="width:${100 * z.min / zMax}%;height:100%;background:${z.col};"></div></div><span style="width:44px;text-align:right;color:var(--muted);">${z.min} min</span></div>`).join('')}</div>` : ''}
     <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">Classée <b style="color:var(--text);">${verdict}</b> : ${why}. FC max de référence ${hrMax} bpm.</div>`;
   const close = document.createElement('button');
@@ -6088,7 +6149,7 @@ function showFreeResultsModal(combined, filename, live = null) {
     <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:14px;">Durée ${dur}</p>
     ${classHtml}
     ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
-    <div style="margin-bottom:16px;">${renderHrChartSvg(combined.hr ? combined.hr.samples : null)}</div>
+    <div style="margin-bottom:16px;">${renderHrChartSvg(combined.hr ? combined.hr.samples : null, { dt: hrSampleDt(combined) })}</div>
     <button onclick="hcCloseModal(this)" class="btn-connect" style="margin-top:8px;">Fermer</button><button onclick="sessionModalDelete(this)" style="display:block;width:auto;margin:10px auto 0;padding:6px;border:none;background:none;color:var(--muted);font-family:var(--font);font-size:11px;text-decoration:underline;cursor:pointer">Supprimer cette séance</button>`;
   box._hc = { combined, kind: 'free', filename };
   if (live) {
