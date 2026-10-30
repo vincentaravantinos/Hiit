@@ -517,8 +517,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     </div>
     <div class="settings-section">
       <div class="settings-label">Capteur Polar</div>
-      <div class="setting-row"><div><div class="setting-name">Batterie</div><div class="setting-sub batt-val"></div></div><div style="display:flex;gap:6px"><button onclick="sensorBatteryCheck()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Vérifier</button><button onclick="sensorPowerOffNow(this)" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Éteindre</button></div></div>
-      <div class="setting-row"><div><div class="setting-name">Éteindre en fin de séance</div><div class="setting-sub">Une fois les données récupérées. Sinon (ou en cas d'échec), un rappel s'affiche</div></div><div class="toggle" id="autooff-toggle" onclick="toggleSensorAutoOff()"></div></div>
+      <div class="setting-row"><div><div class="setting-name">Batterie</div><div class="setting-sub batt-val"></div></div><div style="display:flex;gap:6px"><button onclick="sensorBatteryCheck()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Vérifier</button></div></div>
       <div class="setting-row"><div><div class="setting-name">Position du bracelet</div><div class="setting-sub">Enregistrée avec les données de chaque séance</div></div></div>
       <div class="position-toggle" id="position-toggle" style="margin-bottom:14px">
         <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
@@ -1948,20 +1947,11 @@ async function sensorSettingsPick() {
   battDenied = false; battRender();
 }
 
-// ======= Batterie du capteur + extinction en fin de séance (28/10) =======
-// Batterie : service standard « battery_service », lu à chaque connexion et juste avant
-// l'extinction. La dernière valeur connue reste affichée (onglet Activité, Réglages) avec
+// ======= Batterie du capteur + rappel d'extinction en fin de séance (28/10) =======
+// Batterie : service standard « battery_service », lu à chaque connexion et en fin de
+// séance. La dernière valeur connue reste affichée (onglet Activité, Réglages) avec
 // son ancienneté : le capteur n'a pas besoin d'être allumé pour la voir.
-// Extinction : même commande que turnDeviceOff() du SDK Polar officiel — notification
-// PFTP RESET (id 2) avec PbPFtpFactoryResetParams { sleep: true, do_factory_defaults:
-// false } envoyée sur la caractéristique H2D. do_factory_defaults vaut true par défaut
-// dans le proto : il est donc écrit explicitement à false (sinon remise à zéro usine).
-// Vérification : après la commande, plus aucune annonce Bluetooth = capteur éteint ;
-// sinon (ou si la commande échoue) un rappel s'affiche.
-const PFTP_D2H = 'fb005c52-02e7-f387-1cad-8acd2d8df0c8';
-const PFTP_H2D = 'fb005c53-02e7-f387-1cad-8acd2d8df0c8';
 const SENSOR_BATT_LS = 'hiitSensorBattery';
-const SENSOR_AUTOOFF_LS = 'hiitSensorAutoOff';
 const SENSOR_OFF_REMIND_LS = 'hiitSensorOffReminder';
 let battDenied = false;   // service batterie non autorisé (capteur choisi avant cette version)
 let battChecking = false;
@@ -1988,7 +1978,6 @@ function battRender() {
     else if (b.pct <= 30) cls = 'mid';
   }
   document.querySelectorAll('.batt-val').forEach(el => { el.textContent = txt; el.dataset.level = cls; });
-  const t = document.getElementById('autooff-toggle'); if (t) t.classList.toggle('on', sensorAutoOffOn());
 }
 setInterval(battRender, 60000);
 
@@ -2012,58 +2001,15 @@ async function sensorReadBattery(why) {
   }
 }
 
-function sensorAutoOffOn() { try { return localStorage.getItem(SENSOR_AUTOOFF_LS) !== '0'; } catch (e) { return true; } }
-function toggleSensorAutoOff() { try { localStorage.setItem(SENSOR_AUTOOFF_LS, sensorAutoOffOn() ? '0' : '1'); } catch (e) {} battRender(); }
-
-// Commande d'extinction (lien déjà établi). Le capteur coupe le lien de lui-même ensuite.
-async function sensorSendPowerOff() {
-  if (!device || !server || !device.gatt.connected) throw new Error('Capteur non connecté');
-  const svc = await withTimeout(server.getPrimaryService(PFTP_SERVICE), 5000, 'getPrimaryService(PFTP)');
-  const d2h = await withTimeout(svc.getCharacteristic(PFTP_D2H), 5000, 'getCharacteristic(D2H)');
-  try { await withTimeout(d2h.startNotifications(), 5000, 'abonnement D2H'); } catch (e) { logError('Abonnement D2H (on continue)', e); }
-  const h2d = await withTimeout(svc.getCharacteristic(PFTP_H2D), 5000, 'getCharacteristic(H2D)');
-  // [id notification RESET=2] + protobuf : champ 1 sleep=true (08 01), champ 2
-  // do_factory_defaults=false (10 00), champ 4 hibernate=true (20 01).
-  // 29/10 : sans hibernate (= turnDeviceOff du SDK), le capteur passait en « mode
-  // stockage » (batterie déconnectée) et ne se rallumait plus que posé sur son chargeur.
-  // Essai avec setHibernateMode du SDK (veille basse conso, garde l'heure).
-  const frames = buildRfc76Frames(new Uint8Array([0x02, 0x08, 0x01, 0x10, 0x00, 0x20, 0x01]));
-  for (const f of frames) {
-    try { await withTimeout(h2d.writeValueWithoutResponse(f), 5000, 'écriture H2D'); }
-    catch (e) {
-      if (!device.gatt.connected) return; // lien déjà coupé par le capteur : il s'éteint
-      await withTimeout(h2d.writeValueWithResponse(f), 5000, 'écriture H2D (avec réponse)');
-    }
-  }
-  logAppend('Commande d\'extinction envoyée au capteur.');
-}
-
-// Plus aucune annonce pendant 8 s (4 s après la commande) = éteint. Tourne en arrière-plan.
-async function sensorVerifyOff(dev) {
-  await sleep(4000);
-  if (device !== dev || bleBusy || sensorConnecting) return;
-  try {
-    await waitForOneAdvertisement(8000);
-    logAppend('Capteur encore visible après la demande d\'extinction.');
-    sensorOffReminderShow('still-on');
-  } catch (e) {
-    if (/indisponible|watchAdvertisements/.test((e && e.message) || '')) { sensorOffReminderShow('unknown'); return; }
-    logAppend('Capteur éteint ✓ (plus aucune annonce).');
-    showToast('✓ Capteur éteint');
-    sensorOffReminderHide();
-  }
-}
-
-// Fin d'utilisation du capteur (séance terminée, données récupérées) : batterie, extinction
-// si activée, sinon rappel. Ne lève jamais d'erreur.
+// 28–30/10 : l'extinction par Bluetooth (commande RESET du SDK Polar, en mode stockage
+// puis en veille prolongée « hibernate ») laissait le capteur impossible à rallumer sans
+// son chargeur. Abandonnée : l'app ne fait plus que rappeler de l'éteindre au bouton.
+// Fin d'utilisation du capteur (séance terminée, données récupérées) : batterie, lien
+// coupé, rappel d'extinction. Ne lève jamais d'erreur.
 async function sensorWrapUp() {
-  const dev = device;
   try { await sensorReadBattery('fin de séance'); } catch (e) {}
-  if (!sensorAutoOffOn()) { safeDisconnect(); sensorOffReminderShow('manual'); return; }
-  let sent = false;
-  try { await sensorSendPowerOff(); sent = true; } catch (err) { logError('Extinction automatique du capteur', err); }
   safeDisconnect();
-  if (sent) sensorVerifyOff(dev); else sensorOffReminderShow('failed');
+  sensorOffReminderShow('manual');
 }
 
 // Sélection du capteur depuis un tap (geste utilisateur exigé par requestDevice).
@@ -2104,35 +2050,8 @@ async function sensorBatteryCheck() {
   else if (battDenied) showToast('Batterie non autorisée : Réglages → Bracelet Polar → Choisir');
 }
 
-async function sensorPowerOffNow(btn) {
-  if (!sensorIdleForCheck()) { showToast('Capteur occupé — réessaie dans un instant'); return; }
-  try { await sensorDeviceFromTap(); } catch (err) { logError('Extinction : capteur non choisi', err); return; }
-  const label = btn ? btn.textContent : null;
-  if (btn) { btn.disabled = true; btn.textContent = 'Extinction...'; }
-  bleBusy++;
-  const dev = device;
-  let sent = false;
-  try {
-    await ensureConnected(1);
-    try { await sensorSendPowerOff(); sent = true; } catch (err) { logError('Extinction manuelle', err); }
-  } catch (err) {
-    logError('Extinction : capteur injoignable', err);
-    if (err && err.btOff) showToast('📵 Active le Bluetooth du téléphone'); else showToast('Capteur injoignable — déjà éteint ? Si oui, touche « C\'est fait »');
-  } finally {
-    bleBusy--;
-    safeDisconnect(); sensorActive = false;
-    if (btn) { btn.disabled = false; btn.textContent = label; }
-  }
-  if (sent) { showToast('Extinction demandée...'); sensorVerifyOff(dev); }
-}
-
 // ---- Rappel « éteins le capteur » : bandeau persistant (survit au rechargement) ----
-const OFF_REMIND_TEXT = {
-  manual: 'Pense à éteindre le capteur Polar.',
-  failed: 'Le capteur n\'a pas pu être éteint automatiquement — pense à l\'éteindre.',
-  'still-on': 'Le capteur semble encore allumé — pense à l\'éteindre.',
-  unknown: 'Extinction demandée, sans confirmation possible — vérifie que le capteur est éteint.',
-};
+const OFF_REMIND_TEXT = { manual: 'Pense à éteindre le capteur Polar.' };
 function sensorOffReminderShow(kind) {
   try { localStorage.setItem(SENSOR_OFF_REMIND_LS, JSON.stringify({ kind, at: Date.now() })); } catch (e) {}
   sensorOffReminderRender();
@@ -2157,12 +2076,9 @@ function sensorOffReminderRender() {
     box.id = 'off-banner';
     box.style.cssText = 'position:relative;z-index:998;background:#2a2417;border-bottom:2px solid #ffb454;padding:10px 14px;font-family:var(--font);text-align:center';
     box.innerHTML = '<div id="off-banner-text" style="font-size:13px;color:#fff;line-height:1.35"></div>'
-      + '<div style="font-size:11px;color:#c9b998;margin-top:3px">Appui long sur le bouton du capteur, ou :</div>'
-      + '<div style="display:flex;gap:8px;margin-top:8px">'
-      + '<button id="off-banner-btn" style="flex:1;padding:10px;border:none;border-radius:9px;background:#ffb454;color:#111;font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">Éteindre maintenant</button>'
-      + '<button id="off-banner-done" style="flex:1;padding:10px;border:1px solid #6b5a38;border-radius:9px;background:none;color:#e8dcc4;font-family:var(--font);font-size:13px;cursor:pointer">C\'est fait</button></div>';
+      + '<div style="font-size:11px;color:#c9b998;margin-top:3px">Appui long sur son bouton, jusqu\'à l\'extinction du voyant</div>'
+      + '<button id="off-banner-done" style="width:100%;margin-top:8px;padding:10px;border:none;border-radius:9px;background:#ffb454;color:#111;font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">C\'est fait</button>';
     anchor.insertAdjacentElement('afterend', box);
-    document.getElementById('off-banner-btn').onclick = (e) => sensorPowerOffNow(e.currentTarget);
     document.getElementById('off-banner-done').onclick = () => sensorOffReminderHide();
   }
   document.getElementById('off-banner-text').textContent = '🔋 ' + (OFF_REMIND_TEXT[r.kind] || OFF_REMIND_TEXT.manual);
