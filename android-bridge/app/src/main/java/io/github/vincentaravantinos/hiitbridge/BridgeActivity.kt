@@ -130,6 +130,18 @@ class BridgeActivity : ComponentActivity() {
             }
             finish(); return
         }
+        // hiitbridge://open-app?pkg=… : ouvrir une autre app (tuile Oura de l'app HIIT, 02/11).
+        // Liste blanche : n'importe quelle page web peut appeler ce lien.
+        if (intent?.data?.host == "open-app") {
+            val pkg = intent.data?.getQueryParameter("pkg")
+            if (pkg in OPENABLE_APPS) {
+                val launch = packageManager.getLaunchIntentForPackage(pkg!!)
+                    ?: Intent(Intent.ACTION_VIEW, android.net.Uri.parse("market://details?id=$pkg"))
+                try { startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                catch (e: Exception) { Toast.makeText(this, "Impossible d'ouvrir l'app : ${e.message}", Toast.LENGTH_LONG).show() }
+            }
+            finish(); return
+        }
         // hiitbridge://spotify?cid=…&uri=… : lancer la playlist au démarrage d'une séance.
         if (intent?.data?.host == "spotify") {
             val cid = intent.data?.getQueryParameter("cid")
@@ -236,5 +248,8 @@ class BridgeActivity : ComponentActivity() {
     private fun done(msg: String) {
         Toast.makeText(applicationContext, msg, Toast.LENGTH_LONG).show()
         finish()
+    }
+    companion object {
+        private val OPENABLE_APPS = setOf("com.ouraring.oura")
     }
 }

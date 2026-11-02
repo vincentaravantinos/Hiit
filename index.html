@@ -5631,6 +5631,13 @@ function renderHealthCard() {
       <div style="font-size:15px;font-weight:700;color:${color[m.st]};">${m.val}</div></div>`).join('');
   el.innerHTML = `${reco}
     ${chips ? `<div style="display:flex;gap:6px;margin-top:10px;">${chips}</div>` : ''}`;
+  // Tuile Oura : un tap ouvre l'app Oura (via le pont, Chrome ne lance pas une app par son seul nom).
+  const hasOura = !!(oura && oura.readiness != null);
+  el.style.cursor = hasOura ? 'pointer' : '';
+  el.onclick = hasOura ? openOuraApp : null;
+}
+function openOuraApp() {
+  location.href = `intent://open-app?pkg=com.ouraring.oura#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
 }
 
 // ======= Health Connect (via l'app Android « HIIT Bridge », android-bridge/ dans le repo) =======
