@@ -60,6 +60,10 @@ object HealthSync {
         return JSONObject(cache).optJSONObject(today)?.has("sleep") == true
     }
 
+    /** Heure (ms) du dernier envoi réussi vers GitHub, 0 si jamais. */
+    fun lastRun(ctx: Context): Long =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("lastRun", 0L)
+
     /** Renvoie le nombre de nuits présentes dans le fichier publié. */
     suspend fun run(ctx: Context): Int = withContext(Dispatchers.IO) {
         val cfg = config(ctx) ?: throw IllegalStateException("Pas encore configuré par l'app HIIT")
@@ -174,6 +178,7 @@ object HealthSync {
         val doc = JSONObject().put("v", 1).put("updatedAt", System.currentTimeMillis())
             .put("tz", zone.id).put("days", cache)
         upload(cfg, encrypt(doc.toString(), cfg.keyB64))
+        prefs.edit().putLong("lastRun", System.currentTimeMillis()).apply()
         cache.length()
     }
 
