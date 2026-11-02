@@ -124,6 +124,14 @@ body {
 .streak-unit { font-size: 12px; color: var(--muted); margin-top: 2px; letter-spacing: 1px; font-weight: 600; }
 .streak-empty { text-align: center; padding: 20px; font-size: 14px; color: var(--muted); letter-spacing: 2px; }
 .settings-section { margin-bottom: 26px; }
+.settings-sublabel { font-size: 12px; letter-spacing: 2px; color: var(--muted); text-transform: uppercase; margin: 14px 4px 8px; }
+.settings-fold > summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+.settings-fold > summary::-webkit-details-marker { display: none; }
+.settings-fold > summary::after { content: '›'; font-size: 20px; letter-spacing: 0; transition: transform .2s; }
+.settings-fold[open] > summary::after { transform: rotate(90deg); }
+.cfg-fold { font-size: 12px; margin-top: 4px; }
+.cfg-fold > summary { color: var(--muted); cursor: pointer; margin-bottom: 8px; }
+.cfg-fold[open] { display: flex; flex-direction: column; gap: 8px; }
 .settings-label { font-size: 14px; letter-spacing: 3px; color: var(--muted); text-transform: uppercase; margin-bottom: 10px; font-weight: 700; }
 .setting-row { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .setting-name { font-size: 16px; font-weight: 700; }
@@ -356,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-02T19:42:34Z';</script>
+<script>const APP_BUILD = '2026-11-02T21:13:46Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -486,15 +494,23 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
   </div>
   <div id="tab-settings" class="tab-panel">
     <div class="settings-section">
-      <div class="settings-label">Rappels</div>
+      <div class="settings-label">Séance</div>
+      <div class="setting-row">
+        <div class="setting-name">Séances / semaine</div>
+        <select id="goal-select" onchange="saveGoal()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px">
+          <option value="3">3 ×</option><option value="4">4 ×</option><option value="5" selected>5 ×</option><option value="6">6 ×</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-name">FC max</div><div class="setting-sub">Sert à calculer les zones (Z2 = 60-70 % de la FC max). Par défaut 220 − âge.</div></div>
+        <input type="number" id="hrmax-input" min="120" max="230" style="width:80px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px;text-align:center" onchange="saveHrMax()">
+      </div>
       <div class="setting-row"><div><div class="setting-name">Rappel quotidien</div><div class="setting-sub">Si pas encore entraîné</div></div><div class="toggle" id="reminder-toggle" onclick="toggleReminder()"></div></div>
       <div class="setting-row" id="time-row" style="display:none"><div class="setting-name">Heure</div><input type="time" class="time-input" id="reminder-time" value="19:00" onchange="saveReminderTime()"></div>
       <button class="notif-btn" id="notif-perm-btn" onclick="requestNotifPermission()" style="margin-top:8px">Activer les notifications</button>
       <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">Fonctionne quand l'app est ouverte en fond de tâche.</div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Voix</div>
       <div class="setting-row"><div><div class="setting-name">Tester la voix</div><div class="setting-sub" id="tts-status"></div></div><button onclick="testVoice()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Tester</button></div>
+      <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
     </div>
     <div class="settings-section">
       <div class="settings-label">Musique</div>
@@ -504,55 +520,27 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <input type="text" id="spotify-playlist-input" placeholder="Lien ou URI Spotify (ex. https://open.spotify.com/playlist/...)" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyPlaylist()">
         <div class="setting-name">Playlist relaxante (minute de récupération)</div>
         <input type="text" id="spotify-relax-input" placeholder="Lien ou URI Spotify — vide : la musique continue" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyRelax()">
-        <div class="setting-sub">Remplace la playlist de la séance dès le début de la récupération (nécessite le Client ID ci-dessous).</div>
-        <div class="setting-name">Client ID Spotify (optionnel)</div>
-        <input type="text" id="spotify-clientid-input" placeholder="Client ID de ton app sur developer.spotify.com" autocapitalize="off" autocomplete="off" spellcheck="false" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyClientId()">
-        <div class="setting-sub">Avec un Client ID, HIIT Bridge lance la lecture en arrière-plan, sans quitter l'app. Sans, Spotify s'ouvre sur la playlist et il faut appuyer sur lecture.</div>
+        <div class="setting-sub">Remplace la playlist de la séance dès le début de la récupération (nécessite le Client ID, dans Configuration).</div>
+        <details class="cfg-fold"><summary>Configuration</summary>
+          <div class="setting-name">Client ID Spotify (optionnel)</div>
+          <input type="text" id="spotify-clientid-input" placeholder="Client ID de ton app sur developer.spotify.com" autocapitalize="off" autocomplete="off" spellcheck="false" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyClientId()">
+          <div class="setting-sub">Avec un Client ID, HIIT Bridge lance la lecture en arrière-plan, sans quitter l'app. Sans, Spotify s'ouvre sur la playlist et il faut appuyer sur lecture.</div>
+        </details>
       </div>
     </div>
     <div class="settings-section">
-      <div class="settings-label">Vélo elliptique</div>
-      <div class="setting-row"><div><div class="setting-name">Console de l'elliptique</div><div class="setting-sub" id="ellip-setting-sub">Connexion automatique sur l'onglet HIIT</div></div><button onclick="ellipSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Changer</button></div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Capteur Polar</div>
+      <div class="settings-label">Capteurs</div>
+      <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct et la batterie</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
       <div class="setting-row"><div><div class="setting-name">Batterie</div><div class="setting-sub batt-val"></div></div><div style="display:flex;gap:6px"><button onclick="sensorBatteryCheck()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Vérifier</button></div></div>
       <div class="setting-row"><div><div class="setting-name">Position du bracelet</div><div class="setting-sub">Enregistrée avec les données de chaque séance</div></div></div>
       <div class="position-toggle" id="position-toggle" style="margin-bottom:14px">
         <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
         <button id="pos-biceps" onclick="setSensorPosition('Biceps')">BICEPS</button>
       </div>
-      <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
-      <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct et la batterie</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
-      <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
-      <div style="display:flex;gap:8px;">
-        <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
-        <button onclick="clearSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Vider le journal</button>
-      </div>
-      <button onclick="sensorStopEverything(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Arrêter tout enregistrement en cours sur le capteur</button>
+      <div class="setting-row"><div><div class="setting-name">Console de l'elliptique</div><div class="setting-sub" id="ellip-setting-sub">Connexion automatique sur l'onglet HIIT</div></div><button onclick="ellipSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Changer</button></div>
     </div>
     <div class="settings-section">
-      <div class="settings-label">Sauvegarde automatique GitHub</div>
-      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
-        <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
-        <button onclick="document.getElementById('session-import-input').click()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Importer une séance téléchargée (envoi GitHub échoué)</button>
-        <input type="file" id="session-import-input" accept=".json,application/json" multiple style="display:none" onchange="importSessionFiles(this)">
-        <div style="display:flex;gap:8px;"><input type="text" id="github-token-input" name="hiit-gh-token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" placeholder="ghp_..." style="flex:1;min-width:0;-webkit-text-security:disc;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()"><button type="button" onclick="toggleReveal('github-token-input',this)" aria-label="Afficher" style="padding:0 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;">👁</button></div>
-        <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Chiffrement des données</div>
-      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
-        <div class="setting-sub">Séances et données santé sont chiffrées avant d'aller sur GitHub. La clé ne vit que sur ce téléphone (et dans HIIT Bridge) : <b>sans elle, l'historique est illisible</b>. Garde-en une copie dans ton gestionnaire de mots de passe.</div>
-        <div style="display:flex;gap:8px;">
-          <button onclick="copyDataKey()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Copier la clé</button>
-          <button onclick="importDataKey()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Importer une clé</button>
-        </div>
-      </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Health Connect</div>
+      <div class="settings-label">Santé</div>
       <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
         <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Envoi automatique en fermant l'écran de résultats d'une séance (une seule fois par séance). En retour, sommeil, HRV, FC de repos et poids alimentent la « Forme du jour » de l'accueil.</div>
         <div style="display:flex;gap:8px;">
@@ -560,7 +548,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
           <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Synchroniser maintenant</button>
         </div>
         <details id="oura-details" style="font-size:12px;">
-          <summary style="color:var(--muted);cursor:pointer;">API Oura — score de préparation <span id="oura-status"></span></summary>
+          <summary style="color:var(--muted);cursor:pointer;">Configuration Oura (score de préparation) <span id="oura-status"></span></summary>
           <div class="setting-sub" style="margin:8px 0;">Crée une application sur cloud.ouraring.com (Developer) avec l'URL de redirection <b>https://vincentaravantinos.github.io/Hiit/</b> et le scope « daily », puis colle ici son Client ID et son Client Secret. Ils restent sur ce téléphone et dans HIIT Bridge.</div>
           <div style="display:flex;flex-direction:column;gap:8px;">
             <input type="text" id="oura-cid-input" placeholder="Client ID" autocomplete="off" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveOuraCreds()">
@@ -575,27 +563,35 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         </details>
       </div>
     </div>
-    <div class="settings-section">
-      <div class="settings-label">Fréquence cardiaque</div>
-      <div class="setting-row">
-        <div><div class="setting-name">FC max</div><div class="setting-sub">Sert à calculer les zones (Z2 = 60-70 % de la FC max). Par défaut 220 − âge.</div></div>
-        <input type="number" id="hrmax-input" min="120" max="230" style="width:80px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px;text-align:center" onchange="saveHrMax()">
+    <details class="settings-section settings-fold">
+      <summary class="settings-label">Données &amp; dépannage</summary>
+      <div class="settings-sublabel">Capteur Polar</div>
+      <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
+      <div style="display:flex;gap:8px;">
+        <button onclick="exportSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Exporter le journal</button>
+        <button onclick="clearSensorLog()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Vider le journal</button>
       </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Objectif</div>
-      <div class="setting-row">
-        <div class="setting-name">Séances / semaine</div>
-        <select id="goal-select" onchange="saveGoal()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px">
-          <option value="3">3 ×</option><option value="4">4 ×</option><option value="5" selected>5 ×</option><option value="6">6 ×</option>
-        </select>
+      <button onclick="sensorStopEverything(this)" style="width:100%;margin-top:8px;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Arrêter tout enregistrement en cours sur le capteur</button>
+      <div class="settings-sublabel">Sauvegarde GitHub</div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div class="setting-sub">Token personnel avec droits d'écriture limités au repo Hiit uniquement. Reste sur cet appareil (jamais dans le code de l'app). Vide = téléchargement local classique.</div>
+        <button onclick="document.getElementById('session-import-input').click()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Importer une séance téléchargée (envoi GitHub échoué)</button>
+        <input type="file" id="session-import-input" accept=".json,application/json" multiple style="display:none" onchange="importSessionFiles(this)">
+        <div style="display:flex;gap:8px;"><input type="text" id="github-token-input" name="hiit-gh-token" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" placeholder="ghp_..." style="flex:1;min-width:0;-webkit-text-security:disc;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveGithubToken()"><button type="button" onclick="toggleReveal('github-token-input',this)" aria-label="Afficher" style="padding:0 12px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-size:16px;">👁</button></div>
+        <button onclick="rebuildHistoryFromGithub()" style="padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Reconstruire l'historique depuis GitHub</button>
       </div>
-    </div>
-    <div class="settings-section">
-      <div class="settings-label">Données</div>
+      <div class="settings-sublabel">Clé de chiffrement</div>
+      <div class="setting-row" style="flex-direction:column;align-items:stretch;gap:8px;">
+        <div class="setting-sub">Séances et données santé sont chiffrées avant d'aller sur GitHub. La clé ne vit que sur ce téléphone (et dans HIIT Bridge) : <b>sans elle, l'historique est illisible</b>. Garde-en une copie dans ton gestionnaire de mots de passe.</div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="copyDataKey()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Copier la clé</button>
+          <button onclick="importDataKey()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--muted);font-family:var(--font);font-size:12px;">Importer une clé</button>
+        </div>
+      </div>
+      <div class="settings-sublabel">Réinitialisation</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px;line-height:1.6">Tes données sont sauvegardées localement. Télécharger une mise à jour n'efface pas les données.</div>
       <button class="danger-btn" onclick="resetData()">Réinitialiser toutes les données</button>
-    </div>
+    </details>
   </div>
 </div>
 <div class="toast" id="toast"></div>
