@@ -9,7 +9,7 @@
 <title>HIIT Tracker</title>
 <link rel="manifest" href="/Hiit/manifest.json">
 <link rel="apple-touch-icon" href="/Hiit/icons/icon-192.png">
-<script>(function(){var c=true;try{c=localStorage.getItem('hiit_theme_v1')!=='"classic"';}catch(e){}if(c)document.documentElement.classList.add('oura');})();</script>
+<script>document.documentElement.classList.add('oura');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
@@ -356,7 +356,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-02T14:16:34Z';</script>
+<script>const APP_BUILD = '2026-11-02T19:42:34Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -486,10 +486,6 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
   </div>
   <div id="tab-settings" class="tab-panel">
     <div class="settings-section">
-      <div class="settings-label">Apparence</div>
-      <div class="setting-row"><div><div class="setting-name">Design moderne</div><div class="setting-sub">Désactivé = ancien thème</div></div><div class="toggle" id="theme-toggle" onclick="toggleTheme()"></div></div>
-    </div>
-    <div class="settings-section">
       <div class="settings-label">Rappels</div>
       <div class="setting-row"><div><div class="setting-name">Rappel quotidien</div><div class="setting-sub">Si pas encore entraîné</div></div><div class="toggle" id="reminder-toggle" onclick="toggleReminder()"></div></div>
       <div class="setting-row" id="time-row" style="display:none"><div class="setting-name">Heure</div><input type="time" class="time-input" id="reminder-time" value="19:00" onchange="saveReminderTime()"></div>
@@ -526,7 +522,6 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <button id="pos-avant-bras" onclick="setSensorPosition('Avant-bras')">AVANT-BRAS</button>
         <button id="pos-biceps" onclick="setSensorPosition('Biceps')">BICEPS</button>
       </div>
-      <div class="setting-row"><div><div class="setting-name">Décompte des reps en direct</div><div class="setting-sub">La voix compte tes reps (expérimental). S'arrête dès « Prochainement » / « 3, 2, 1 »</div></div><div class="toggle" id="livecount-toggle" onclick="toggleLiveOpt('livecount')"></div></div>
       <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
       <div class="setting-row"><div><div class="setting-name">Bracelet Polar</div><div class="setting-sub" id="sensor-pick-sub">À refaire une fois pour autoriser la FC en direct et la batterie</div></div><button onclick="sensorSettingsPick()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Choisir</button></div>
       <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
@@ -2292,7 +2287,7 @@ async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
 // = les 12 dernières secondes tant que la fenêtre 9–21 s n'est pas complète). Évalué sur
 // 12 séances : retard ~1 s, compte à la fin identique au final dans 99,5 % des cas,
 // ~7 % d'exercices avec une rep de trop transitoire (d'où la confirmation de 1 s).
-const LIVE_OPT_LS = { livecount: 'hiitLiveCount', recding: 'hiitRecordDing' };
+const LIVE_OPT_LS = { recding: 'hiitRecordDing' };   // décompte vocal en direct retiré le 02/11 (trop imprécis)
 function liveOptOn(k) { try { return localStorage.getItem(LIVE_OPT_LS[k]) === '1'; } catch (e) { return false; } }
 function toggleLiveOpt(k) { try { localStorage.setItem(LIVE_OPT_LS[k], liveOptOn(k) ? '0' : '1'); } catch (e) {} liveOptsRender(); }
 function liveOptsRender() { for (const k in LIVE_OPT_LS) { const el = document.getElementById(k + '-toggle'); if (el) el.classList.toggle('on', liveOptOn(k)); } }
@@ -2341,7 +2336,7 @@ let liveRepTimer = null, liveRepBusy = false, liveRepCostMs = 0;
 function liveRepTick() {
   if (liveRepBusy) return;
   const L = liveSession;
-  if (!L || tState !== 'running' || (!liveOptOn('livecount') && !liveOptOn('recding'))) return;
+  if (!L || tState !== 'running' || !liveOptOn('recding')) return;
   const accSt = Object.values(L.streams).find(x => x.name === 'ACC');
   if (!accSt) return;
   // Nouvel exercice compté ? (le précédent reste suivi jusqu'à 31,5 s pour un record de dernière seconde)
@@ -2365,12 +2360,6 @@ function liveRepTick() {
   const confirmed = R.hist.length === 2 ? Math.min(...R.hist) : 0;   // tenu ~1 s
   if (confirmed <= R.said) return;
   R.said = confirmed;
-  // Décompte vocal : uniquement pendant l'exercice, et jamais par-dessus une annonce.
-  const nx = SEQ[R.idx + 1];
-  const cutoff = nx && nx.type !== 'rest' ? 7 : 3;
-  if (liveOptOn('livecount') && tIdx === R.idx && tLeft > cutoff && !(window.speechSynthesis && speechSynthesis.speaking)) {
-    speak(String(confirmed), { rate: 1.2, hold: 400 });
-  }
   if (liveOptOn('recding') && !R.dinged && R.target != null && confirmed > R.target) {
     R.dinged = true;
     beep(1568, .09, 1.0, 600); setTimeout(() => beep(2093, .16, 1.0, 600), 110);
@@ -6202,8 +6191,6 @@ function freeUpdateIndexClass(combined) {
 
 // ===== Thème moderne (Oura) =====
 function isModernTheme(){return document.documentElement.classList.contains('oura');}
-function syncThemeToggle(){const t=document.getElementById('theme-toggle');if(t)t.classList.toggle('on',isModernTheme());}
-function toggleTheme(){const on=!isModernTheme();document.documentElement.classList.toggle('oura',on);S.set('hiit_theme_v1',on?'modern':'classic');syncThemeToggle();renderDashboard();}
 function renderOuraHero(weekDone){
   const st=getCurrentStreak(),C=326.7,pct=Math.min(1,goal?weekDone/goal:0);
   document.getElementById('oh-arc').style.strokeDashoffset=C*(1-pct);
@@ -6265,7 +6252,7 @@ window.addEventListener('popstate', () => {
 });
 new MutationObserver(() => { backSync(); setTimeout(backSync, 300); }).observe(document.body, { childList: true });
 
-syncThemeToggle();
+
 loadProgram().then(init);
 </script>
 </body>
