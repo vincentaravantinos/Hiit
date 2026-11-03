@@ -545,7 +545,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <div class="setting-sub">Les séances (exercices, répétitions, FC, calories) sont envoyées à Health Connect via la petite app « HIIT Bridge ». Envoi automatique en fermant l'écran de résultats d'une séance (une seule fois par séance). En retour, sommeil, HRV, FC de repos et poids alimentent la « Forme du jour » de l'accueil.</div>
         <div style="display:flex;gap:8px;">
           <a href="https://github.com/vincentaravantinos/Hiit/releases/download/bridge-latest/hiit-bridge.apk" style="flex:1;text-align:center;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;text-decoration:none;">Installer HIIT Bridge</a>
-          <button onclick="hcOpenBridge(null)" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Synchroniser maintenant</button>
+          <button onclick="healthSyncNow()" style="flex:1;padding:9px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Synchroniser maintenant</button>
         </div>
         <details id="oura-details" style="font-size:12px;">
           <summary style="color:var(--muted);cursor:pointer;">Configuration Oura (score de préparation) <span id="oura-status"></span></summary>
@@ -5463,9 +5463,34 @@ async function refreshHealthData(force = false) {
     const env = JSON.parse(new TextDecoder('utf-8').decode(b64Decode(meta.content.replace(/\s/g, ''))));
     const h = await decryptMaybe(env);
     localStorage.setItem(HEALTH_CACHE_LS, JSON.stringify(h));
+    healthSyncCheck(h);
     renderHealthCard();
     hcExProcess();
-  } catch (err) { logError('Lecture forme du jour', err); }
+  } catch (err) { logError('Lecture forme du jour', err); if (healthSyncAt) healthSyncRetry(); }
+}
+// Synchro demandée depuis l'app (03/11) : le pont envoie le fichier quelques secondes après le
+// retour, on relit donc toutes les 4 s (max 90 s) jusqu'à recevoir un fichier plus récent que le tap.
+var healthSyncAt = 0, healthSyncNote = '', healthSyncTimer = null; // var : lu par renderHealthCard dès init()
+function healthSyncNow() {
+  healthSyncAt = Date.now(); healthSyncNote = '';
+  renderHealthCard();
+  hcOpenBridge(null);
+}
+function healthSyncRetry() {
+  clearTimeout(healthSyncTimer);
+  if (Date.now() - healthSyncAt > 90000) {
+    healthSyncAt = 0; healthSyncNote = 'La synchro n\'a pas abouti — réessaie dans un moment.';
+    renderHealthCard(); return;
+  }
+  healthSyncTimer = setTimeout(() => refreshHealthData(true), 4000);
+}
+function healthSyncCheck(h) {
+  if (!healthSyncAt) return;
+  if (!h || !(h.updatedAt >= healthSyncAt - 5000)) { healthSyncRetry(); return; }
+  healthSyncAt = 0; clearTimeout(healthSyncTimer);
+  const d = (h.days || {})[todayStr()] || {};
+  healthSyncNote = (d.sleep || (d.oura && d.oura.readiness != null)) ? ''
+    : 'Synchro faite — Oura n\'a pas encore publié la nuit.';
 }
 function hcCurrentWeight() {
   const h = healthData();
@@ -5604,9 +5629,12 @@ function renderHealthCard() {
     reco = `<div style="font-size:17px;font-weight:700;color:${color[st]};">${RECO[st]}</div>
       <div style="font-size:12px;color:var(--muted);margin-top:3px;">${sub.join(' · ')}${weak.length ? `<br>En prudence : ${weak.join(', ')}` : ''}</div>`;
   }
+  else if (!a.hasToday && healthSyncAt) reco = `<div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px;">
+      <span style="width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--text);border-radius:50%;animation:hsspin .8s linear infinite;flex-shrink:0;"></span>
+      Synchronisation de la nuit…</div><style>@keyframes hsspin{to{transform:rotate(360deg)}}</style>`;
   else if (!a.hasToday) reco = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
-      <div style="color:var(--muted);font-size:14px;">Nuit pas encore synchronisée</div>
-      <button onclick="event.stopPropagation();hcOpenBridge(null)" style="flex-shrink:0;padding:8px 12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:600;">Synchroniser maintenant</button></div>`;
+      <div style="color:var(--muted);font-size:14px;">${healthSyncNote || 'Nuit pas encore synchronisée'}</div>
+      <button onclick="event.stopPropagation();healthSyncNow()" style="flex-shrink:0;padding:8px 12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:600;">Synchroniser maintenant</button></div>`;
   else if (a.points >= 3) reco = `<div style="font-size:17px;font-weight:700;color:${color.bad};">${RECO.bad}</div>`;
   else if (a.points >= 1) reco = `<div style="font-size:17px;font-weight:700;color:${color.meh};">${RECO.meh}</div>`;
   else reco = `<div style="font-size:17px;font-weight:700;color:${color.ok};">${RECO.ok}</div>`;
@@ -5620,7 +5648,7 @@ function renderHealthCard() {
   // Chrome ne lance pas une app par son seul nom).
   const synced = !!(oura && oura.readiness != null) || a.hasToday;
   el.style.cursor = 'pointer';
-  el.onclick = synced ? openOuraApp : () => hcOpenBridge(null);
+  el.onclick = synced ? openOuraApp : (healthSyncAt ? null : healthSyncNow);
 }
 function openOuraApp() {
   location.href = `intent://open-app?pkg=com.ouraring.oura#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
