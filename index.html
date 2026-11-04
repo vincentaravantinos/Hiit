@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-04T06:26:09Z';</script>
+<script>const APP_BUILD = '2026-11-04T12:07:24Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -865,9 +865,11 @@ function beep(freq=1100,dur=0.18,vol=1.0,holdMs=null){duckStart();try{const ctx=
 // celle qui a parlé. Le 13/10, toutes les phrases tombaient en « synthesis-failed ».
 let ttsFails=0,ttsKeep=null,ttsIdx=0;
 const TTS_LS='hiitTtsVoice';
-function ttsCandidates(){let vs=[];try{vs=speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.toLowerCase().replace('_','-').startsWith('fr'));}catch(e){}
+// 04/11 : français de France uniquement — les voix fr-CA/fr-BE/fr-CH sont exclues (une erreur faisait
+// basculer sur une voix québécoise, ensuite retenue). Sans voix fr-FR qui marche : bips de secours.
+function ttsCandidates(){let vs=[];try{vs=speechSynthesis.getVoices().filter(v=>v.lang&&v.lang.toLowerCase().replace('_','-')==='fr-fr');}catch(e){}
   const loc=vs.filter(v=>v.localService),net=vs.filter(v=>!v.localService);
-  const c=[{key:'défaut fr-FR',voice:null,lang:'fr-FR'}].concat(loc.concat(net).map(v=>({key:v.name,voice:v,lang:v.lang})),[{key:'sans langue',voice:null,lang:''}]);
+  const c=[{key:'défaut fr-FR',voice:null,lang:'fr-FR'}].concat(loc.concat(net).map(v=>({key:v.name,voice:v,lang:v.lang})),[]);
   let saved=null;try{saved=localStorage.getItem(TTS_LS);}catch(e){}
   if(saved){const i=c.findIndex(x=>x.key===saved);if(i>0)c.unshift(c.splice(i,1)[0]);}
   return c;}
@@ -900,7 +902,7 @@ function countSay(word,last){if(ttsFails>=1)beep(last?990:750,last?.18:.12,1.0,1
 // Test : essaie chaque voix française tour à tour jusqu'à en trouver une qui parle.
 function testVoice(){const el=document.getElementById('tts-status');let n=0;try{n=speechSynthesis.getVoices().length;}catch(e){}
   try{localStorage.removeItem(TTS_LS);}catch(e){}ttsIdx=0;ttsFails=0;const c=ttsCandidates();
-  const base='Version '+APP_BUILD+' · '+n+' voix, '+(c.length-2)+' françaises';getACtx();beep(825,.14,1.0);
+  const base='Version '+APP_BUILD+' · '+n+' voix, '+(c.length-1)+' fr-FR';getACtx();beep(825,.14,1.0);
   const tryOne=i=>{if(i>=c.length){el.innerHTML=base+' · ÉCHEC avec toutes les voix — <a href="#" onclick="chromeReset();return false" style="color:#ff7a7a">redémarrer Chrome</a>';return;}ttsIdx=i;el.textContent=base+' · essai '+(i+1)+'/'+c.length+' : '+c[i].key+'…';
     speak('Test de la voix.',{onstart:()=>{el.textContent=base+' · voix OK ✔ ('+c[i].key+')';},onfail:()=>{ttsIdx=i;setTimeout(()=>tryOne(i+1),400);}});};
   setTimeout(()=>tryOne(0),300);}
