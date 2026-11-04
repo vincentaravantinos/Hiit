@@ -372,7 +372,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
 </div>
 <div class="app-header">
   <div class="app-title">HIIT Tracker</div>
-  <div class="streak-badge">🔥 <span id="streak-count">0</span>&thinsp;<span style="opacity:.55;font-size:13px;color:var(--text)">jours</span></div>
+  <div class="streak-badge">🔥 <span id="streak-count">0</span>&thinsp;<span id="streak-unit" style="opacity:.55;font-size:13px;color:var(--text)">semaine</span></div>
 </div>
 <div class="tab-nav">
   <button class="tab-btn active" onclick="showTab('dashboard',this)"><svg class="tab-ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5" opacity=".35"/><path d="M12 3.5a8.5 8.5 0 0 1 8.5 8.5"/><circle cx="12" cy="12" r="3.2"/></svg><span>Suivi</span></button>
@@ -391,7 +391,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
       </svg>
       <div class="oura-hero-side">
         <div class="oura-hero-msg" id="oh-msg"></div>
-        <div class="oura-kv"><div><b id="oh-streak">0</b><span>jours de streak</span></div><div><b id="oh-total">0</b><span>séances</span></div></div>
+        <div class="oura-kv"><div><b id="oh-streak">0</b><span>sem. de streak</span></div><div><b id="oh-total">0</b><span>séances</span></div></div>
       </div>
     </div>
     <div class="row-between">
@@ -404,7 +404,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     </div>
     <div class="week-grid" id="week-grid"></div>
     <div class="stats-row">
-      <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak actuel</div></div>
+      <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak (semaines)</div></div>
       <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total séances</div></div>
     </div>
     <div id="health-card" style="display:none;margin-bottom:16px;padding:14px;border:1px solid var(--border2);border-radius:12px;background:var(--surface2);"></div>
@@ -496,9 +496,15 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     <div class="settings-section">
       <div class="settings-label">Séance</div>
       <div class="setting-row">
-        <div class="setting-name">Séances / semaine</div>
+        <div><div class="setting-name">Objectif Intense / semaine</div><div class="setting-sub">Cible de l'anneau. Les Récup ne comptent pas.</div></div>
         <select id="goal-select" onchange="saveGoal()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px">
           <option value="3">3 ×</option><option value="4">4 ×</option><option value="5" selected>5 ×</option><option value="6">6 ×</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <div><div class="setting-name">Streak : Intense / semaine</div><div class="setting-sub">Minimum pour qu'une semaine compte dans le streak.</div></div>
+        <select id="streakmin-select" onchange="saveStreakMin()" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:16px;font-weight:700;border-radius:8px;padding:7px 10px">
+          <option value="2">2 ×</option><option value="3" selected>3 ×</option><option value="4">4 ×</option><option value="5">5 ×</option>
         </select>
       </div>
       <div class="setting-row">
@@ -621,7 +627,7 @@ const S={get:(k,d)=>{try{const v=localStorage.getItem(k);return v!==null?JSON.pa
 let workouts=S.get(KEYS.workouts,[]),goal=S.get(KEYS.goal,5),reminderOn=S.get(KEYS.reminderOn,false),reminderTime=S.get(KEYS.reminderTime,'19:00'),reminderTO=null,spotifyOn=S.get(KEYS.spotifyOn,false),spotifyPlaylist=S.get(KEYS.spotifyPlaylist,''),spotifyClientId=S.get(KEYS.spotifyClientId,''),spotifyRelax=S.get(KEYS.spotifyRelax,'https://open.spotify.com/playlist/37i9dQZF1DWZqd5JICZI0u');
 // Migration: old format was a plain array of date strings (all sessions treated as "Intense").
 if(workouts.length&&typeof workouts[0]==='string'){workouts=workouts.map(d=>({date:d,type:'I'}));S.set(KEYS.workouts,workouts);}
-const MAX_RECUP_RUN=3; // le streak casse si on enchaîne 3 jours sans la moindre séance Intense
+const STREAK_MIN_KEY='hiit_streakMin_v1';let streakMin=S.get(STREAK_MIN_KEY,3); // streak en semaines : une semaine compte si elle a au moins streakMin séances Intense (les Récup ne comptent pas)
 const todayStr=()=>{const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');};
 const ds=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 // Moment où la séance a eu lieu (début), et non celui où ses données ont été récupérées.
@@ -632,39 +638,31 @@ const hasEntry=dstr=>!!getEntry(dstr);
 const hasTrainedToday=()=>hasEntry(todayStr());
 function logWorkout(type,silent=false,dstr=null){const t=dstr||todayStr();if(hasEntry(t))return;workouts.unshift({date:t,type});workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);if(!silent)showToast(type==='I'?'Séance Intense enregistrée ✓':'Séance Récup enregistrée ✓');renderDashboard();}
 function toggleDay(dstr){const cur=getEntry(dstr);if(!cur){workouts.push({date:dstr,type:'I'});showToast('Intense ajouté ✓');}else if(cur.type==='I'){cur.type='R';showToast('Passé en Récup');}else{workouts=workouts.filter(w=>w.date!==dstr);showToast('Séance retirée');}workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);renderDashboard();}
-// Parcourt une séquence de jours triée (ancien -> récent) et calcule les longueurs de streak,
-// en respectant la règle : le streak casse sur un jour non-entraîné OU sur 3 jours consécutifs sans Intense.
-function computeStreakRuns(sortedDates){
-  const runs=[];let len=0,recupRun=0,prevDate=null;
-  for(const dstr of sortedDates){
-    const isConsecutive=prevDate&&Math.round((new Date(dstr)-new Date(prevDate))/86400000)===1;
-    if(!isConsecutive&&prevDate!==null){if(len>0)runs.push(len);len=0;recupRun=0;}
-    const type=getEntry(dstr).type;
-    if(type==='I'){recupRun=0;len++;}
-    else{recupRun++;if(recupRun>=MAX_RECUP_RUN){if(len>0)runs.push(len);len=0;recupRun=0;}else{len++;}}
-    prevDate=dstr;
+// Streak en SEMAINES (lundi → dimanche). Une semaine compte si elle contient au moins streakMin
+// séances Intense (Récup ignorées). La semaine en cours ne casse pas le streak tant que le minimum
+// reste atteignable (assez de jours libres d'ici dimanche) ; elle ajoute +1 dès qu'il est atteint.
+const parseDay=s=>{const[y,m,d]=s.split('-').map(Number);return new Date(y,m-1,d);};
+function mondayOf(d){const m=new Date(d.getFullYear(),d.getMonth(),d.getDate());m.setDate(m.getDate()-((m.getDay()+6)%7));return m;}
+const intenseInWeek=mon=>{let n=0;for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);const e=getEntry(ds(d));if(e&&e.type==='I')n++;}return n;};
+// Renvoie {runs:[longueurs des streaks passés et en cours], current}
+function computeWeekStreaks(){
+  const res={runs:[],current:0};if(workouts.length===0)return res;
+  const first=mondayOf(parseDay([...workouts].map(w=>w.date).sort()[0])),thisMon=mondayOf(new Date()),today=todayStr();
+  let len=0;
+  for(const mon=new Date(first);mon<=thisMon;mon.setDate(mon.getDate()+7)){
+    const n=intenseInWeek(mon),isCur=mon.getTime()===thisMon.getTime();
+    if(n>=streakMin){len++;continue;}
+    if(isCur){
+      let free=0;for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);const s=ds(d);if(s>=today&&!hasEntry(s))free++;}
+      if(n+free>=streakMin)continue; // encore atteignable : la semaine en cours ne casse rien
+    }
+    if(len>0)res.runs.push(len);len=0;
   }
-  if(len>0)runs.push(len);
-  return runs;
+  if(len>0)res.runs.push(len);res.current=len;return res;
 }
-function getCurrentStreak(){
-  if(workouts.length===0)return 0;
-  const sorted=[...workouts].map(w=>w.date).sort();
-  const lastDate=sorted[sorted.length-1];
-  const today=todayStr(),yesterday=ds(new Date(Date.now()-86400000));
-  if(lastDate!==today&&lastDate!==yesterday)return 0; // streak déjà perdue (jour manqué)
-  let len=0,recupRun=0,prevDate=null;
-  for(const dstr of sorted){
-    const isConsecutive=prevDate&&Math.round((new Date(dstr)-new Date(prevDate))/86400000)===1;
-    if(prevDate!==null&&!isConsecutive){len=0;recupRun=0;}
-    const type=getEntry(dstr).type;
-    if(type==='I'){recupRun=0;len++;}
-    else{recupRun++;if(recupRun>=MAX_RECUP_RUN){len=0;recupRun=0;}else{len++;}}
-    prevDate=dstr;
-  }
-  return len;
-}
-function getAllStreaks(){if(workouts.length===0)return[];const sorted=[...workouts].map(w=>w.date).sort();return computeStreakRuns(sorted).sort((a,b)=>b-a);}
+function getCurrentStreak(){return computeWeekStreaks().current;}
+function getAllStreaks(){return computeWeekStreaks().runs.sort((a,b)=>b-a);}
+const wkUnit=n=>n>1?'semaines':'semaine';
 function getWeekDates(offset=0){const now=new Date(),day=now.getDay();const mon=new Date(now);mon.setDate(now.getDate()-(day===0?6:day-1)+offset*7);mon.setHours(0,0,0,0);return Array.from({length:7},(_,i)=>{const d=new Date(mon);d.setDate(mon.getDate()+i);return d;});}
 let weekOffset=0;
 function changeWeek(delta){const next=weekOffset+delta;if(next>0)return;weekOffset=next;renderDashboard();}
@@ -674,7 +672,7 @@ function renderDashboard(){
   const today=todayStr(),now=new Date(),weekDates=getWeekDates(weekOffset);
   document.getElementById('week-label').textContent=weekLabel(weekOffset);
   document.getElementById('week-next').disabled=weekOffset>=0;
-  const weekDone=weekDates.filter(d=>hasEntry(ds(d))).length;
+  const weekDone=weekDates.filter(d=>{const e=getEntry(ds(d));return e&&e.type==='I';}).length; // Récup non comptées
   document.getElementById('week-score').textContent=`${weekDone} / ${goal}`;try{renderOuraHero(weekDone);}catch(e){}
   const grid=document.getElementById('week-grid');grid.innerHTML='';
   weekDates.forEach((d,i)=>{
@@ -701,10 +699,10 @@ function renderDashboard(){
     grid.appendChild(cell);
   });
   const streak=getCurrentStreak();
-  document.getElementById('streak-count').textContent=streak;document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
+  document.getElementById('streak-count').textContent=streak;document.getElementById('streak-unit').textContent=wkUnit(streak);document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
   const top3=getAllStreaks().slice(0,3),maxVal=top3[0]||1,container=document.getElementById('top-streaks');
   if(top3.length===0){container.innerHTML='<div class="streak-empty">Commence à t\'entraîner pour voir tes records !</div>';return;}
-  container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">jours</div></div></div>`;}).join('');
+  container.innerHTML=top3.map((days,i)=>{const isGold=i===0,barW=Math.max(8,Math.round(days/maxVal*100));return`<div class="streak-row"><div class="streak-rank">${MEDALS[i]}</div><div class="streak-bar-wrap"><div class="streak-bar-track"><div class="streak-bar-fill${isGold?' gold':''}\" style="width:${barW}%"></div></div><div class="streak-unit">${i===0?'meilleur streak':'streak'}</div></div><div><div class="streak-days${isGold?' gold':''}\">${days}</div><div class="streak-unit" style="text-align:right">${wkUnit(days)}</div></div></div>`;}).join('');
 }
 function showPanel(name){document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));document.getElementById('tab-'+name).classList.add('active');if(name==='dashboard')renderDashboard();if(name==='activity')renderActivityCards();if(name==='free')freeRenderChips();if(name==='timer'||name==='swim'||name==='free')sensorPrewarmConnect();if(name==='timer')ellipAutoStart(true);}
 function runningActivity(){if(tState!=='idle')return'timer';if(swimTimerInterval)return'swim';if(freePending())return'free';return null;}
@@ -714,6 +712,7 @@ function showTab(name,btn){document.querySelectorAll('.tab-btn').forEach(b=>b.cl
 function openActivity(name){showPanel(name);}
 function toggleReminder(){reminderOn=!reminderOn;S.set(KEYS.reminderOn,reminderOn);document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';reminderOn?scheduleReminder():clearTimeout(reminderTO);}
 function saveReminderTime(){reminderTime=document.getElementById('reminder-time').value;S.set(KEYS.reminderTime,reminderTime);scheduleReminder();}
+function saveStreakMin(){streakMin=parseInt(document.getElementById('streakmin-select').value);S.set(STREAK_MIN_KEY,streakMin);renderDashboard();}
 function saveGoal(){goal=parseInt(document.getElementById('goal-select').value);S.set(KEYS.goal,goal);renderDashboard();}
 function toggleSpotify(){spotifyOn=!spotifyOn;S.set(KEYS.spotifyOn,spotifyOn);document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';}
 function saveSpotifyPlaylist(){spotifyPlaylist=document.getElementById('spotify-playlist-input').value;S.set(KEYS.spotifyPlaylist,spotifyPlaylist);}
@@ -1001,7 +1000,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);spotifyMusicBtn(false);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -6227,8 +6226,8 @@ function renderOuraHero(weekDone){
   document.getElementById('oh-total').textContent=workouts.length;
   let msg;const left=goal-weekDone;
   if(weekOffset<0)msg=weekDone>=goal?'Objectif atteint cette semaine-là':'Semaine passée';
-  else if(hasTrainedToday())msg=left>0?'Séance du jour faite. Encore '+left+' cette semaine':'Séance faite, objectif de la semaine atteint';
-  else msg=left>0?'Encore '+left+' séance'+(left>1?'s':'')+' cette semaine':'Objectif de la semaine atteint';
+  else if(hasTrainedToday())msg=left>0?'Séance du jour faite. Encore '+left+' Intense cette semaine':'Séance faite, objectif de la semaine atteint';
+  else msg=left>0?'Encore '+left+' Intense cette semaine':'Objectif de la semaine atteint';
   document.getElementById('oh-msg').textContent=msg;
 }
 
