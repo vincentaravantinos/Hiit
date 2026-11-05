@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T05:30:57Z';</script>
+<script>const APP_BUILD = '2026-11-05T05:35:09Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -527,6 +527,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <div class="setting-sub" id="spotify-playlist-status"></div>
         <div class="setting-name">Playlist relaxante (minute de récupération)</div>
         <input type="text" id="spotify-relax-input" placeholder="Lien ou URI Spotify — vide : la musique continue" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyRelax()">
+        <div class="setting-sub" id="spotify-relax-status"></div>
         <div class="setting-sub">Remplace la playlist de la séance dès le début de la récupération (nécessite le Client ID, dans Configuration).</div>
         <details class="cfg-fold"><summary>Configuration</summary>
           <div class="setting-name">Client ID Spotify (optionnel)</div>
@@ -730,9 +731,11 @@ function spotifyParse(raw){if(!raw)return null;raw=String(raw).trim();if(!raw)re
   return null;}
 function spotifyWhyBad(raw){if(!raw||!String(raw).trim())return 'aucun lien saisi';if(/spotify\.link|spoti\.fi/i.test(raw))return 'lien court (spotify.link) non pris en charge — ouvre-le dans le navigateur et copie le lien open.spotify.com';return 'lien non reconnu';}
 const SP_TYPE_FR={playlist:'playlist',album:'album',artist:'artiste',track:'titre',show:'podcast',episode:'épisode'};
-function spotifyStatusRender(){const el=document.getElementById('spotify-playlist-status');if(!el)return;const r=spotifyParse(spotifyPlaylist);el.textContent=r?'✓ '+SP_TYPE_FR[r.type]+' reconnu(e)':'⚠ '+spotifyWhyBad(spotifyPlaylist);el.style.color=r?'var(--muted)':'#ff7a7a';}
+function spotifyStatusOne(elId,val,emptyOk){const el=document.getElementById(elId);if(!el)return;const r=spotifyParse(val);const empty=!val||!String(val).trim();
+  el.textContent=r?'✓ '+SP_TYPE_FR[r.type]+' reconnu(e)':(empty&&emptyOk)?'Aucune : la musique de la séance continue':'⚠ '+spotifyWhyBad(val);el.style.color=(r||(empty&&emptyOk))?'var(--muted)':'#ff7a7a';}
+function spotifyStatusRender(){spotifyStatusOne('spotify-playlist-status',spotifyPlaylist,false);spotifyStatusOne('spotify-relax-status',spotifyRelax,true);}
 function extractSpotifyId(raw){const r=spotifyParse(raw);return r?r.id:null;}
-function saveSpotifyRelax(){spotifyRelax=document.getElementById('spotify-relax-input').value;S.set(KEYS.spotifyRelax,spotifyRelax);}
+function saveSpotifyRelax(){spotifyRelax=document.getElementById('spotify-relax-input').value;S.set(KEYS.spotifyRelax,spotifyRelax);spotifyStatusRender();}
 // Minute de récupération (30/10) : bascule sur la playlist relaxante, en arrière-plan via
 // HIIT Bridge (le Client ID est donc requis : sans lui, Spotify s'ouvrirait par-dessus le timer).
 // Lancée après l'annonce vocale de début de récupération pour ne pas la couper.
