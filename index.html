@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T06:17:26Z';</script>
+<script>const APP_BUILD = '2026-11-05T20:08:38Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -3744,7 +3744,6 @@ function renderHrChartSvg(hrSamples, opts = {}) {
   const data = { w, pts: pts.map(p => [p.t, p.hr, +X(p.t).toFixed(1), +Y(p.hr).toFixed(1)]), segs: segs.map(sg => [sg.label, sg.t0, sg.t1]), prev };
   let html = `<div class="hrc" data-hrc='${JSON.stringify(data)}' style="position:relative;touch-action:pan-y;user-select:none;-webkit-user-select:none;">${svg}`;
   html += `<div class="hrc-tip" style="display:none;position:absolute;top:0;transform:translateX(-50%);padding:4px 8px;border-radius:8px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:12px;font-weight:600;white-space:nowrap;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.3);"></div></div>`;
-  html += `<div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-top:4px;"><span>Moy. ${avgHr} bpm</span><span style="opacity:.7;">${prev.length > 1 ? 'Pâle : ' + (opts.prevLabel || 'séance précédente') : 'Glisse le doigt sur la courbe'}</span><span>Max ${maxHrActual} bpm</span></div>`;
   return html;
 }
 // Courbes FC compactes (1 point / 2 s) gardées en local par fichier de séance, pour
@@ -4560,9 +4559,6 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
     if (trend[name]) html += `<tr><td colspan="6" style="padding:0 0 6px;color:#2ecc71;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;">💪 ${trend[name]}</td></tr>`;
   }
   html += '</table>';
-  html += `<div style="font-size:11px;color:var(--muted);margin-top:6px;">${anyColor
-    ? '<span style="color:#2ecc71;">Vert</span> : mieux que ta dernière séance au même tour, à charge égale. Blanc : pareil. <span style="color:#e74c3c;">Rouge</span> : moins bien.'
-    : 'Couleurs à partir de la 2ᵉ séance enregistrée.'}</div>`;
   return html;
 }
 
@@ -4700,8 +4696,7 @@ function showSessionResultsModal(combined, filename) {
     const zonesHtml = renderHrZonesHtml(combined, null, hiitZoneOpts(combined));
     box.innerHTML = `
       ${hiitNavHeaderHtml(box._hc)}
-      ${combined.variant ? `<p style="font-size:12px;color:var(--accent);text-align:center;margin-bottom:6px;">Programme ${combined.programLabel || combined.variant} — comparé uniquement aux séances de ce programme</p>` : ''}
-      <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
+      ${combined.variant ? `<p style="font-size:12px;color:var(--accent);text-align:center;margin-bottom:6px;">Programme ${combined.programLabel || combined.variant}</p>` : ''}
       <div style="margin-bottom:16px;">${repsHtml}</div>
       ${recHtml ? `<div style="margin-bottom:16px;">${recHtml}</div>` : ''}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
@@ -5217,8 +5212,7 @@ function renderHrZonesHtml(combined, segments, opts = {}) {
   const headline = opts.focus === 'high'
     ? `Zones 4-5 : <b>${pct(counts[3] + counts[4])} %</b> ${scope}`
     : `Zone 2 : <b>${pct(counts[1])} %</b> ${scope}`;
-  return `<div style="font-size:14px;">${headline}</div>${bar}${rows}
-    <div style="font-size:11px;color:var(--muted);margin-top:6px;">FC max ${hrMax} bpm (modifiable dans Réglages)</div>`;
+  return `<div style="font-size:14px;">${headline}</div>${bar}${rows}`;
 }
 
 const CADENCE_MIN_S = 180;      // au moins 3 min dans une nage pour comparer sa cadence
@@ -5312,7 +5306,7 @@ function renderCcKpiHtml(combined, filename) {
     svg += `<polyline points="${xy.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}" fill="none" stroke="var(--muted)" stroke-width="1.5"/>`;
     xy.forEach((p,i) => { const last = i === xy.length-1; svg += `<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="${last?5:3}" fill="${last?bg:'var(--muted)'}" stroke="${last?'#fff':'none'}" stroke-width="1.5"/>`; });
     svg += '</svg>';
-    html += svg + `<div style="font-size:11px;color:var(--muted);text-align:center;">${series.length} dernières séances au niveau ${level} (plus bas = mieux)</div>`;
+    html += svg;
   }
   return html;
 }
@@ -5438,7 +5432,6 @@ function showSwimResultsModal(combined, filename) {
     const zonesHtml = renderHrZonesHtml(combined, segments);
     box.innerHTML = `
       ${hiitNavHeaderHtml(box._hc, isCc ? 'CONTRE-COURANT' : 'NATATION')}
-      <p style="font-size:11px;color:var(--muted);text-align:center;margin-bottom:14px;">Estimation algorithmique, encore en évolution</p>
       ${ccHtml}
       ${zonesHtml ? `<div style="margin-bottom:16px;">${zonesHtml}</div>` : ''}
       <div style="margin-bottom:16px;">${hrHtml}</div>
