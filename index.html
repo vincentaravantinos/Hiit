@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T05:25:15Z';</script>
+<script>const APP_BUILD = '2026-11-05T05:28:20Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -571,6 +571,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     </div>
     <details class="settings-section settings-fold">
       <summary class="settings-label">Données &amp; dépannage</summary>
+      <div class="setting-row"><div><div class="setting-name">Version de l'app</div><div class="setting-sub" id="build-info">—</div></div><button id="build-check-btn" onclick="buildCheckNow(this)" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Vérifier</button></div>
       <div class="settings-sublabel">Capteur Polar</div>
       <div class="setting-row"><div><div class="setting-name">Journal de connexion</div><div class="setting-sub">Utile en cas de problème de connexion au capteur</div></div></div>
       <div style="display:flex;gap:8px;">
@@ -1006,7 +1007,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);spotifyMusicBtn(false);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){buildInfoRender();renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -1056,15 +1057,26 @@ async function healStaleBuild() {
   return true;
 }
 function staleReload() { location.replace(location.pathname + '?v=' + Date.now()); }
+// Réglages > Données & dépannage : build chargé + état par rapport à la dernière version en ligne.
+function fmtBuild(b) { const d = new Date(b); if (isNaN(d)) return b || '?'; return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }); }
+function buildInfoRender(latest, err) {
+  const el = document.getElementById('build-info'); if (!el) return;
+  let st = '';
+  if (err) st = ' · vérification impossible (hors ligne ?)';
+  else if (latest) st = new Date(latest) > new Date(APP_BUILD) ? ' · ⚠ nouvelle version en ligne (' + fmtBuild(latest) + ') — touche le bandeau orange' : ' · ✓ à jour';
+  el.textContent = 'Build du ' + fmtBuild(APP_BUILD) + ' (' + APP_BUILD + ')' + st;
+}
+async function buildCheckNow(btn) { if (btn) btn.disabled = true; await checkForUpdate(); if (btn) btn.disabled = false; }
 async function checkForUpdate() {
   if (updatePolling) return;
   try {
     const resp = await fetch('https://raw.githubusercontent.com/vincentaravantinos/Hiit/main/version.txt?t=' + Date.now(), { cache: 'no-store' });
-    if (!resp.ok) return;
+    if (!resp.ok) { buildInfoRender(null, true); return; }
     const latest = (await resp.text()).trim();
     const isNewer = latest && !isNaN(new Date(latest)) && new Date(latest) > new Date(APP_BUILD);
     document.getElementById('update-banner').style.display = isNewer ? 'block' : 'none';
-  } catch (e) { /* silencieux — pas bloquant, retenté au prochain cycle */ }
+    buildInfoRender(latest);
+  } catch (e) { buildInfoRender(null, true); /* pas bloquant, retenté au prochain cycle */ }
 }
 async function applyUpdate() {
   if (updatePolling) return;
