@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T05:59:13Z';</script>
+<script>const APP_BUILD = '2026-11-05T06:02:21Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2354,7 +2354,13 @@ function pacerRefFor(i) {
 }
 function pacerSetup(i) {
   pacer = null;
-  const r = pacerRefFor(i); if (!r) return;
+  const r = pacerRefFor(i);
+  if (!r) {
+    const p = SEQ[i];
+    if (liveOptOn('pacer') && p && p.type === 'work' && REP_EXERCISES[p.name] != null && lastRepsFor(p.name, p.round) != null)
+      try { logAppend(`Lièvre ${p.name} T${p.round || 1} : séance de référence sans instants de reps (pas encore recalculée)`); } catch (e) {}
+    return;
+  }
   const p = SEQ[i], step = r.step;
   pacer = { idx: i, n: r.n, first: r.first, step, beep: r.n > 1 && step < PACER_BEEP_BELOW_S, next: 1 };
   try { logAppend(`Lièvre ${p.name} T${p.round || 1} : ${r.n} reps de ${r.first} s à ${r.last} s (${step.toFixed(2)} s/rep${pacer.beep ? ', bips' : ''})`); } catch (e) {}
@@ -3264,9 +3270,18 @@ async function backfillHiitSummaries() {
   try {
     await syncHistoryIndexFromGithub(token);
     const readIndex = () => { try { return JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { return []; } };
-    const latestHiit = {};   // dernière séance HIIT par variante : il lui faut les instants des reps (lièvre)
-    readIndex().filter(e => e.type === 'hiit').forEach(e => { const v = (e.summary && e.summary.variant) || ''; if (!latestHiit[v] || latestHiit[v].filename < e.filename) latestHiit[v] = e; });
-    const needTimes = e => e.summary && e.summary.repsByEx && !e.summary.repTimes && Object.values(latestHiit).includes(e);
+    // Séances de référence du lièvre (celles que lastRepsFor choisit, par variante/exercice/tour) :
+    // il leur faut les instants des reps. Seulement celles-là, pas de re-téléchargement en masse.
+    const refs = new Set(), seenRef = {};
+    readIndex().filter(e => e.type === 'hiit' && e.summary && e.summary.repsByEx).sort((a, b) => a.filename < b.filename ? 1 : -1).forEach(e => {
+      const v = e.summary.variant || '';
+      for (const name in e.summary.repsByEx) for (const r in e.summary.repsByEx[name]) {
+        const k = v + '|' + name + '|' + r;
+        if (!seenRef[k] && e.summary.repsByEx[name][r] > 0) { seenRef[k] = 1; refs.add(e.filename); }
+      }
+    });
+    const needTimes = e => e.summary && e.summary.repsByEx && !e.summary.repTimes && refs.has(e.filename);
+    log(`Lièvre : ${[...refs].filter(f => { const e = readIndex().find(x => x.filename === f); return e && !e.summary.repTimes; }).length} séance(s) de référence à recalculer`);
     const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx && e.summary.repAlgo === REP_ALGO_VERSION) || needTimes(e) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.swimAlgo === SWIM_ALGO_VERSION) : false));
     for (const entry of todo) {
       try {
