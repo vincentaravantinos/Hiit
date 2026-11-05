@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T05:45:26Z';</script>
+<script>const APP_BUILD = '2026-11-05T05:56:39Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -513,6 +513,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
       <button class="notif-btn" id="notif-perm-btn" onclick="requestNotifPermission()" style="margin-top:8px">Activer les notifications</button>
       <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">Fonctionne quand l'app est ouverte en fond de tâche.</div>
       <div class="setting-row"><div><div class="setting-name">Tester la voix</div><div class="setting-sub" id="tts-status"></div></div><button onclick="testVoice()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Tester</button></div>
+      <div class="setting-row"><div><div class="setting-name">Lièvre de reps</div><div class="setting-sub">Rejoue le rythme de tes reps de la dernière séance : « 1 » au moment de ta 1re rep d'alors, le dernier chiffre au moment de ta dernière. Bips si le rythme est rapide</div></div><div class="toggle" id="pacer-toggle" onclick="toggleLiveOpt('pacer')"></div></div>
       <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
     </div>
     <div class="settings-section">
@@ -936,6 +937,8 @@ setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent
 let lastRepsIntroDone=false;
 function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
 // Annonce de début de phase : nom de l'exercice + reps de la dernière fois.
+// (05/11) Même séance de référence que lastRepsFor, avec les instants de la 1re et de la dernière rep.
+function lastRepPaceFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0){const t=idx[i].summary.repTimes&&idx[i].summary.repTimes[name]&&idx[i].summary.repTimes[name][round];return t?{n:v,first:t[0],last:t[1]}:null;}}}catch(e){}return null;}
 function phaseSpeech(i){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'&&p.name===ELLIP_EX){const s=ellipConnected?lastSprintFor(p.round||1,ellipLevelNow()):null;if(s){t+=' '+s.d+' mètres';if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}else if(p.type==='work'&&p.phase==='CIRCUIT'){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}return t;}
 const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
 const tCol=()=>SEQ[tIdx]&&SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)';
@@ -991,9 +994,9 @@ function duckHold(ms){
   duckTimeout=setTimeout(()=>{stopSilentAudio();duckReleaseAt=0;},Math.max(0,duckReleaseAt-Date.now()));
 }
 const SESSION_VARIANT_LS='hiitSessionVariant';
-async function tStartCountdown(){try{const v=curVariantTag();if(v)localStorage.setItem(SESSION_VARIANT_LS,v);else localStorage.removeItem(SESSION_VARIANT_LS);}catch(e){}launchSpotify();ellipOnSessionStart();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);clearInterval(tCdTimer);const id=tCdTimer=setInterval(()=>{c--;if(c<=0){clearInterval(id);tCdTimer=null;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
+async function tStartCountdown(){pacerIdx=-1;pacer=null;try{const v=curVariantTag();if(v)localStorage.setItem(SESSION_VARIANT_LS,v);else localStorage.removeItem(SESSION_VARIANT_LS);}catch(e){}launchSpotify();ellipOnSessionStart();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);clearInterval(tCdTimer);const id=tCdTimer=setInterval(()=>{c--;if(c<=0){clearInterval(id);tCdTimer=null;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
 function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
-function tTick(){if(tState!=='running')return;const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+(n.spoken||n.name).replace(/[\s!]+$/,'')),100);}}if(tLeft===3)countSay('Trois');if(tLeft===2)countSay('Deux');if(tLeft===1)countSay('Un',true);if(tLeft<=0){tGoNext();return;}tRender();}
+function tTick(){if(tState!=='running')return;try{pacerTick();}catch(e){}const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+(n.spoken||n.name).replace(/[\s!]+$/,'')),100);}}if(tLeft===3)countSay('Trois');if(tLeft===2)countSay('Deux');if(tLeft===1)countSay('Un',true);if(tLeft<=0){tGoNext();return;}tRender();}
 function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';ellipOnSessionEnd(sensorActive);sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();const relaxGo=SEQ[tIdx].phase==='RECOVERY'&&launchSpotifyRelax();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);if(relaxGo)speakAfterBridge(phaseSpeech(tIdx));else setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
 let tCdTimer=null;
 // Arrêt volontaire en cours de séance (pause → ⏹, ou ANNULER pendant le décompte) :
@@ -2323,10 +2326,48 @@ async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
 // = les 12 dernières secondes tant que la fenêtre 9–21 s n'est pas complète). Évalué sur
 // 12 séances : retard ~1 s, compte à la fin identique au final dans 99,5 % des cas,
 // ~7 % d'exercices avec une rep de trop transitoire (d'où la confirmation de 1 s).
-const LIVE_OPT_LS = { recding: 'hiitRecordDing' };   // décompte vocal en direct retiré le 02/11 (trop imprécis)
-function liveOptOn(k) { try { return localStorage.getItem(LIVE_OPT_LS[k]) === '1'; } catch (e) { return false; } }
+const LIVE_OPT_LS = { recding: 'hiitRecordDing', pacer: 'hiitRepPacer' };   // décompte vocal en direct retiré le 02/11 (trop imprécis)
+const LIVE_OPT_DEF = { pacer: true };
+function liveOptOn(k) { try { const v = localStorage.getItem(LIVE_OPT_LS[k]); return v === null ? !!LIVE_OPT_DEF[k] : v === '1'; } catch (e) { return !!LIVE_OPT_DEF[k]; } }
 function toggleLiveOpt(k) { try { localStorage.setItem(LIVE_OPT_LS[k], liveOptOn(k) ? '0' : '1'); } catch (e) {} liveOptsRender(); }
 function liveOptsRender() { for (const k in LIVE_OPT_LS) { const el = document.getElementById(k + '-toggle'); if (el) el.classList.toggle('on', liveOptOn(k)); } }
+
+// ======= Lièvre de reps (05/11) =======
+// Ne compte PAS les reps réelles : rejoue le rythme de la dernière séance (même exercice, même
+// tour). « 1 » à l'instant de la 1re rep d'alors, le dernier chiffre à l'instant de la dernière,
+// les autres à intervalle régulier entre les deux, puis silence. Fonctionne sans capteur.
+// Rythme rapide (< 1,6 s par rep) : un bip par rep (dernier bip plus aigu) au lieu des chiffres.
+// Un chiffre tombant pendant une autre annonce est sauté ; « Prochainement / 3, 2, 1 » arrête tout.
+const PACER_BEEP_BELOW_S = 1.6, PACER_TTS_LEAD_S = 0.3, PACER_STOP_LEFT_S = 7.3;
+let pacer = null, pacerIdx = -1;
+function pacerSetup(i) {
+  pacer = null;
+  if (!liveOptOn('pacer')) return;
+  const p = SEQ[i];
+  if (!p || p.type !== 'work' || p.phase !== 'CIRCUIT' || REP_EXERCISES[p.name] == null) return;
+  const r = lastRepPaceFor(p.name, p.round || 1);
+  if (!r || !(r.n >= 1) || r.first == null) return;
+  const step = r.n > 1 ? (r.last - r.first) / (r.n - 1) : 0;
+  if (r.n > 1 && !(step >= 0.4)) return;
+  pacer = { idx: i, n: r.n, first: r.first, step, beep: r.n > 1 && step < PACER_BEEP_BELOW_S, next: 1 };
+  try { logAppend(`Lièvre ${p.name} T${p.round || 1} : ${r.n} reps de ${r.first} s à ${r.last} s (${step.toFixed(2)} s/rep${pacer.beep ? ', bips' : ''})`); } catch (e) {}
+}
+function pacerTick() {
+  if (pacerIdx !== tIdx) { pacerIdx = tIdx; pacerSetup(tIdx); }
+  const P = pacer;
+  if (!P || P.idx !== tIdx) return;
+  const el = (Date.now() - tickStart) / 1000;
+  if (SEQ[tIdx].duration - el <= PACER_STOP_LEFT_S) { pacer = null; return; }   // « Prochainement » prioritaire
+  if (P.next > P.n) { pacer = null; return; }
+  const useBeep = P.beep || ttsFails >= 1;
+  const at = P.first + (P.next - 1) * P.step - (useBeep ? 0 : PACER_TTS_LEAD_S);
+  if (el < at) return;
+  const k = P.next++;
+  if (el - at > 0.6) return;   // en retard (reprise après pause, appli en arrière-plan) : sauté
+  if (useBeep) { beep(k === P.n ? 990 : 620, 0.08, 0.8, 400); return; }
+  let busy = false; try { busy = speechSynthesis.speaking || speechSynthesis.pending; } catch (e) {}
+  if (!busy) speak(String(k), { rate: 1.2, hold: 500, queue: true });
+}
 
 function countRepsGen(seg, minStartS, coreS, coreE, endS) {
   // countRepsWindow avec cœur et fin paramétrables (identique pour 9/21/28 — vérifié sur 192 exercices).
@@ -2927,7 +2968,9 @@ function buildSessionSummary(combined, type) {
     const totalReps = reps.reduce((a,r) => a + r.reps, 0);
     const repsByEx = {};
     reps.forEach(r => { (repsByEx[r.name] = repsByEx[r.name] || {})[r.round] = r.reps; });
-    const summary = { totalReps, exerciseCount: reps.length, repsByEx, repAlgo: REP_ALGO_VERSION };
+    const repTimes = {};   // (05/11) instants 1re/dernière rep, pour le lièvre de reps
+    reps.forEach(r => { if (r.firstS != null && r.lastS != null) (repTimes[r.name] = repTimes[r.name] || {})[r.round] = [r.firstS, r.lastS]; });
+    const summary = { totalReps, exerciseCount: reps.length, repsByEx, repTimes, repAlgo: REP_ALGO_VERSION };
     if (hasSprints) summary.sprints = sprints;
     if (combined.variant) summary.variant = combined.variant;
     if (combined.loads) summary.loads = combined.loads;
@@ -3214,14 +3257,17 @@ async function backfillHiitSummaries() {
   try {
     await syncHistoryIndexFromGithub(token);
     const readIndex = () => { try { return JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch(e) { return []; } };
-    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx && e.summary.repAlgo === REP_ALGO_VERSION) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.swimAlgo === SWIM_ALGO_VERSION) : false));
+    const latestHiit = {};   // dernière séance HIIT par variante : il lui faut les instants des reps (lièvre)
+    readIndex().filter(e => e.type === 'hiit').forEach(e => { const v = (e.summary && e.summary.variant) || ''; if (!latestHiit[v] || latestHiit[v].filename < e.filename) latestHiit[v] = e; });
+    const needTimes = e => e.summary && e.summary.repsByEx && !e.summary.repTimes && Object.values(latestHiit).includes(e);
+    const todo = readIndex().filter(e => e.savedToGithub && (e.type === 'hiit' ? !(e.summary && e.summary.repsByEx && e.summary.repAlgo === REP_ALGO_VERSION) || needTimes(e) : e.type === 'swim' ? !(e.summary && e.summary.ccV === CC_KPI_VERSION && e.summary.swimAlgo === SWIM_ALGO_VERSION) : false));
     for (const entry of todo) {
       try {
         const combined = await fetchSessionFile(entry.filename, token);
         await new Promise(r => setTimeout(r, 50));
         if (entry.type === 'swim') {
           combined.analysis = buildSwimAnalysis(combined);
-        } else if (!(combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION)) {
+        } else if (!repsAnalysisFresh(combined.analysis)) {
           combined.analysis = buildHiitAnalysis(combined);
         }
         const summary = buildSessionSummary(combined, entry.type);
@@ -3289,7 +3335,7 @@ async function importSessionFiles(input) {
       const text = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error || new Error('lecture impossible')); r.readAsText(file); });
       const combined = await decryptMaybe(JSON.parse(text));
       if (!combined || typeof combined !== 'object' || !(combined.acc || combined.hr)) throw new Error('ce fichier ne contient pas de données de séance');
-      if (type === 'hiit' && !(combined.analysis && combined.analysis.reps && combined.analysis.algoVersion === REP_ALGO_VERSION)) combined.analysis = buildHiitAnalysis(combined);
+      if (type === 'hiit' && !repsAnalysisFresh(combined.analysis)) combined.analysis = buildHiitAnalysis(combined);
       const res = await githubPutSession(filename, combined, token);
       let index = [];
       try { index = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]'); } catch (e) { index = []; }
@@ -3565,11 +3611,13 @@ function countRepsWindow(seg, minStartS) {
   const cx = x.slice(c0, c1), ptp = Math.max(...cx) - Math.min(...cx);
   const S = Math.floor((off + minStartS) * FS), E = Math.floor((off + REP_END_MAX_S) * FS);
   const pk = repFindPeaks(x, Math.max(1, Math.floor(0.5 * P * FS)), ptp * 0.25).filter(p => p >= S && p <= E);
-  if (pk.length < 3) return { reps: pk.length, axis: k };
+  const tS = q => Math.round((q / FS - off) * 100) / 100;   // instant d'un pic, en s après le top
+  const span = (a, b) => ({ firstS: a != null ? tS(a) : null, lastS: b != null ? tS(b) : null });
+  if (pk.length < 3) return { reps: pk.length, axis: k, ...span(pk[0], pk[pk.length - 1]) };
   const H = Math.floor(0.5 * P * FS);
   const win = p => { const w = []; for (let i = p - H; i <= p + H; i++) w.push(x[Math.min(x.length - 1, Math.max(0, i))]); const m = w.reduce((a, b) => a + b, 0) / w.length; return w.map(v => v - m); };
   const cin = pk.filter(p => p >= c0 && p < c1);
-  if (cin.length < 3) return { reps: pk.length, axis: k };
+  if (cin.length < 3) return { reps: pk.length, axis: k, ...span(pk[0], pk[pk.length - 1]) };
   const cw = cin.map(win), T = cw[0].map((_, i) => repMedian(cw.map(w => w[i])));
   const ptpW = w => Math.max(...w) - Math.min(...w), hmed = repMedian(cw.map(ptpW));
   const nT = Math.hypot(...T) + 1e-9;
@@ -3591,12 +3639,13 @@ function countRepsWindow(seg, minStartS) {
     const a2 = step(a1[0], d); if (!a2 || a2[1] !== 1) return null;
     return [k1, 2];
   };
-  let reps = 1;
+  let reps = 1; const ends = {};
   for (const d of [-1, 1]) {
     let i = j;
     for (;;) { const r = step(i, d) || bridge(i, d); if (!r) break; i = r[0]; reps += r[1]; }
+    ends[d] = pk[i];
   }
-  return { reps, axis: k };
+  return { reps, axis: k, ...span(ends[-1], ends[1]) };
 }
 
 function analyzeSessionReps(accSamples, phaseLog) {
@@ -3610,7 +3659,7 @@ function analyzeSessionReps(accSamples, phaseLog) {
     if (s0 - REP_WIN_BEFORE_S < 0) return;
     const r = countRepsWindow(seg, minStart);
     if (!r) return;
-    results.push({ name: p.name, round: p.round || 1, reps: r.reps, axis: r.axis });
+    results.push({ name: p.name, round: p.round || 1, reps: r.reps, axis: r.axis, firstS: r.firstS, lastS: r.lastS });
   });
   return results;
 }
@@ -4550,6 +4599,8 @@ function hiitZoneOpts(combined) {
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
 const REP_ALGO_VERSION = 'v3-gabarit';
+// Analyse en cache utilisable : bonne version d'algo ET instants des reps (05/11, lièvre).
+function repsAnalysisFresh(a) { return !!(a && a.reps && a.algoVersion === REP_ALGO_VERSION && a.reps.every(r => 'firstS' in r)); }
 
 async function updateExistingSessionFile(filename, combined) {
   // Writes a recomputed analysis back to the existing GitHub file (same name, in
