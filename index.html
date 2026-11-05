@@ -157,8 +157,6 @@ body {
 .sensor-modal button { width: 100%; padding: 14px; margin: 6px 0; border: none; border-radius: 10px; font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 1px; cursor: pointer; }
 .sensor-modal .btn-connect { background: var(--accent); color: #111; }
 .sensor-modal .btn-skip { background: var(--surface2); color: var(--text); border: 1px solid var(--border2); }
-.batt-card { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; padding: 10px 14px; margin-bottom: 12px; border: 1px solid var(--border2); border-radius: 12px; background: var(--surface2); color: var(--muted); font-family: var(--font); font-size: 12px; cursor: pointer; text-align: left; }
-.batt-card .batt-val { color: var(--text); font-weight: 600; text-align: right; }
 .batt-val[data-level="mid"] { color: #ffb454 !important; }
 .batt-val[data-level="low"] { color: #ff6b6b !important; }
 .sensor-status { font-size: 11px; color: var(--muted); text-align: center; margin-top: 6px; letter-spacing: 1px; min-height: 14px; }
@@ -364,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T05:37:30Z';</script>
+<script>const APP_BUILD = '2026-11-05T05:42:37Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -412,7 +410,6 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     <div id="top-streaks"></div>
   </div>
   <div id="tab-activity" class="tab-panel">
-    <button class="batt-card" onclick="sensorBatteryCheck()"><span>🔋 Capteur Polar</span><span class="batt-val"></span></button>
     <button class="act-card" id="act-card-timer" onclick="openActivity('timer')"><span class="ico">⏱️</span><span><div class="ttl">HIIT</div><div class="sub">Circuit minuté, comptage des répétitions</div></span></button>
     <button class="act-card" id="act-card-swim" onclick="openActivity('swim')"><span class="ico">🏊</span><span><div class="ttl">Natation</div><div class="sub">Contre-courant, analyse des mouvements</div></span></button>
     <button class="act-card" id="act-card-free" onclick="openActivity('free')"><span class="ico">🧗</span><span><div class="ttl">Activité libre</div><div class="sub">Escalade, vélo… FC seule, classée en fin de séance</div></span></button>
