@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-04T12:07:24Z';</script>
+<script>const APP_BUILD = '2026-11-05T05:25:15Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -726,7 +726,11 @@ function launchSpotifyRelax(){if(!spotifyOn||!spotifyClientId)return;const id=ex
 // 03/11 : Chrome bloque en silence l'ouverture d'une autre app (le pont) si le tap sur DÉMARRER
 // date de plus de ~5 s — cas d'une connexion Polar lente. Dans ce cas : bouton « Lancer la musique ».
 function spotifyMusicBtn(show){let b=document.getElementById('spotify-go-btn');if(!show){if(b)b.remove();return;}if(b)return;b=document.createElement('button');b.id='spotify-go-btn';b.textContent='🎵 Lancer la musique';b.style.cssText='position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:900;padding:14px 22px;border:none;border-radius:999px;background:#1db954;color:#fff;font-family:var(--font);font-size:16px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.35)';b.onclick=()=>{spotifyMusicBtn(false);launchSpotify(true);};document.body.appendChild(b);setTimeout(()=>spotifyMusicBtn(false),90000);}
-function launchSpotify(fromBtn){if(!spotifyOn)return;const id=extractSpotifyId(spotifyPlaylist);if(!id)return;const ua=navigator.userActivation;if(!fromBtn&&ua&&!ua.isActive){logAppend('Spotify : tap sur DÉMARRER trop ancien (connexion capteur lente), lancement bloqué par Chrome → bouton « Lancer la musique ».');spotifyMusicBtn(true);return;}logAppend('Spotify : lancement de la playlist'+(fromBtn?' (bouton)':'')+'.');if(spotifyClientId){location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent('spotify:playlist:'+id)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';return;}const webUrl='https://open.spotify.com/playlist/'+id;const w=window.open(webUrl,'_blank');if(!w)window.location.href=webUrl;}
+// 05/11 : la musique part dès le tap sur DÉMARRER (geste encore valide), en parallèle de l'attente
+// elliptique + Polar ; avant, elle partait au décompte, après ces attentes, et Chrome la bloquait souvent.
+let spotifyTapAt=0;
+function launchSpotifyOnTap(){if(!spotifyOn||!extractSpotifyId(spotifyPlaylist))return;spotifyTapAt=Date.now();logAppend('Spotify : lancement dès le tap sur DÉMARRER.');launchSpotify(true);}
+function launchSpotify(fromBtn){if(!spotifyOn)return;if(!fromBtn&&spotifyTapAt&&Date.now()-spotifyTapAt<180000){spotifyTapAt=0;return;}spotifyTapAt=fromBtn?spotifyTapAt:0;const id=extractSpotifyId(spotifyPlaylist);if(!id)return;const ua=navigator.userActivation;if(!fromBtn&&ua&&!ua.isActive){logAppend('Spotify : tap sur DÉMARRER trop ancien (connexion capteur lente), lancement bloqué par Chrome → bouton « Lancer la musique ».');spotifyMusicBtn(true);return;}logAppend('Spotify : lancement de la playlist'+(fromBtn?' (bouton)':'')+'.');if(spotifyClientId){location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent('spotify:playlist:'+id)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';return;}const webUrl='https://open.spotify.com/playlist/'+id;const w=window.open(webUrl,'_blank');if(!w)window.location.href=webUrl;}
 function resetData(){if(!confirm('Supprimer toutes les données ?'))return;workouts=[];S.set(KEYS.workouts,[]);renderDashboard();showToast('Données effacées');}
 async function requestNotifPermission(){if(!('Notification'in window)){showToast('Non supporté');return;}const p=await Notification.requestPermission();updateNotifBtn(p);if(p==='granted'){showToast('Notifications activées');scheduleReminder();}}
 function updateNotifBtn(p){const b=document.getElementById('notif-perm-btn');b.textContent=p==='granted'?'✓ Notifications activées':'Activer les notifications';b.classList.toggle('granted',p==='granted');}
@@ -3906,6 +3910,7 @@ function ellipModalShow(mode) {
 }
 function ellipModalHide() { document.getElementById('ellip-modal').style.display = 'none'; }
 async function ellipGateThenStart(btn) {
+  if (!sensorStartBlocked()) launchSpotifyOnTap(); // avant tout await : le tap compte encore pour Chrome
   if (!curSensors().elliptical) {
     if (!curSensors().polar && !sensorStartBlocked()) { sensorActive = false; tStartCountdown(); return; }
     sensorPromptThenStart(btn); return;
