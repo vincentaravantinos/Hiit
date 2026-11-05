@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T06:08:38Z';</script>
+<script>const APP_BUILD = '2026-11-05T06:12:19Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -513,7 +513,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
       <button class="notif-btn" id="notif-perm-btn" onclick="requestNotifPermission()" style="margin-top:8px">Activer les notifications</button>
       <div style="font-size:13px;color:var(--muted);margin-top:8px;line-height:1.6">Fonctionne quand l'app est ouverte en fond de tâche.</div>
       <div class="setting-row"><div><div class="setting-name">Tester la voix</div><div class="setting-sub" id="tts-status"></div></div><button onclick="testVoice()" style="padding:9px 14px;border:1px solid var(--border2);border-radius:8px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:12px;">Tester</button></div>
-      <div class="setting-row"><div><div class="setting-name">Lièvre de reps</div><div class="setting-sub">Rejoue le rythme de tes reps de la dernière séance : « 1 » au moment de ta 1re rep d'alors, le dernier chiffre au moment de ta dernière. Bips si le rythme est rapide</div></div><div class="toggle" id="pacer-toggle" onclick="toggleLiveOpt('pacer')"></div></div>
+      <div class="setting-row"><div><div class="setting-name">Lièvre de reps</div><div class="setting-sub">Rejoue le rythme de tes reps de la dernière séance : « 1 » au moment de ta 1re rep d'alors, le dernier chiffre au moment de ta dernière. Bip à la place d'un chiffre qui tombe pendant une autre annonce ou dans le « 3, 2, 1 » (bip aigu = dernière rep)</div></div><div class="toggle" id="pacer-toggle" onclick="toggleLiveOpt('pacer')"></div></div>
       <div class="setting-row"><div><div class="setting-name">Ding pour un record</div><div class="setting-sub">Un son quand tu dépasses tes reps de la dernière séance (expérimental)</div></div><div class="toggle" id="recding-toggle" onclick="toggleLiveOpt('recding')"></div></div>
     </div>
     <div class="settings-section">
@@ -2337,8 +2337,10 @@ function liveOptsRender() { for (const k in LIVE_OPT_LS) { const el = document.g
 // tour). « 1 » à l'instant de la 1re rep d'alors, le dernier chiffre à l'instant de la dernière,
 // les autres à intervalle régulier entre les deux, puis silence. Fonctionne sans capteur.
 // Rythme rapide (< 1,0 s par rep ; 1,6 s avant le 05/11, trop prudent : ~1,5 s/rep typique) : un bip par rep (dernier bip plus aigu) au lieu des chiffres.
-// Un chiffre tombant pendant une autre annonce est sauté ; « Prochainement / 3, 2, 1 » arrête tout.
-const PACER_BEEP_BELOW_S = 1.0, PACER_TTS_LEAD_S = 0.3, PACER_STOP_LEFT_S = 7.3;
+// Un chiffre qui ne peut pas être dit (autre annonce en cours, ou dans le « 3, 2, 1 » final) devient
+// un bip : chaque rep de référence reste marquée jusqu'à la dernière (05/11 : le lièvre s'arrêtait à
+// 7 s de la fin et perdait les dernières reps, p. ex. 10 annoncées pour 13).
+const PACER_BEEP_BELOW_S = 1.0, PACER_TTS_LEAD_S = 0.3, PACER_VOICE_UNTIL_LEFT_S = 3.4;
 let pacer = null, pacerIdx = -1;
 // Référence du lièvre pour la phase i, ou null. Quand il y en a une, l'annonce de début
 // d'exercice ne dit plus « N répétitions » (05/11) : le lièvre le donne, plus précisément.
@@ -2370,16 +2372,16 @@ function pacerTick() {
   const P = pacer;
   if (!P || P.idx !== tIdx) return;
   const el = (Date.now() - tickStart) / 1000;
-  if (SEQ[tIdx].duration - el <= PACER_STOP_LEFT_S) { pacer = null; return; }   // « Prochainement » prioritaire
-  if (P.next > P.n) { pacer = null; return; }
+  if (P.next > P.n || el >= SEQ[tIdx].duration) { pacer = null; return; }
   const useBeep = P.beep || ttsFails >= 1;
   const at = P.first + (P.next - 1) * P.step - (useBeep ? 0 : PACER_TTS_LEAD_S);
   if (el < at) return;
   const k = P.next++;
   if (el - at > 0.6) return;   // en retard (reprise après pause, appli en arrière-plan) : sauté
-  if (useBeep) { beep(k === P.n ? 990 : 620, 0.08, 0.8, 400); return; }
   let busy = false; try { busy = speechSynthesis.speaking || speechSynthesis.pending; } catch (e) {}
-  if (!busy) speak(String(k), { rate: 1.35, hold: 500, queue: true });
+  const left = SEQ[tIdx].duration - el - (useBeep ? 0 : PACER_TTS_LEAD_S);
+  if (useBeep || busy || left <= PACER_VOICE_UNTIL_LEFT_S) beep(k === P.n ? 990 : 620, 0.08, 0.8, 400);
+  else speak(String(k), { rate: 1.35, hold: 500, queue: true });
 }
 
 function countRepsGen(seg, minStartS, coreS, coreE, endS) {
