@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T06:02:21Z';</script>
+<script>const APP_BUILD = '2026-11-05T06:08:38Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2336,9 +2336,9 @@ function liveOptsRender() { for (const k in LIVE_OPT_LS) { const el = document.g
 // Ne compte PAS les reps réelles : rejoue le rythme de la dernière séance (même exercice, même
 // tour). « 1 » à l'instant de la 1re rep d'alors, le dernier chiffre à l'instant de la dernière,
 // les autres à intervalle régulier entre les deux, puis silence. Fonctionne sans capteur.
-// Rythme rapide (< 1,6 s par rep) : un bip par rep (dernier bip plus aigu) au lieu des chiffres.
+// Rythme rapide (< 1,0 s par rep ; 1,6 s avant le 05/11, trop prudent : ~1,5 s/rep typique) : un bip par rep (dernier bip plus aigu) au lieu des chiffres.
 // Un chiffre tombant pendant une autre annonce est sauté ; « Prochainement / 3, 2, 1 » arrête tout.
-const PACER_BEEP_BELOW_S = 1.6, PACER_TTS_LEAD_S = 0.3, PACER_STOP_LEFT_S = 7.3;
+const PACER_BEEP_BELOW_S = 1.0, PACER_TTS_LEAD_S = 0.3, PACER_STOP_LEFT_S = 7.3;
 let pacer = null, pacerIdx = -1;
 // Référence du lièvre pour la phase i, ou null. Quand il y en a une, l'annonce de début
 // d'exercice ne dit plus « N répétitions » (05/11) : le lièvre le donne, plus précisément.
@@ -2379,7 +2379,7 @@ function pacerTick() {
   if (el - at > 0.6) return;   // en retard (reprise après pause, appli en arrière-plan) : sauté
   if (useBeep) { beep(k === P.n ? 990 : 620, 0.08, 0.8, 400); return; }
   let busy = false; try { busy = speechSynthesis.speaking || speechSynthesis.pending; } catch (e) {}
-  if (!busy) speak(String(k), { rate: 1.2, hold: 500, queue: true });
+  if (!busy) speak(String(k), { rate: 1.35, hold: 500, queue: true });
 }
 
 function countRepsGen(seg, minStartS, coreS, coreE, endS) {
