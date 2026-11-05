@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T06:12:19Z';</script>
+<script>const APP_BUILD = '2026-11-05T06:17:26Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -939,7 +939,9 @@ function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('
 // Annonce de début de phase : nom de l'exercice + reps de la dernière fois.
 // (05/11) Même séance de référence que lastRepsFor, avec les instants de la 1re et de la dernière rep.
 function lastRepPaceFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0){const t=idx[i].summary.repTimes&&idx[i].summary.repTimes[name]&&idx[i].summary.repTimes[name][round];return t?{n:v,first:t[0],last:t[1]}:null;}}}catch(e){}return null;}
-function phaseSpeech(i){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'&&p.name===ELLIP_EX){const s=ellipConnected?lastSprintFor(p.round||1,ellipLevelNow()):null;if(s){t+=' '+s.d+' mètres';if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}else if(p.type==='work'&&p.phase==='CIRCUIT'&&!pacerRefFor(i)){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}return t;}
+// (05/11) afterNext : passage automatique — « Prochainement : X » a déjà nommé l'exercice, on ne le répète pas
+// (il ne reste que l'info chiffrée éventuelle : reps de la dernière séance sans lièvre, mètres du sprint).
+function phaseSpeech(i,afterNext){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'&&p.name===ELLIP_EX){const s=ellipConnected?lastSprintFor(p.round||1,ellipLevelNow()):null;if(s){t+=' '+s.d+' mètres';if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}else if(p.type==='work'&&p.phase==='CIRCUIT'&&!pacerRefFor(i)){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}if(afterNext&&p.type==='work'&&i>0&&SEQ[i-1].duration>=8&&t.startsWith(p.spoken))t=t.slice(p.spoken.length).trim();return t;}
 const fmt=s=>Math.floor(s/60)+':'+(s%60+'').padStart(2,'0');
 const tCol=()=>SEQ[tIdx]&&SEQ[tIdx].type==='rest'?'var(--green)':'var(--accent)';
 function tRender(){if(!SEQ.length){tRenderControls();return;}const cur=SEQ[tIdx],nxt=SEQ[tIdx+1]||null,isRest=cur.type==='rest';document.getElementById('timer-wrap').classList.toggle('rest-mode',isRest);document.getElementById('t-phase').textContent=cur.phase==='WARMUP'?'ÉCHAUFFEMENT':cur.phase==='RECOVERY'?'RÉCUPÉRATION':`CIRCUIT · ROUND ${cur.round}/${ROUNDS}`;document.getElementById('t-total').textContent=fmt(TOTAL_DUR-tElapsed);const bar=document.getElementById('t-bar');bar.style.width=(tElapsed/TOTAL_DUR*100)+'%';bar.style.background=tCol();const arc=document.getElementById('t-arc');arc.style.stroke=tCol();arc.style.strokeDasharray=CIRCUM;arc.style.strokeDashoffset=CIRCUM*(1-(1-tLeft/cur.duration));document.getElementById('t-time').textContent=fmt(tLeft);document.getElementById('t-ex').textContent=cur.name;document.getElementById('t-ex').style.fill=tCol();document.getElementById('t-next').textContent=nxt&&tState!=='idle'?'ENSUITE → '+nxt.name:'';const cStart=SEQ.findIndex(e=>e.phase==='CIRCUIT')+(cur.round?(cur.round-1):0)*CIRCUIT.length;const isLastRound=cur.round===ROUNDS;document.getElementById('t-list').innerHTML=CIRCUIT.map((ex,i)=>{const isSkipped=SKIP_LAST_REST&&isLastRound&&i===CIRCUIT.length-1&&ex.type==='rest';if(isSkipped)return'';const ai=cStart+i,isA=tIdx===ai,isD=tIdx>ai&&cur.phase!=='WARMUP',col=tCol();const isLast=SKIP_LAST_REST&&isLastRound?i===CIRCUIT.length-2:i===CIRCUIT.length-1;return`<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:${!isLast?'1px solid rgba(255,255,255,.08)':'none'};opacity:${isD?.25:isA?1:.55};transition:opacity .3s"><div style="display:flex;align-items:center;gap:9px"><div style="width:5px;height:5px;border-radius:50%;background:${isA?col:'rgba(255,255,255,.28)'}"></div><span style="font-size:14px;font-weight:${isA?700:400};color:${isA?col:'var(--text)'};text-transform:uppercase;letter-spacing:1.5px">${ex.name}</span></div><span style="font-size:13px;color:var(--muted)">${ex.duration}s</span></div>`;}).join('');tRenderControls();}
@@ -997,7 +999,7 @@ const SESSION_VARIANT_LS='hiitSessionVariant';
 async function tStartCountdown(){pacerIdx=-1;pacer=null;try{const v=curVariantTag();if(v)localStorage.setItem(SESSION_VARIANT_LS,v);else localStorage.removeItem(SESSION_VARIANT_LS);}catch(e){}launchSpotify();ellipOnSessionStart();await sensorOnSessionStart();getACtx();acquireWakeLock();lastRepsIntroDone=false;tState='countdown';document.getElementById('t-cd').style.display='block';document.getElementById('t-time').style.display='none';document.getElementById('t-ex').style.display='none';tRenderControls();let c=3;document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);clearInterval(tCdTimer);const id=tCdTimer=setInterval(()=>{c--;if(c<=0){clearInterval(id);tCdTimer=null;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tState='running';sensorOnPhaseChange();beep(990,.25,1.0);speak(phaseSpeech(0));tRenderControls();tStartTicker();}else{document.getElementById('t-cd').textContent=c;beep(750,.15,1.0);}},1000);}
 function tStartTicker(){clearInterval(ticker);tickStart=Date.now()-(SEQ[tIdx].duration-tLeft)*1000;tickLastSec=tLeft;ticker=setInterval(tTick,100);}
 function tTick(){if(tState!=='running')return;try{pacerTick();}catch(e){}const elapsed=Math.floor((Date.now()-tickStart)/1000);const newLeft=Math.max(0,SEQ[tIdx].duration-elapsed);if(newLeft===tickLastSec)return;tickLastSec=newLeft;tLeft=newLeft;tElapsed=Math.min(SEQ.slice(0,tIdx).reduce((a,e)=>a+e.duration,0)+(SEQ[tIdx].duration-tLeft),TOTAL_DUR);if(tLeft===7){const n=SEQ[tIdx+1];if(n&&n.type!=='rest'){beep(750,.12,1.0,2300);setTimeout(()=>speak('Prochainement : '+(n.spoken||n.name).replace(/[\s!]+$/,'')),100);}}if(tLeft===3)countSay('Trois');if(tLeft===2)countSay('Deux');if(tLeft===1)countSay('Un',true);if(tLeft<=0){tGoNext();return;}tRender();}
-function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';ellipOnSessionEnd(sensorActive);sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();const relaxGo=SEQ[tIdx].phase==='RECOVERY'&&launchSpotifyRelax();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);if(relaxGo)speakAfterBridge(phaseSpeech(tIdx));else setTimeout(()=>speak(phaseSpeech(tIdx)),150);tRender();tStartTicker();}
+function tGoNext(){clearInterval(ticker);tElapsed=Math.min(SEQ.slice(0,tIdx+1).reduce((a,e)=>a+e.duration,0),TOTAL_DUR);if(tIdx+1>=SEQ.length){tState='done';ellipOnSessionEnd(sensorActive);sensorOnSessionEnd();beep(750,.3,1.0);setTimeout(()=>beep(900,.3,1.0),350);setTimeout(()=>beep(1050,.5,1.0),700);setTimeout(()=>speak('Bravo ! Séance terminée !'),800);setTimeout(()=>{logWorkout('I',true);showToast('🏆 Séance terminée et enregistrée');},1200);setTimeout(()=>{stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tReset();},4000);return;}tIdx++;sensorOnPhaseChange();const relaxGo=SEQ[tIdx].phase==='RECOVERY'&&launchSpotifyRelax();tLeft=SEQ[tIdx].duration;tickLastSec=tLeft;beep(SEQ[tIdx].type==='rest'?600:825,.14,1.0);const ps=phaseSpeech(tIdx,true);if(ps){if(relaxGo)speakAfterBridge(ps);else setTimeout(()=>speak(ps),150);}tRender();tStartTicker();}
 let tCdTimer=null;
 // Arrêt volontaire en cours de séance (pause → ⏹, ou ANNULER pendant le décompte) :
 // la séance n'est pas enregistrée, l'enregistrement interne du capteur est arrêté en
@@ -3522,10 +3524,12 @@ function countRepsOnSignal(signal1d, gracesS = 0.5, lowPct = 20, highPct = 80, b
 //     gabarit (forme et amplitude) avec un écart normal — les mouvements de mise en place et de
 //     transition ne ressemblent pas au gabarit, ce qui délimite l'exercice sans a priori fin.
 const REP_EXERCISES = {           // début au plus tôt après le top (s) — garde-fou contre la mise en place
+  // (05/11) Abaissé (avant : pompes 2,0, squats 4,0, tractions 3,5) : Vincent se met en place dès
+  // « Prochainement » et est prêt au top, à ~1 s près. La transition reste filtrée par le gabarit.
   'Rowing élastique': 0.8,
-  'Pompes déclinées': 2.0,
-  'Squats élastique': 4.0,
-  'Pull ups': 3.5,
+  'Pompes déclinées': 1.0,
+  'Squats élastique': 1.0,
+  'Pull ups': 1.0,
 };
 const REP_WIN_BEFORE_S = 2, REP_WIN_AFTER_S = 34, REP_END_MAX_S = 28;
 const REP_CORE = [9, 21];
@@ -4622,7 +4626,7 @@ function hiitZoneOpts(combined) {
 // NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
-const REP_ALGO_VERSION = 'v3-gabarit';
+const REP_ALGO_VERSION = 'v3-gabarit-d1';   // d1 (05/11) : garde-fou de début abaissé à ~1 s
 // Analyse en cache utilisable : bonne version d'algo ET instants des reps (05/11, lièvre).
 function repsAnalysisFresh(a) { return !!(a && a.reps && a.algoVersion === REP_ALGO_VERSION && a.reps.every(r => 'firstS' in r)); }
 
