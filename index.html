@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-05T20:08:38Z';</script>
+<script>const APP_BUILD = '2026-11-06T10:21:50Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -4622,7 +4622,7 @@ function hiitZoneOpts(combined) {
 // NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
-const REP_ALGO_VERSION = 'v3-gabarit-d1';   // d1 (05/11) : garde-fou de début abaissé à ~1 s
+const REP_ALGO_VERSION = 'v3-gabarit-d1b';  // d1 (05/11) : garde-fou de début abaissé à ~1 s ; d1b (06/11) : simple recalcul forcé (séance du 06/11, R3 rowing/vélo inversés)
 // Analyse en cache utilisable : bonne version d'algo ET instants des reps (05/11, lièvre).
 function repsAnalysisFresh(a) { return !!(a && a.reps && a.algoVersion === REP_ALGO_VERSION && a.reps.every(r => 'firstS' in r)); }
 
