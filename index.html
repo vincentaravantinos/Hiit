@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-06T10:31:01Z';</script>
+<script>const APP_BUILD = '2026-11-06T11:32:53Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2307,7 +2307,7 @@ async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
     return st && st.samples.length ? { startTimeStr, settings: null, factor: st.factor, samples: st.samples } : null;
   };
   const combined = { position: sensorPosition, phaseLog: null, acc: pick('ACC'), gyro: pick('GYRO'), mag: pick('MAG'), hr: null,
-    source: 'direct', liveGaps: L.gaps, liveReconnects: L.links };
+    source: 'direct', liveGaps: L.gaps, liveReconnects: L.links, sensorT0Ms: L.startedAt };
   if (L.gaps.length) log(`Direct : ${L.gaps.length} trou(s) comblé(s) — ` + L.gaps.map(g => `${g.durS} s à ${g.atS} s`).join(', '));
   if (L.hr.mode === 'live') {
     combined.hr = { startTimeStr, samples: L.hr.samples };
@@ -2437,8 +2437,8 @@ function liveRepTick() {
   const cur = SEQ[tIdx];
   const ms = cur && cur.type === 'work' ? REP_EXERCISES[cur.name] : null;
   const last = sensorPhaseLog[sensorPhaseLog.length - 1];
-  if (ms != null && last && last.name === cur.name && (!liveRep || liveRep.s0 !== last.tElapsedStart)) {
-    liveRep = { name: cur.name, round: cur.round || 1, s0: last.tElapsedStart, ms, idx: tIdx,
+  if (ms != null && last && last.name === cur.name && (!liveRep || liveRep.atMs !== last.atMs)) {
+    liveRep = { name: cur.name, round: cur.round || 1, s0: phaseSensorStart(last, L.startedAt), atMs: last.atMs, ms, idx: tIdx,
       target: lastRepsFor(cur.name, cur.round), hist: [], said: 0, dinged: false };
   }
   const R = liveRep; if (!R) return;
@@ -3676,13 +3676,31 @@ function countRepsWindow(seg, minStartS) {
   return { reps, axis: k, ...span(ends[-1], ends[1]) };
 }
 
-function analyzeSessionReps(accSamples, phaseLog) {
+// (06/11) Le capteur démarre AVANT le décompte 3-2-1 (mise en route du direct + 3 s) : l'échantillon 0
+// n'est pas le top du chrono. Jusqu'ici l'analyse prenait tElapsedStart comme temps capteur, d'où une
+// fenêtre décalée de ~4–5 s : reps (et lièvre) en retard d'autant, dernières reps tronquées par la fin
+// de fenêtre. Temps capteur d'une phase = son atMs − départ du capteur (exact en direct, à ~1 s près
+// via l'heure d'en-tête sinon). Repli sur l'ancien calcul si l'écart n'est pas plausible.
+function sensorT0Ms(combined) {
+  if (!combined) return null;
+  if (combined.sensorT0Ms) return combined.sensorT0Ms;
+  const t = combined.acc && hcParseSensorUtc(combined.acc.startTimeStr);
+  return t ? t + 500 : null;   // heure tronquée à la seconde
+}
+function phaseSensorStart(p, t0) {
+  if (t0 != null && p.atMs != null) {
+    const s = (p.atMs - t0) / 1000, d = s - p.tElapsedStart;
+    if (d >= 0 && d <= 120) return s;
+  }
+  return p.tElapsedStart;
+}
+function analyzeSessionReps(accSamples, phaseLog, t0) {
   if (!accSamples || !phaseLog || accSamples.length < 20) return null;
   const results = [];
   phaseLog.forEach(p => {
     const minStart = REP_EXERCISES[p.name];
     if (minStart == null) return; // échauffement, sprint, repos, levées de jambes : pas de comptage
-    const s0 = p.tElapsedStart;
+    const s0 = phaseSensorStart(p, t0);
     const seg = accSamples.slice(Math.max(0, Math.round((s0 - REP_WIN_BEFORE_S) * FS_ALGO)), Math.round((s0 + REP_WIN_AFTER_S) * FS_ALGO));
     if (s0 - REP_WIN_BEFORE_S < 0) return;
     const r = countRepsWindow(seg, minStart);
@@ -4587,7 +4605,7 @@ function computeHiitRecovery(combined) {
 
 function buildHiitAnalysis(combined) {
   return {
-    reps: analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog) || [],
+    reps: analyzeSessionReps(combined.acc ? combined.acc.samples : null, combined.phaseLog, sensorT0Ms(combined)) || [],
     recovery: computeHiitRecovery(combined),
     algoVersion: REP_ALGO_VERSION
   };
@@ -4622,7 +4640,7 @@ function hiitZoneOpts(combined) {
 // NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
-const REP_ALGO_VERSION = 'v3-gabarit-d1c';  // d1 (05/11) : garde-fou de début abaissé à ~1 s ; d1b (06/11) : simple recalcul forcé (séance du 06/11, R3 rowing/vélo inversés) ; d1c : idem, sprint elliptique R3 recalculé
+const REP_ALGO_VERSION = 'v3-gabarit-d1c-t0';  // t0 (06/11) : phases recalées sur le départ réel du capteur ; d1 (05/11) : garde-fou de début abaissé à ~1 s ; d1b (06/11) : simple recalcul forcé (séance du 06/11, R3 rowing/vélo inversés) ; d1c : idem, sprint elliptique R3 recalculé
 // Analyse en cache utilisable : bonne version d'algo ET instants des reps (05/11, lièvre).
 function repsAnalysisFresh(a) { return !!(a && a.reps && a.algoVersion === REP_ALGO_VERSION && a.reps.every(r => 'firstS' in r)); }
 
