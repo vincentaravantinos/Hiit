@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-06T11:32:53Z';</script>
+<script>const APP_BUILD = '2026-11-06T13:51:11Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1728,6 +1728,7 @@ async function connectPmd() {
 async function startAllRecordings(types = REC_TYPES) {
   for (const t of types) {
     const resp = await controlRequest(new Uint8Array([0x02, t.typeByte, ...t.settings]));
+    if (resp[3] === PMD_DISK_FULL) throw new Error(`${t.name}: code erreur 14 au demarrage (mémoire du capteur pleine)`);
     if (resp[3] !== 0) throw new Error(`${t.name}: code erreur ${resp[3]} au demarrage`);
     logAppend(`  ${t.name}: enregistrement demarre (erreur=0)`);
   }
@@ -1961,12 +1962,68 @@ function isSensorAnswer(err) {
 
 // Démarrage d'un enregistrement interne, commun aux trois activités. Rejouable :
 // chaque essai arrête d'abord tout enregistrement actif puis relit la ligne de base.
+// ---- Ménage de la mémoire du capteur (06/11) ----
+// Les .REC n'étaient jamais effacés après récupération : la mémoire s'est remplie et le
+// capteur a refusé le démarrage de la natation (PMD code 14 = ERROR_DISK_FULL).
+// Avant chaque démarrage, si aucune séance n'attend de récupération, on efface tous les
+// anciens enregistrements (déjà récupérés et sauvegardés, ou abandonnés).
+const PMD_DISK_FULL = 14;
+function sensorHasPendingSession() {
+  try {
+    return ['hiitSensorPendingSession', 'hiitSwimPendingSession', 'hiitFreePending']
+      .some(k => !!localStorage.getItem(k));
+  } catch (e) { return true; } // dans le doute, on ne touche à rien
+}
+async function pftpRemove(path) {
+  await pftpEnsureReady();
+  for (let i = 0; ; i++) {
+    try { return await pftpWriteAndRead(makeCompleteMessage(encodePftpOperation(3, path))); } // PftpOperation.REMOVE = 3
+    catch (e) {
+      const code = pftpErrCode(e);
+      if (code == null || !PFTP_BUSY_CODES.includes(code) || i >= 3) throw e;
+      await sleep(1000);
+    }
+  }
+}
+async function sensorDiskLog(when) {
+  try {
+    const d = await pftpGetDiskSpace();
+    if (d.fragmentSize && d.totalFragments) {
+      const free = Math.round(d.fragmentSize * d.freeFragments / 1024), total = Math.round(d.fragmentSize * d.totalFragments / 1024);
+      logAppend(`Mémoire du capteur (${when}) : ${free} ko libres sur ${total} ko.`);
+    }
+  } catch (e) { logError('Lecture mémoire du capteur', e); }
+}
+async function sensorPurgeOldRecordings(list) {
+  if (!list.length) return list;
+  if (sensorHasPendingSession()) {
+    logAppend(`${list.length} ancien(s) enregistrement(s) conservé(s) : une séance attend sa récupération.`);
+    return list;
+  }
+  const kb = Math.round(list.reduce((s, r) => s + (r.size || 0), 0) / 1024);
+  log(`Nettoyage de la mémoire du capteur (${list.length} fichier(s), ${kb} ko)...`);
+  await sensorDiskLog('avant nettoyage');
+  const kept = [], dirs = new Set();
+  for (const r of list) {
+    try { await pftpRemove(r.path); dirs.add(r.path.replace(/[^/]+$/, '')); }
+    catch (e) {
+      if (pftpErrCode(e) == null) throw e; // lien coupé : la passe suivante reprendra
+      logError(`Effacement ${r.path}`, e); kept.push(r);
+    }
+  }
+  for (const dir of dirs) { try { await pftpRemove(dir); } catch (e) {} } // dossier vide, sans gravité si refusé
+  logAppend(`Mémoire du capteur nettoyée : ${list.length - kept.length} fichier(s) effacé(s).`);
+  await sensorDiskLog('après nettoyage');
+  return kept;
+}
+
 async function sensorStartRecording(types = REC_TYPES) {
   return await withSensorRetry('Démarrage', async () => {
     log('Préparation du capteur...');
     await pftpEnsureReady();
     await stopStrayRecordings();
-    const baseline = (await listAllRecordings()).map(r => r.path);
+    const existing = await sensorPurgeOldRecordings(await listAllRecordings());
+    const baseline = existing.map(r => r.path);
     log('Démarrage de l\'enregistrement...');
     await startAllRecordings(types);
     return baseline;
