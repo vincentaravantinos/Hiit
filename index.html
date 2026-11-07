@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-06T13:51:11Z';</script>
+<script>const APP_BUILD = '2026-11-07T13:58:38Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1032,7 +1032,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);spotifyMusicBtn(false);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){buildInfoRender();renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;spotifyStatusRender();document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){buildInfoRender();renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;spotifyStatusRender();document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();purgeBicepsHrCaches();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -3075,6 +3075,24 @@ function buildSessionSummary(combined, type) {
 }
 
 const HISTORY_INDEX_KEY = 'hiitHistoryIndex';
+// (07/11) FC des séances HIIT d'avant le 07/11 non représentative (capteur à l'intérieur
+// du biceps : décrochages pendant tractions/levées de jambes). Supprimée des fichiers
+// GitHub (marqués hrExcluded) ; ici on nettoie une fois les caches locaux du téléphone.
+const HR_EXCLUDED_BEFORE = '2026-11-07';
+function purgeBicepsHrCaches() {
+  if (localStorage.getItem('hiitHrPurge1107') === '1') return;
+  try {
+    const idx = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]');
+    const old = idx.filter(e => e.type === 'hiit' && e.date < HR_EXCLUDED_BEFORE);
+    old.forEach(e => { if (e.summary) { delete e.summary.hrRecovery; if (e.summary.sprints) for (const r in e.summary.sprints) if (e.summary.sprints[r]) e.summary.sprints[r].hrAtS = null; } });
+    localStorage.setItem(HISTORY_INDEX_KEY, JSON.stringify(idx));
+    const curves = JSON.parse(localStorage.getItem(HR_CURVES_KEY) || '{}');
+    old.forEach(e => { delete curves[e.filename]; hiitSessionCache.delete(e.filename); });
+    localStorage.setItem(HR_CURVES_KEY, JSON.stringify(curves));
+    localStorage.setItem('hiitHrPurge1107', '1');
+    log(`FC d'avant le 07/11 retirée des caches locaux (${old.length} séance(s))`);
+  } catch (err) { logError('Nettoyage FC avant 07/11', err); }
+}
 function recordHistoryEntry(combined, prefix, filename, savedToGithub) {
   const type = prefix === 'natation_' ? 'swim' : (prefix === 'libre_' || prefix === 'rugby_') ? 'free' : 'hiit';
   const date = sessionDayStr(combined);
@@ -4762,7 +4780,7 @@ function showSessionResultsModal(combined, filename) {
       if (wrap) wrap.innerHTML = renderHrChartSvg(combined.hr.samples, { ...hrOpts, prev: pr.curve, prevLabel: pr.label });
     }) : null;
     if (prevHr) { hrOpts.prev = prevHr.curve; hrOpts.prevLabel = prevHr.label; }
-    const hrHtml = renderHrChartSvg(combined.hr ? combined.hr.samples : null, hrOpts);
+    const hrHtml = combined.hrExcluded ? '<p style="color:var(--muted);font-size:13px;">FC non représentative (capteur mal placé) — supprimée.</p>' : renderHrChartSvg(combined.hr ? combined.hr.samples : null, hrOpts);
     const hist = getHiitHistory(filename, combined.variant || null);
     const repsHtml = renderSprintsHtml(combined, hist) + (combined.noSensor
       ? '<p style="color:var(--muted);font-size:13px;">Séance sans capteur Polar : pas de comptage des reps ni de FC.</p>'
