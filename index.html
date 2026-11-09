@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-09T14:54:31Z';</script>
+<script>const APP_BUILD = '2026-11-09T15:11:51Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -447,7 +447,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <div id="t-controls" style="display:flex;gap:10px;justify-content:center;align-items:center"></div>
         <div id="t-loads" style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:12px;font-size:13px;color:var(--muted)">
           <label style="display:flex;align-items:center;gap:6px">Rowing <input type="number" id="load-rowing" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
-          <label style="display:flex;align-items:center;gap:6px">Squats <input type="number" id="load-squats" min="0" max="200" step="5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
+          <label style="display:flex;align-items:center;gap:6px">Goblet <input type="number" id="load-squats" min="0" max="200" step="0.5" placeholder="kg" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"> kg</label>
           <label style="display:flex;align-items:center;gap:6px">Elliptique niv. <input type="number" id="load-ellip" min="1" max="16" step="1" placeholder="—" onchange="saveLoads()" style="width:58px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-size:15px;font-weight:700;border-radius:8px;padding:6px;text-align:center"></label>
         </div>
         <div class="sensor-status" id="ellip-status" onclick="ellipStatusTap()" style="cursor:pointer"></div>
@@ -781,7 +781,7 @@ const FALLBACK_PROGRAM={
   exercises:[
     {name:"Pull ups",spoken:"Tractions !",duration:30,type:"work"},
     {name:"Pompes déclinées",spoken:"Pompes déclinées !",duration:30,type:"work"},
-    {name:"Squats élastique",spoken:"Squats élastique !",duration:30,type:"work"},
+    {name:"Goblet squat",spoken:"Goblet squat !",duration:30,type:"work"},
     {name:"Levée de jambes suspendu",spoken:"Levée de jambes !",duration:30,type:"work"},
     {name:"Rowing élastique",spoken:"Rowing élastique !",duration:30,type:"work"},
     {name:"Vélo elliptique Sprint",spoken:"Sprint vélo elliptique !",duration:30,type:"work"},
@@ -3603,7 +3603,8 @@ const REP_EXERCISES = {           // début au plus tôt après le top (s) — g
   // « Prochainement » et est prêt au top, à ~1 s près. La transition reste filtrée par le gabarit.
   'Rowing élastique': 0.8,
   'Pompes déclinées': 1.0,
-  'Squats élastique': 1.0,
+  'Squats élastique': 1.0,      // variante hôtel
+  'Goblet squat': 1.0,
   'Pull ups': 1.0,
 };
 const REP_WIN_BEFORE_S = 2, REP_WIN_AFTER_S = 34, REP_END_MAX_S = 28;
@@ -3920,7 +3921,7 @@ function hrcHide(el) { el.querySelectorAll('.hrc-v,.hrc-dot,.hrc-tip').forEach(n
 })();
 
 // ======= Charges des exercices à élastique =======
-const LOAD_EXERCISES = { 'Rowing élastique': 'load-rowing', 'Squats élastique': 'load-squats', 'Vélo elliptique Sprint': 'load-ellip' };
+const LOAD_EXERCISES = { 'Rowing élastique': 'load-rowing', 'Goblet squat': 'load-squats', 'Vélo elliptique Sprint': 'load-ellip' };
 
 // ======= Vélo elliptique (Maxxus CX 4.3f, console FTMS « FAL-SPORTS… ») =======
 // La console parle le protocole standard FTMS en BLE (trames « Indoor Bike Data » ~2 Hz).
@@ -4495,6 +4496,8 @@ function getLoads() {
 }
 function renderLoadInputs() {
   const l = getLoads() || {};
+  // (09/11) Squats élastique → Goblet squat (haltère 24 kg) à la maison.
+  if (l['Goblet squat'] == null) { l['Goblet squat'] = 24; delete l['Squats élastique']; setLoads(l); }
   for (const ex in LOAD_EXERCISES) { const el = document.getElementById(LOAD_EXERCISES[ex]); if (el) el.value = l[ex] != null ? l[ex] : ''; }
 }
 function saveLoads() {
@@ -4561,7 +4564,8 @@ function renderProgressionHtml(results, combined, history) {
     const ok = sessions.every(s => [1,2,3,4].every(r => s[r] != null && s[r] >= PROGRESSION_REPS));
     if (ok) {
       const load = sessionLoadFor(combined.loads, ex);
-      msgs.push(`${ex} : ${PROGRESSION_REPS} reps ou plus à chaque tour sur ${PROGRESSION_SESSIONS} séances${load != null ? ` à ${load} kg` : ''}. Passe à un élastique plus fort.`);
+      const next = ex === 'Goblet squat' ? 'Ajoute une pause en bas ou passe à deux haltères.' : 'Passe à un élastique plus fort.';
+      msgs.push(`${ex} : ${PROGRESSION_REPS} reps ou plus à chaque tour sur ${PROGRESSION_SESSIONS} séances${load != null ? ` à ${load} kg` : ''}. ${next}`);
     }
   }
   if (!msgs.length) return '';
