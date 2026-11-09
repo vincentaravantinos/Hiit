@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-07T13:58:38Z';</script>
+<script>const APP_BUILD = '2026-11-09T14:54:31Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -4751,10 +4751,13 @@ function showSessionResultsModal(combined, filename) {
   if (cacheValid && !('recovery' in combined.analysis)) combined.analysis.recovery = computeHiitRecovery(combined);
   // Récupération en erreur dans une séance déjà sauvegardée : on retente (calcul corrigé
   // depuis) et, si elle aboutit, on met à jour le fichier et le résumé d'historique.
-  else if (cacheValid && filename && combined.analysis.recovery && combined.analysis.recovery.drop == null) {
+  // (09/11) Idem si le calcul donne désormais une autre valeur (base de temps FC corrigée).
+  else if (cacheValid && filename && !combined.hrExcluded && combined.analysis.recovery !== null) {
+    const cur = combined.analysis.recovery;
     const rec2 = computeHiitRecovery(combined);
-    if (rec2) combined.analysis.recovery = rec2;
-    if (rec2 && rec2.drop != null) {
+    if (rec2 && (!cur || cur.drop == null)) combined.analysis.recovery = rec2;
+    if (rec2 && rec2.drop != null && (!cur || cur.drop !== rec2.drop)) {
+      combined.analysis.recovery = rec2;
       try {
         const idx = JSON.parse(localStorage.getItem(HISTORY_INDEX_KEY) || '[]');
         const e = idx.find(x => x.filename === filename);
@@ -5223,12 +5226,19 @@ function hrTimeline(combined) {
 // petite dérive d'horloge (±10 %). Au-delà, c'est que les deux enregistrements n'ont
 // pas été arrêtés en même temps (arrêt partiel, récupération tardive) : étirer la FC
 // sur la durée ACC la décalerait complètement, on garde alors 1 Hz.
+// (09/11) Référence d'abord l'horloge réelle (départ capteur → fin de séance) : le 09/11,
+// l'ACC ne couvrait que 925 s pour 964 s réelles (échantillons perdus) ; recaler la FC sur
+// l'ACC la comprimait de 4 % et la fin de la minute de récupération tombait hors données.
 function hrSampleDt(combined) {
   const n = combined.hr && combined.hr.samples ? combined.hr.samples.length : 0;
+  if (!n) return 1;
+  const inRange = r => r >= 0.9 && r <= 1.1;
+  const t0 = combined.sensorT0Ms, t1 = combined.endedAtMs;
+  if (t0 && t1 && t1 > t0) { const r = (t1 - t0) / 1000 / n; if (inRange(r)) return r; }
   const accDur = combined.acc && combined.acc.samples ? combined.acc.samples.length / FS_ALGO : 0;
-  if (!n || accDur <= 0) return 1;
+  if (accDur <= 0) return 1;
   const ratio = accDur / n;
-  return (ratio >= 0.9 && ratio <= 1.1) ? ratio : 1;
+  return inRange(ratio) ? ratio : 1;
 }
 
 function swimWindow(segments) {
