@@ -5675,8 +5675,11 @@ async function refreshHealthData(force = false) {
   const token = localStorage.getItem('hiitGithubToken');
   if (!token || (!force && Date.now() - healthLastFetch < 10 * 60 * 1000)) return;
   healthLastFetch = Date.now();
+  // Délai max : une requête lancée quand Chrome passe en arrière-plan peut rester bloquée à vie.
+  const ctl = new AbortController(), kill = setTimeout(() => ctl.abort(), 12000);
+  healthFetchBusy = Date.now();
   try {
-    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${HEALTH_PATH}?t=${Date.now()}`, { headers: { 'Authorization': 'token ' + token }, cache: 'no-store' });
+    const resp = await fetch(`https://api.github.com/repos/vincentaravantinos/Hiit/contents/${HEALTH_PATH}?t=${Date.now()}`, { headers: { 'Authorization': 'token ' + token }, cache: 'no-store', signal: ctl.signal });
     if (resp.status === 404) { renderHealthCard(); return; }
     if (!resp.ok) throw new Error('GitHub a répondu ' + resp.status);
     const meta = await resp.json();
@@ -5686,32 +5689,46 @@ async function refreshHealthData(force = false) {
     healthSyncCheck(h);
     renderHealthCard();
     hcExProcess();
-  } catch (err) { logError('Lecture forme du jour', err); if (healthSyncAt) healthSyncRetry(); }
+  } catch (err) { logError('Lecture forme du jour', err); }
+  finally { clearTimeout(kill); healthFetchBusy = 0; }
 }
-// Synchro demandée depuis l'app (03/11) : le pont envoie le fichier quelques secondes après le
-// retour, on relit donc toutes les 4 s (max 90 s) jusqu'à recevoir un fichier plus récent que le tap.
-var healthSyncAt = 0, healthSyncNote = '', healthSyncTimer = null; // var : lu par renderHealthCard dès init()
+// Synchro demandée depuis l'app (03/11, revu 10/11) : le pont envoie le fichier quelques secondes
+// après le retour. Une boucle indépendante (toutes les 3 s, app visible) relit jusqu'à recevoir un
+// fichier plus récent que le tap, 2 min max — elle ne dépend plus d'une lecture qui aurait abouti.
+var healthSyncAt = 0, healthSyncNote = '', healthSyncTimer = null, healthFetchBusy = 0; // var : lus dès init()
 function healthSyncNow() {
   healthSyncAt = Date.now(); healthSyncNote = '';
+  logAppend('Forme du jour : synchro demandée.');
+  clearInterval(healthSyncTimer);
+  healthSyncTimer = setInterval(healthSyncTick, 3000);
   renderHealthCard();
   hcOpenBridge(null);
 }
-function healthSyncRetry() {
-  clearTimeout(healthSyncTimer);
-  if (Date.now() - healthSyncAt > 90000) {
-    healthSyncAt = 0; healthSyncNote = 'La synchro n\'a pas abouti — réessaie dans un moment.';
-    renderHealthCard(); return;
+function healthSyncStop(note) {
+  clearInterval(healthSyncTimer); healthSyncTimer = null;
+  healthSyncAt = 0; healthSyncNote = note || '';
+  renderHealthCard();
+}
+function healthSyncTick() {
+  if (!healthSyncAt) { healthSyncStop(healthSyncNote); return; }
+  if (Date.now() - healthSyncAt > 120000) {
+    logAppend('Forme du jour : pas de données récentes après 2 min.');
+    healthSyncStop('La synchro n\'a pas abouti — réessaie dans un moment.'); return;
   }
-  healthSyncTimer = setTimeout(() => refreshHealthData(true), 4000);
+  if (document.hidden) return;                                    // on est encore dans le pont
+  if (healthFetchBusy && Date.now() - healthFetchBusy < 15000) return; // lecture en cours
+  refreshHealthData(true);
 }
 function healthSyncCheck(h) {
   if (!healthSyncAt) return;
-  if (!h || !(h.updatedAt >= healthSyncAt - 5000)) { healthSyncRetry(); return; }
-  healthSyncAt = 0; clearTimeout(healthSyncTimer);
+  const age = h && h.updatedAt ? Math.round((h.updatedAt - healthSyncAt) / 1000) : null;
+  if (!h || !(h.updatedAt >= healthSyncAt - 5000)) { logAppend(`Forme du jour : fichier pas encore à jour (${age} s).`); return; }
   const d = (h.days || {})[todayStr()] || {};
-  healthSyncNote = (d.sleep || (d.oura && d.oura.readiness != null)) ? ''
-    : 'Synchro faite — Oura n\'a pas encore publié la nuit.';
+  const got = !!(d.sleep || (d.oura && d.oura.readiness != null));
+  logAppend(`Forme du jour : données reçues (nuit ${got ? 'présente' : 'absente'}).`);
+  healthSyncStop(got ? '' : 'Synchro faite — Oura n\'a pas encore publié la nuit.');
 }
+document.addEventListener('visibilitychange', () => { if (!document.hidden && healthSyncAt) setTimeout(healthSyncTick, 500); });
 function hcCurrentWeight() {
   const h = healthData();
   if (h && h.days) {
