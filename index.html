@@ -526,7 +526,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
         <div class="setting-name">Playlist relaxante (minute de récupération)</div>
         <input type="text" id="spotify-relax-input" placeholder="Lien ou URI Spotify — vide : la musique continue" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyRelax()">
         <div class="setting-sub" id="spotify-relax-status"></div>
-        <div class="setting-sub">Remplace la playlist de la séance dès le début de la récupération (nécessite le Client ID, dans Configuration).</div>
+        <div class="setting-sub">Remplace la playlist de la séance dès le début de la récupération (nécessite « Connecter Spotify », dans Configuration).</div>
         <details class="cfg-fold"><summary>Configuration</summary>
           <div class="setting-name">Client ID Spotify (optionnel)</div>
           <input type="text" id="spotify-clientid-input" placeholder="Client ID de ton app sur developer.spotify.com" autocapitalize="off" autocomplete="off" spellcheck="false" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:var(--font);font-size:14px;border-radius:8px;padding:9px 10px" onchange="saveSpotifyClientId()">
@@ -755,7 +755,7 @@ function speakAfterBridge(txt){let sawHidden=false,fired=false;const t0=Date.now
 const SPWEB_LS='hiitSpWebToken',SPWEB_VER_LS='hiitSpWebVerifier',SPWEB_STATE_LS='hiitSpWebState',SPWEB_REDIRECT='https://vincentaravantinos.github.io/Hiit/';
 function spWebTok(){try{return JSON.parse(localStorage.getItem(SPWEB_LS)||'null');}catch(e){return null;}}
 function spWebSave(t){try{t?localStorage.setItem(SPWEB_LS,JSON.stringify(t)):localStorage.removeItem(SPWEB_LS);}catch(e){}spWebRender();}
-function spWebRender(){const st=document.getElementById('spweb-status'),b=document.getElementById('spweb-btn');if(!st)return;const t=spWebTok();st.textContent=t&&t.refresh?'✓ Connecté : la playlist relaxante part sans confirmation.':'Non connecté : la bascule passe par HIIT Bridge (Chrome demande une confirmation).';if(b)b.textContent=t&&t.refresh?'Reconnecter Spotify':'Connecter Spotify';}
+function spWebRender(){const st=document.getElementById('spweb-status'),b=document.getElementById('spweb-btn');if(!st)return;const t=spWebTok();st.textContent=t&&t.refresh?'✓ Connecté : la playlist relaxante part sans confirmation.':'Non connecté : la musique de séance continue pendant la récupération.';if(b)b.textContent=t&&t.refresh?'Reconnecter Spotify':'Connecter Spotify';}
 function spB64u(buf){return btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');}
 async function spWebConnect(){if(!spotifyClientId){showToast('Renseigne d\'abord le Client ID Spotify');return;}
   const ver=spB64u(crypto.getRandomValues(new Uint8Array(48)));const ch=spB64u(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(ver)));const state='spotify-'+spB64u(crypto.getRandomValues(new Uint8Array(12)));
@@ -778,11 +778,13 @@ async function spWebPlay(uri){const tk=await spWebAccess();if(!tk)return 'pas de
   try{const r=await fetch('https://api.spotify.com/v1/me/player/play',{method:'PUT',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(ctx)});if(r.ok)return '';const j=await r.json().catch(()=>({}));return 'HTTP '+r.status+((j.error&&(j.error.reason||j.error.message))?' '+(j.error.reason||j.error.message):'');}
   catch(e){return e.message||'réseau';}}
 function spRelaxViaBridge(uri){location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent(uri)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';}
-// Retour : 'web' (pas de changement d'app), true (passage par le pont), false (rien).
+// 11/11 : plus jamais de passage par HIIT Bridge pendant la récupération (Chrome affiche une
+// pop-up de confirmation, insupportable en pleine séance). Sans connexion Spotify ou si l'API
+// échoue, la musique de séance continue simplement ; le motif va au journal.
 function launchSpotifyRelax(){if(!spotifyOn||!spotifyClientId)return false;const r=spotifyParse(spotifyRelax);if(!r)return false;
   const t=spWebTok();
-  if(t&&t.refresh){spWebPlay(r.uri).then(err=>{if(!err){logAppend('Spotify : playlist relaxante (récupération, API Web).');return;}logAppend('Spotify Web : bascule impossible ('+err+') → repli sur HIIT Bridge.');if(tState==='running'&&SEQ[tIdx]&&SEQ[tIdx].phase==='RECOVERY')spRelaxViaBridge(r.uri);});return 'web';}
-  logAppend('Spotify : playlist relaxante (récupération, HIIT Bridge).');spRelaxViaBridge(r.uri);return true;}
+  if(!t||!t.refresh){logAppend('Spotify : playlist relaxante non lancée — Spotify non connecté (Réglages › Musique › Configuration).');return false;}
+  spWebPlay(r.uri).then(err=>logAppend(err?'Spotify Web : bascule impossible ('+err+'), la musique continue.':'Spotify : playlist relaxante (récupération, API Web).'));return 'web';}
 // 03/11 : Chrome bloque en silence l'ouverture d'une autre app (le pont) si le tap sur DÉMARRER
 // date de plus de ~5 s — cas d'une connexion Polar lente. Dans ce cas : bouton « Lancer la musique ».
 function spotifyMusicBtn(show){let b=document.getElementById('spotify-go-btn');if(!show){if(b)b.remove();return;}if(b)return;b=document.createElement('button');b.id='spotify-go-btn';b.textContent='🎵 Lancer la musique';b.style.cssText='position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:900;padding:14px 22px;border:none;border-radius:999px;background:#1db954;color:#fff;font-family:var(--font);font-size:16px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.35)';b.onclick=()=>{spotifyMusicBtn(false);launchSpotify(true);};document.body.appendChild(b);setTimeout(()=>spotifyMusicBtn(false),90000);}
