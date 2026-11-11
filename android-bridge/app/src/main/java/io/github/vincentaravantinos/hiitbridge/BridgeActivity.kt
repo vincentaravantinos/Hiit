@@ -142,13 +142,14 @@ class BridgeActivity : ComponentActivity() {
             }
             finish(); return
         }
-        // hiitbridge://spotify?cid=…&uri=… : lancer la playlist au démarrage d'une séance.
+        // hiitbridge://spotify?cid=…&uri=…[&shuffle=0] : lancer la playlist au démarrage d'une séance.
         if (intent?.data?.host == "spotify") {
             val cid = intent.data?.getQueryParameter("cid")
             val uri = intent.data?.getQueryParameter("uri")
             if (cid.isNullOrBlank() || uri.isNullOrBlank()) { done("Spotify : réglages incomplets."); return }
             spotify?.cancel()
-            spotify = SpotifyStarter(this, cid, uri) { spotify = null; finish() }.also { it.start() }
+            val shuffle = intent.data?.getQueryParameter("shuffle") != "0"
+            spotify = SpotifyStarter(this, cid, uri, shuffle) { spotify = null; finish() }.also { it.start() }
             return
         }
         // hiitbridge://oura?cid=…&secret=…&code=…&redirect=… : fin de l'autorisation Oura (OAuth).

@@ -32,6 +32,7 @@ class SpotifyStarter(
     private val activity: Activity,
     private val clientId: String,
     private val uri: String,
+    private val shuffle: Boolean = true,
     private val onDone: () -> Unit,
 ) {
     private val handler = Handler(Looper.getMainLooper())
@@ -57,9 +58,21 @@ class SpotifyStarter(
                 override fun onConnected(r: SpotifyAppRemote) {
                     if (finished || mine != attempt) { SpotifyAppRemote.disconnect(r); return }
                     remote = r
-                    r.playerApi.play(uri)
-                        .setResultCallback { shuffleAndSkip(r) }
-                        .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
+                    if (shuffle) {
+                        r.playerApi.play(uri)
+                            .setResultCallback { shuffleAndSkip(r) }
+                            .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
+                    } else {
+                        // Dans l'ordre (ex. un album) : aléatoire coupé AVANT la lecture, pour
+                        // commencer au premier titre.
+                        val playInOrder = {
+                            r.playerApi.play(uri)
+                                .setResultCallback { finish() }
+                                .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
+                            Unit
+                        }
+                        r.playerApi.setShuffle(false).setResultCallback { playInOrder() }.setErrorCallback { playInOrder() }
+                    }
                 }
 
                 override fun onFailure(e: Throwable) {
