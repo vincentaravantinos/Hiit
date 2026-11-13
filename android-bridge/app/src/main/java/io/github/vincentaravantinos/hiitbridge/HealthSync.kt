@@ -73,10 +73,11 @@ object HealthSync {
         val today = LocalDate.now(zone)
 
         val cache = prefs.getString("cache", null)?.let { JSONObject(it) } ?: JSONObject()
-        // Première fois : 30 jours (limite d'historique Health Connect) ; ensuite les 4 derniers.
+        // Première fois : 30 jours (limite d'historique Health Connect) ; ensuite les 10 derniers,
+        // car Oura écrit parfois une activité plusieurs jours après coup (après confirmation).
         // Idem la première fois que les activités sont lues (rattrapage des 30 jours).
-        val exBackfill = !prefs.getBoolean("exV1", false)
-        val back = if (cache.length() == 0 || exBackfill) 30L else 4L
+        val exBackfill = !prefs.getBoolean("exV2", false)
+        val back = if (cache.length() == 0 || exBackfill) 30L else 10L
         val from = today.minusDays(back).atStartOfDay(zone).minusHours(12).toInstant()
         val to = Instant.now()
 
@@ -173,7 +174,7 @@ object HealthSync {
         for ((d, o) in days) cache.put(d.toString(), o)
         val oldest = today.minusDays(KEEP_DAYS).toString()
         cache.keys().asSequence().toList().filter { it < oldest }.forEach { cache.remove(it) }
-        prefs.edit().putString("cache", cache.toString()).also { if (exOk) it.putBoolean("exV1", true) }.apply()
+        prefs.edit().putString("cache", cache.toString()).also { if (exOk) it.putBoolean("exV2", true) }.apply()
 
         val doc = JSONObject().put("v", 1).put("updatedAt", System.currentTimeMillis())
             .put("tz", zone.id).put("days", cache)
