@@ -171,7 +171,10 @@ object HealthSync {
         else for ((d, o) in days) if (!o.has("oura")) cache.optJSONObject(d.toString())?.optJSONObject("oura")?.let { o.put("oura", it) }
 
         // Fusion avec le cache (les jours relus remplacent les anciens), purge > 60 jours.
-        for ((d, o) in days) cache.put(d.toString(), o)
+        // Le jour juste avant la fenêtre n'est lu qu'à partir de midi : le réécrire effacerait
+        // ses activités du matin. On ne remplace que les jours lus en entier.
+        val firstFull = today.minusDays(back)
+        for ((d, o) in days) if (!d.isBefore(firstFull)) cache.put(d.toString(), o)
         val oldest = today.minusDays(KEEP_DAYS).toString()
         cache.keys().asSequence().toList().filter { it < oldest }.forEach { cache.remove(it) }
         prefs.edit().putString("cache", cache.toString()).also { if (exOk) it.putBoolean("exV2", true) }.apply()
