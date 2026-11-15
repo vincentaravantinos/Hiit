@@ -5470,6 +5470,30 @@ function renderCcKpiHtml(combined, filename) {
 // sur 10 s — indépendante de l'orientation du capteur. Brasse ≈ 480-700, crawl ≈ 800-990
 // (séances du 29/09, 09/10, 14/10).
 const STROKE_WIN_S = 10, STROKE_STEP_S = 2, CRAWL_ACC_STD = 760, REST_ACC_STD = 420, STROKE_MIN_RUN_S = 15;
+// (15/11) Dos crawlé : le corps est retourné, donc la gravité vue par le capteur pivote
+// fortement. On compare l'orientation moyenne de chaque fenêtre à l'orientation moyenne de
+// toute la nage de la séance (ventrale : brasse/crawl) — relatif, car le capteur n'est pas
+// posé pareil d'une séance à l'autre. Brasse/crawl ≤ 44°, dos 55–84° (séance du 15/11),
+// pauses/réglages jusqu'à 49° mais quasi immobiles (écartées par REST_ACC_STD).
+const DOS_MIN_ANGLE_DEG = 55;
+function swimRefDirection(accSamples, segments) {
+  let rx = 0, ry = 0, rz = 0;
+  segments.forEach(([s, e]) => {
+    for (let i = Math.round(s*FS_ALGO); i < Math.min(accSamples.length, Math.round(e*FS_ALGO)); i++) {
+      const [x, y, z] = accSamples[i]; const n = Math.sqrt(x*x + y*y + z*z) || 1e-6;
+      rx += x/n; ry += y/n; rz += z/n;
+    }
+  });
+  const n = Math.sqrt(rx*rx + ry*ry + rz*rz);
+  return n > 0 ? [rx/n, ry/n, rz/n] : null;
+}
+function windowAngleDeg(win, ref) {
+  let mx = 0, my = 0, mz = 0;
+  for (const [x, y, z] of win) { const n = Math.sqrt(x*x + y*y + z*z) || 1e-6; mx += x/n; my += y/n; mz += z/n; }
+  const n = Math.sqrt(mx*mx + my*my + mz*mz) || 1e-6;
+  const c = Math.max(-1, Math.min(1, (mx*ref[0] + my*ref[1] + mz*ref[2]) / n));
+  return Math.acos(c) * 180 / Math.PI;
+}
 function accTotalStd(win) {
   const n = win.length; if (n < 2) return 0;
   let mx=0,my=0,mz=0; for (const [x,y,z] of win) { mx+=x; my+=y; mz+=z; } mx/=n; my/=n; mz/=n;
@@ -5479,11 +5503,13 @@ function accTotalStd(win) {
 // Renvoie des sous-segments [début, fin, type|null]. null = bloc homogène, laissé au
 // classifieur historique. Les bords « au repos » (amplitude faible : pompes qui ralentissent,
 // arrêt) sont retirés du bloc.
-function splitSegmentByStroke(accSamples, s, e) {
+function splitSegmentByStroke(accSamples, s, e, ref) {
   const lab = [];
   for (let t = s; t + STROKE_WIN_S <= e + 0.01; t += STROKE_STEP_S) {
-    const sd = accTotalStd(accSamples.slice(Math.round(t*FS_ALGO), Math.round((t+STROKE_WIN_S)*FS_ALGO)));
-    lab.push({ c: t + STROKE_WIN_S/2, k: sd > CRAWL_ACC_STD ? 'crawl' : sd < REST_ACC_STD ? 'rest' : 'brasse' });
+    const win = accSamples.slice(Math.round(t*FS_ALGO), Math.round((t+STROKE_WIN_S)*FS_ALGO));
+    const sd = accTotalStd(win);
+    const dos = ref && sd >= REST_ACC_STD && windowAngleDeg(win, ref) > DOS_MIN_ANGLE_DEG;
+    lab.push({ c: t + STROKE_WIN_S/2, k: dos ? 'dos' : sd > CRAWL_ACC_STD ? 'crawl' : sd < REST_ACC_STD ? 'rest' : 'brasse' });
   }
   if (lab.length < 3) return [[s, e, null]];
   // lissage : vote majoritaire sur 5 fenêtres (≈ 18 s)
@@ -5526,24 +5552,25 @@ function splitSegmentByStroke(accSamples, s, e) {
   spans = glue(spans);
   if (spans.length === 1 && spans[0].k === 'rest') return [[s, e, null]];
   const kinds = new Set(spans.map(p => p.k));
-  if (kinds.size === 1) return [[Math.round(spans[0].s), Math.round(spans[spans.length-1].e), null]];
+  if (kinds.size === 1) return [[Math.round(spans[0].s), Math.round(spans[spans.length-1].e), spans[0].k === 'dos' ? 'dos' : null]];
   return spans.map(p => [Math.round(p.s), Math.round(p.e), p.k]);
 }
 
 function analyzeSwimSession(accSamples) {
   if (!accSamples || accSamples.length < 20) return [];
   const segments = detectSwimSegments(accSamples);
+  const ref = swimRefDirection(accSamples, segments);
   const out = [];
   segments.forEach(([s0, e0]) => {
-    splitSegmentByStroke(accSamples, s0, e0).forEach(([s, e, forced]) => {
+    splitSegmentByStroke(accSamples, s0, e0, ref).forEach(([s, e, forced]) => {
       const window = accSamples.slice(Math.round(s*FS_ALGO), Math.round(e*FS_ALGO));
       // Bloc homogène : classifieur historique ; bloc découpé : type donné par l'amplitude.
       const stroke = forced || classifyStrokeType(window).stroke;
       // Plain tilt counting, not auto-axis — auto-axis was only validated for land
       // exercises; swim stroke counts were validated using the standard tilt signal.
-      // Crawl : le capteur ne voit qu'un bras → 1 cycle = 2 mouvements (on compte les deux bras).
+      // Crawl et dos : le capteur ne voit qu'un bras → 1 cycle = 2 mouvements (on compte les deux bras).
       const cycles = countRepsOnSignal(computeTilt(window));
-      const reps = stroke === 'crawl' ? cycles * 2 : cycles;
+      const reps = (stroke === 'crawl' || stroke === 'dos') ? cycles * 2 : cycles;
       out.push({ startS: s, endS: e, stroke, reps });
     });
   });
@@ -5563,7 +5590,7 @@ function renderSwimResultsHtml(segments) {
   return html;
 }
 
-const SWIM_ALGO_VERSION = 'v3-crawl-both-arms';
+const SWIM_ALGO_VERSION = 'v4-dos';
 
 function showSwimResultsModal(combined, filename) {
   normalizeSwimSession(combined);
