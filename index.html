@@ -1078,7 +1078,7 @@ function tResume(){tState='running';tStartTicker();tRenderControls();}
 function tReset(){clearInterval(ticker);spotifyMusicBtn(false);setVoiceBanner(false);ellipRecording=false;setWakeStatus('ok');speechSynthesis.cancel();clearTimeout(duckTimeout);duckReleaseAt=0;stopSilentAudio();if(wakeLock){wakeLock.release();wakeLock=null;}tState='idle';tIdx=0;tLeft=SEQ.length?SEQ[0].duration:0;tElapsed=0;document.getElementById('t-cd').style.display='none';document.getElementById('t-time').style.display='block';document.getElementById('t-ex').style.display='block';tRender();}
 function toggleFS(){if(!document.fullscreenElement&&!document.webkitFullscreenElement)(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen)?.call(document.documentElement);else(document.exitFullscreen||document.webkitExitFullscreen)?.call(document);}
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&(tState==='running'||tState==='countdown')&&!wakeLock)acquireWakeLock();});
-function init(){buildInfoRender();renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;spotifyStatusRender();document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;spWebRender();spShuffleRender();spWebHandleCallback();if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();sensorOffReminderRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();purgeBicepsHrCaches();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
+function init(){buildInfoRender();renderDashboard();tRender();document.getElementById('reminder-toggle').classList.toggle('on',reminderOn);document.getElementById('time-row').style.display=reminderOn?'flex':'none';document.getElementById('reminder-time').value=reminderTime;document.getElementById('goal-select').value=goal;document.getElementById('streakmin-select').value=streakMin;document.getElementById('spotify-toggle').classList.toggle('on',spotifyOn);document.getElementById('spotify-playlist-row').style.display=spotifyOn?'flex':'none';document.getElementById('spotify-playlist-input').value=spotifyPlaylist;spotifyStatusRender();document.getElementById('spotify-clientid-input').value=spotifyClientId;document.getElementById('spotify-relax-input').value=spotifyRelax;spWebRender();spShuffleRender();spWebHandleCallback();if('Notification'in window)updateNotifBtn(Notification.permission);if(reminderOn)scheduleReminder();healStaleBuild().then(reloading=>{if(!reloading)tryResumePendingSensorSession();});freeRestoreUi();swimRefreshRecoverBox();setSensorPosition(sensorPosition);liveOptsRender();battRender();document.getElementById('github-token-input').value=localStorage.getItem('hiitGithubToken')||'';document.getElementById('hrmax-input').value=getHrMax();renderLoadInputs();document.getElementById('cc-level').textContent=getCcLevel();checkForUpdate();setInterval(checkForUpdate,180000);ouraInitUi();ouraHandleCallback();renderHealthCard();hcExRender();refreshHealthData();setTimeout(async()=>{await prefillLoadsFromLastSession();await backfillHiitSummaries();await encryptExistingSessions();purgeBicepsHrCaches();},3000);document.addEventListener('visibilitychange',()=>{if(!document.hidden){checkForUpdate();refreshHealthData();}});}
 
 // version.txt (raw.githubusercontent) est mis à jour dès le push, alors que GitHub
 // Pages met ~1 min à déployer la nouvelle page. Le bandeau s'affiche dès l'écart ;
@@ -2099,7 +2099,6 @@ async function sensorSettingsPick() {
 // séance. La dernière valeur connue reste affichée (onglet Activité, Réglages) avec
 // son ancienneté : le capteur n'a pas besoin d'être allumé pour la voir.
 const SENSOR_BATT_LS = 'hiitSensorBattery';
-const SENSOR_OFF_REMIND_LS = 'hiitSensorOffReminder';
 let battDenied = false;   // service batterie non autorisé (capteur choisi avant cette version)
 let battChecking = false;
 
@@ -2151,12 +2150,20 @@ async function sensorReadBattery(why) {
 // 28–30/10 : l'extinction par Bluetooth (commande RESET du SDK Polar, en mode stockage
 // puis en veille prolongée « hibernate ») laissait le capteur impossible à rallumer sans
 // son chargeur. Abandonnée : l'app ne fait plus que rappeler de l'éteindre au bouton.
-// Fin d'utilisation du capteur (séance terminée, données récupérées) : batterie, lien
-// coupé, rappel d'extinction. Ne lève jamais d'erreur.
+// Fin d'utilisation du capteur (séance terminée, données récupérées) : batterie lue,
+// FC en direct arrêtée, mais lien GARDÉ ouvert (18/11) : tant qu'il tient, le capteur est
+// allumé, et un bandeau « Polar toujours connecté » le signale. Quand Vincent l'éteint au
+// bouton, le lien tombe et le bandeau disparaît. Ne lève jamais d'erreur.
+let sensorKeptOn = false;
 async function sensorWrapUp() {
   try { await sensorReadBattery('fin de séance'); } catch (e) {}
-  safeDisconnect();
-  sensorOffReminderShow('manual');
+  try {
+    const svc = await withTimeout(server.getPrimaryService('heart_rate'), 3000, 'service cardio');
+    const ch = await withTimeout(svc.getCharacteristic('heart_rate_measurement'), 3000, 'mesure cardio');
+    await withTimeout(ch.stopNotifications(), 3000, 'arrêt FC');
+  } catch (e) {}
+  sensorKeptOn = !!(device && device.gatt && device.gatt.connected);
+  sensorStillOnRender();
 }
 
 // Sélection du capteur depuis un tap (geste utilisateur exigé par requestDevice).
@@ -2197,39 +2204,30 @@ async function sensorBatteryCheck() {
   else if (battDenied) showToast('Batterie non autorisée : Réglages → Bracelet Polar → Choisir');
 }
 
-// ---- Rappel « éteins le capteur » : bandeau persistant (survit au rechargement) ----
-const OFF_REMIND_TEXT = { manual: 'Pense à éteindre le capteur Polar.' };
-function sensorOffReminderShow(kind) {
-  try { localStorage.setItem(SENSOR_OFF_REMIND_LS, JSON.stringify({ kind, at: Date.now() })); } catch (e) {}
-  sensorOffReminderRender();
-  try { if (navigator.vibrate) navigator.vibrate([120, 80, 120]); } catch (e) {}
-  try {
-    if (document.hidden && 'Notification' in window && Notification.permission === 'granted')
-      new Notification('Capteur Polar', { body: OFF_REMIND_TEXT[kind] || OFF_REMIND_TEXT.manual });
-  } catch (e) {}
-}
-function sensorOffReminderHide() {
-  try { localStorage.removeItem(SENSOR_OFF_REMIND_LS); } catch (e) {}
-  const box = document.getElementById('off-banner'); if (box) box.remove();
-}
-function sensorOffReminderRender() {
-  let r = null; try { r = JSON.parse(localStorage.getItem(SENSOR_OFF_REMIND_LS) || 'null'); } catch (e) {}
+// ---- Bandeau « Polar toujours connecté » (18/11) : vérifié chaque seconde, disparaît
+// dès que le lien tombe (capteur éteint ou hors de portée). Pas de bouton. ----
+function sensorStillOnRender() {
+  if (sensorKeptOn && (!device || !device.gatt || !device.gatt.connected)) {
+    logAppend('Lien capteur gardé après séance : coupé (éteint, hors de portée ou nouvelle séance).');
+    sensorKeptOn = false;
+  }
+  // Masqué pendant une activité (le capteur y est forcément connecté) ; tState 'done'
+  // compte comme fini, le bandeau apparaît donc dès la fin de la séance.
+  const busy = typeof runningActivity === 'function' && runningActivity() && tState !== 'done';
   let box = document.getElementById('off-banner');
-  if (!r) { if (box) box.remove(); return; }
+  if (!sensorKeptOn || busy) { if (box) box.remove(); return; }
   if (!box) {
     const anchor = document.getElementById('update-banner');
     if (!anchor) return;
     box = document.createElement('div');
     box.id = 'off-banner';
-    box.style.cssText = 'position:relative;z-index:998;background:#2a2417;border-bottom:2px solid #ffb454;padding:10px 14px;font-family:var(--font);text-align:center';
-    box.innerHTML = '<div id="off-banner-text" style="font-size:13px;color:#fff;line-height:1.35"></div>'
-      + '<div style="font-size:11px;color:#c9b998;margin-top:3px">Appui long sur son bouton, jusqu\'à l\'extinction du voyant</div>'
-      + '<button id="off-banner-done" style="width:100%;margin-top:8px;padding:10px;border:none;border-radius:9px;background:#ffb454;color:#111;font-family:var(--font);font-size:13px;font-weight:700;cursor:pointer">C\'est fait</button>';
+    box.style.cssText = 'position:relative;z-index:998;background:#2a2417;border-bottom:2px solid #ffb454;padding:9px 14px;font-family:var(--font);text-align:center;font-size:13px;color:#fff';
+    box.textContent = '🔵 Polar toujours connecté';
     anchor.insertAdjacentElement('afterend', box);
-    document.getElementById('off-banner-done').onclick = () => sensorOffReminderHide();
   }
-  document.getElementById('off-banner-text').textContent = '🔋 ' + (OFF_REMIND_TEXT[r.kind] || OFF_REMIND_TEXT.manual);
 }
+setInterval(sensorStillOnRender, 1000);
+try { localStorage.removeItem('hiitSensorOffReminder'); } catch (e) {} // ancien rappel « éteins-le »
 
 // ======= Séance HIIT en direct (20/10) =======
 // La Verity Sense refuse le direct et l'enregistrement interne d'une même mesure en
@@ -2415,12 +2413,12 @@ async function sensorLiveFinish(L, phaseLog, rewindEvents, endedAtMs) {
   if (L.hr.mode === 'live') {
     combined.hr = { startTimeStr, samples: L.hr.samples };
     try { await stopAllRecordings(REC_TYPES.filter(r => r.name !== 'HR')); } catch (e) {}
-    await sensorWrapUp(); // batterie, extinction (ou rappel), puis lien coupé
+    await sensorWrapUp(); // batterie, FC arrêtée, lien gardé (bandeau « toujours connecté »)
     sensorActive = false;
   } else if (L.hr.mode === 'internal') {
     const r = await retrieveAllSensorData(L.hr.baseline, 3, [HR_REC]);
-    if (r.ok) combined.hr = r.combined.hr; else showToast('FC non récupérée — séance enregistrée sans FC');
-    safeDisconnect(); sensorActive = false;
+    if (r.ok) combined.hr = r.combined.hr; else { showToast('FC non récupérée — séance enregistrée sans FC'); safeDisconnect(); }
+    sensorActive = false;
   }
   return await sensorFinishCombined(combined, phaseLog, rewindEvents, endedAtMs);
 }
@@ -2870,7 +2868,7 @@ async function retrieveAllSensorData(baseline, maxAttempts = 5, types = REC_TYPE
       }
     }
     log('Données du capteur récupérées ✓');
-    await sensorWrapUp(); // batterie, extinction (ou rappel), puis lien coupé
+    await sensorWrapUp(); // batterie, FC arrêtée, lien gardé (bandeau « toujours connecté »)
     sensorActive = false;
     return { ok: true, combined };
   } finally { bleBusy--; }
