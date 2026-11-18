@@ -63,15 +63,19 @@ class SpotifyStarter(
                             .setResultCallback { shuffleAndSkip(r) }
                             .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
                     } else {
-                        // Dans l'ordre (ex. un album) : aléatoire coupé AVANT la lecture, pour
-                        // commencer au premier titre.
-                        val playInOrder = {
-                            r.playerApi.play(uri)
-                                .setResultCallback { finish() }
-                                .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
+                        // Dans l'ordre (ex. un album). 18/11 : couper l'aléatoire AVANT play() ne
+                        // suffisait pas — Spotify réapplique l'état aléatoire mémorisé en chargeant
+                        // le contexte. Donc : play(), PUIS aléatoire coupé, PUIS retour au 1er titre.
+                        val fromStart = {
+                            r.playerApi.skipToIndex(uri, 0).setResultCallback { finish() }.setErrorCallback { finish() }
                             Unit
                         }
-                        r.playerApi.setShuffle(false).setResultCallback { playInOrder() }.setErrorCallback { playInOrder() }
+                        r.playerApi.play(uri)
+                            .setResultCallback {
+                                r.playerApi.setShuffle(false)
+                                    .setResultCallback { fromStart() }.setErrorCallback { fromStart() }
+                            }
+                            .setErrorCallback { e -> fail("Spotify : lecture impossible (${describe(e)})", openApp = true) }
                     }
                 }
 
