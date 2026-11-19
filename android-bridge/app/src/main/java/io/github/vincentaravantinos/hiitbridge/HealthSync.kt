@@ -53,11 +53,13 @@ object HealthSync {
         return SyncConfig(key, token, p.getString("repo", "vincentaravantinos/Hiit")!!, p.getString("path", "data/health/health.json")!!)
     }
 
-    /** La nuit du jour (date de réveil = aujourd'hui) est-elle déjà captée ? */
+    /** La nuit du jour (date de réveil = aujourd'hui) est-elle déjà captée — ou sait-on qu'il n'y
+     *  en aura pas (bague pas portée) ? Dans les deux cas, plus de synchro jusqu'au lendemain. */
     fun hasTodaySleep(ctx: Context): Boolean {
         val cache = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("cache", null) ?: return false
         val today = LocalDate.now(ZoneId.systemDefault()).toString()
-        return JSONObject(cache).optJSONObject(today)?.has("sleep") == true
+        val d = JSONObject(cache).optJSONObject(today) ?: return false
+        return d.has("sleep") || d.optJSONObject("oura")?.optBoolean("noNight") == true
     }
 
     /** Heure (ms) du dernier envoi réussi vers GitHub, 0 si jamais. */

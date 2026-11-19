@@ -87,6 +87,19 @@ object OuraSync {
             val d = r.optString("day"); if (d.isEmpty()) continue
             if (!r.isNull("score")) day(d).put("sleepScore", r.getInt("score"))
         }
+        // Nuit absente pour de bon (bague oubliée sur le chargeur) : ni l'API ni Health Connect ne
+        // le disent, une nuit manquante ressemble à une nuit pas encore publiée. L'activité du jour
+        // (class_5_min, tranches de 5 min depuis 4h, '0' = bague non portée) le trahit : non portée
+        // de 4h à 5h, mais portée depuis → la bague s'est synchronisée et il n'y aura pas de nuit.
+        // Une nuit avec la bague donne des '1' (repos) sur cette heure-là, même avant son traitement.
+        try {
+            for (r in list("$API/daily_activity?$range", token)) {
+                val d = r.optString("day"); if (d.isEmpty()) continue
+                val c = r.optString("class_5_min").takeIf { it != "null" } ?: continue
+                if (c.length > 12 && c.take(12).all { it == '0' } && c.drop(12).any { it in '1'..'5' })
+                    day(d).put("noNight", true)
+            }
+        } catch (e: Exception) { /* ignorée */ }
         // Résilience : facultative (pas disponible sur tous les comptes / toutes les bagues).
         try {
             for (r in list("$API/daily_resilience?$range", token)) {

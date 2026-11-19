@@ -5800,8 +5800,15 @@ function healthSyncCheck(h) {
   if (!h || !(h.updatedAt >= healthSyncAt - 5000)) { logAppend(`Forme du jour : fichier pas encore à jour (${age} s).`); return; }
   const d = (h.days || {})[todayStr()] || {};
   const got = !!(d.sleep || (d.oura && d.oura.readiness != null));
-  logAppend(`Forme du jour : données reçues (nuit ${got ? 'présente' : 'absente'}).`);
-  healthSyncStop(got ? '' : 'Synchro faite — Oura n\'a pas encore publié la nuit.');
+  logAppend(`Forme du jour : données reçues (nuit ${got ? 'présente' : healthNoNight(h) ? 'absente pour de bon' : 'pas encore publiée'}).`);
+  healthSyncStop(got || healthNoNight(h) ? '' : 'Synchro faite — Oura n\'a pas encore publié la nuit.');
+}
+// Nuit absente pour de bon (bague pas portée) : le pont le déduit de l'activité Oura du jour
+// (bague non portée entre 4h et 5h, mais portée depuis) ; à défaut, plus rien à attendre après midi.
+function healthNoNight(h) {
+  const d = ((h && h.days) || {})[todayStr()] || {};
+  if (d.sleep || (d.oura && d.oura.readiness != null)) return false;
+  return !!(d.oura && d.oura.noNight) || new Date().getHours() >= 12;
 }
 document.addEventListener('visibilitychange', () => { if (!document.hidden && healthSyncAt) setTimeout(healthSyncTick, 500); });
 function hcCurrentWeight() {
@@ -5944,6 +5951,7 @@ function renderHealthCard() {
   else if (!a.hasToday && healthSyncAt) reco = `<div style="display:flex;align-items:center;gap:10px;color:var(--muted);font-size:14px;">
       <span style="width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--text);border-radius:50%;animation:hsspin .8s linear infinite;flex-shrink:0;"></span>
       Synchronisation de la nuit…</div><style>@keyframes hsspin{to{transform:rotate(360deg)}}</style>`;
+  else if (!a.hasToday && healthNoNight(h)) reco = `<div style="color:var(--muted);font-size:14px;">Pas de nuit enregistrée</div>`;
   else if (!a.hasToday) reco = `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
       <div style="color:var(--muted);font-size:14px;">${healthSyncNote || 'Nuit pas encore synchronisée'}</div>
       <button onclick="event.stopPropagation();healthSyncNow()" style="flex-shrink:0;padding:8px 12px;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);color:var(--text);font-family:var(--font);font-size:13px;font-weight:600;">Synchroniser maintenant</button></div>`;
