@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-19T05:11:57Z';</script>
+<script>const APP_BUILD = '2026-11-19T07:46:06Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -787,6 +787,21 @@ async function spWebPlay(uri,shuffle=true){const tk=await spWebAccess();if(!tk)r
   await setSh();
   try{const r=await fetch('https://api.spotify.com/v1/me/player/play',{method:'PUT',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify(ctx)});if(r.ok){if(!shuffle)setTimeout(setSh,800);return '';}const j=await r.json().catch(()=>({}));return 'HTTP '+r.status+((j.error&&(j.error.reason||j.error.message))?' '+(j.error.reason||j.error.message):'');}
   catch(e){return e.message||'réseau';}}
+// 19/11 : « dans l'ordre » toujours ignoré malgré le pont corrigé. Contrôle par l'API Web après le
+// lancement (pont ou Web) : on lit l'état réel du lecteur, on le note au journal et, si Spotify est
+// encore en aléatoire sur ce contexte, on coupe l'aléatoire et on repart du 1er titre.
+async function spEnforceOrder(uri,label,round=1){const tk=await spWebAccess();if(!tk){if(round===1)logAppend('Spotify ('+label+') : contrôle « dans l\'ordre » impossible — Spotify non connecté (Réglages › Musique › Configuration).');return;}
+  const h={Authorization:'Bearer '+tk};let st=null;
+  try{const r=await fetch('https://api.spotify.com/v1/me/player',{headers:h});if(r.status===200)st=await r.json();}catch(e){}
+  if(!st||!st.context||st.context.uri!==uri){if(round<4){setTimeout(()=>spEnforceOrder(uri,label,round+1),3000);}else logAppend('Spotify ('+label+') : contrôle « dans l\'ordre » — contexte attendu introuvable ('+(st&&st.context?st.context.uri:'aucun')+').');return;}
+  const tn=st.item&&st.item.track_number,sh=!!st.shuffle_state,sm=!!st.smart_shuffle;
+  logAppend('Spotify ('+label+') : état réel — aléatoire '+(sh?'ON':'off')+(sm?', smart shuffle ON':'')+', titre n° '+(tn||'?')+'.');
+  if(!sh&&!sm&&(st.progress_ms>30000||tn===1||!/^spotify:album:/.test(uri)))return;
+  if(round>4)return;
+  await fetch('https://api.spotify.com/v1/me/player/shuffle?state=false',{method:'PUT',headers:h}).catch(()=>{});
+  if((st.progress_ms||0)<30000)await fetch('https://api.spotify.com/v1/me/player/play',{method:'PUT',headers:{...h,'Content-Type':'application/json'},body:JSON.stringify({context_uri:uri,offset:{position:0}})}).catch(()=>{});
+  logAppend('Spotify ('+label+') : aléatoire forcé à off + retour au 1er titre (API Web).');
+  setTimeout(()=>spEnforceOrder(uri,label,round+5),2500);}
 function spRelaxViaBridge(uri){location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent(uri)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';}
 // 11/11 : plus jamais de passage par HIIT Bridge pendant la récupération (Chrome affiche une
 // pop-up de confirmation, insupportable en pleine séance). Sans connexion Spotify ou si l'API
@@ -794,7 +809,7 @@ function spRelaxViaBridge(uri){location.href='intent://spotify?cid='+encodeURICo
 function launchSpotifyRelax(){if(!spotifyOn||!spotifyClientId)return false;const r=spotifyParse(spotifyRelax);if(!r)return false;
   const t=spWebTok();
   if(!t||!t.refresh){logAppend('Spotify : playlist relaxante non lancée — Spotify non connecté (Réglages › Musique › Configuration).');return false;}
-  spWebPlay(r.uri,spotifyRelaxShuffle).then(err=>logAppend(err?'Spotify Web : bascule impossible ('+err+'), la musique continue.':'Spotify : playlist relaxante (récupération, API Web, '+(spotifyRelaxShuffle?'aléatoire':'dans l\'ordre')+').'));return 'web';}
+  spWebPlay(r.uri,spotifyRelaxShuffle).then(err=>{if(!err&&!spotifyRelaxShuffle)setTimeout(()=>spEnforceOrder(r.uri,'récupération'),2500);return err;}).then(err=>logAppend(err?'Spotify Web : bascule impossible ('+err+'), la musique continue.':'Spotify : playlist relaxante (récupération, API Web, '+(spotifyRelaxShuffle?'aléatoire':'dans l\'ordre')+').'));return 'web';}
 // 03/11 : Chrome bloque en silence l'ouverture d'une autre app (le pont) si le tap sur DÉMARRER
 // date de plus de ~5 s — cas d'une connexion Polar lente. Dans ce cas : bouton « Lancer la musique ».
 function spotifyMusicBtn(show){let b=document.getElementById('spotify-go-btn');if(!show){if(b)b.remove();return;}if(b)return;b=document.createElement('button');b.id='spotify-go-btn';b.textContent='🎵 Lancer la musique';b.style.cssText='position:fixed;left:50%;bottom:calc(24px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:900;padding:14px 22px;border:none;border-radius:999px;background:#1db954;color:#fff;font-family:var(--font);font-size:16px;font-weight:600;box-shadow:0 6px 20px rgba(0,0,0,.35)';b.onclick=()=>{spotifyMusicBtn(false);launchSpotify(true);};document.body.appendChild(b);setTimeout(()=>spotifyMusicBtn(false),90000);}
@@ -802,7 +817,7 @@ function spotifyMusicBtn(show){let b=document.getElementById('spotify-go-btn');i
 // elliptique + Polar ; avant, elle partait au décompte, après ces attentes, et Chrome la bloquait souvent.
 let spotifyTapAt=0;
 function launchSpotifyOnTap(){if(!spotifyOn)return;if(!spotifyParse(spotifyPlaylist)){logAppend('Spotify : rien lancé — '+spotifyWhyBad(spotifyPlaylist)+' (réglage : « '+String(spotifyPlaylist||'').slice(0,80)+' »).');showToast('🎵 Musique non lancée : '+spotifyWhyBad(spotifyPlaylist)+' (Réglages › Musique)');return;}spotifyTapAt=Date.now();logAppend('Spotify : lancement dès le tap sur DÉMARRER.');launchSpotify(true);}
-function launchSpotify(fromBtn){if(!spotifyOn)return;if(!fromBtn&&spotifyTapAt&&Date.now()-spotifyTapAt<180000){spotifyTapAt=0;return;}spotifyTapAt=fromBtn?spotifyTapAt:0;const r=spotifyParse(spotifyPlaylist);if(!r){logAppend('Spotify : rien lancé — '+spotifyWhyBad(spotifyPlaylist)+'.');return;}const ua=navigator.userActivation;if(!fromBtn&&ua&&!ua.isActive){logAppend('Spotify : tap sur DÉMARRER trop ancien (connexion capteur lente), lancement bloqué par Chrome → bouton « Lancer la musique ».');spotifyMusicBtn(true);return;}logAppend('Spotify : lancement de la playlist'+(fromBtn?' (bouton)':'')+(spotifyShuffle?', aléatoire':', dans l\'ordre')+'.');if(spotifyClientId){location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent(r.uri)+'&shuffle='+(spotifyShuffle?1:0)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';return;}const webUrl=r.web;const w=window.open(webUrl,'_blank');if(!w)window.location.href=webUrl;}
+function launchSpotify(fromBtn){if(!spotifyOn)return;if(!fromBtn&&spotifyTapAt&&Date.now()-spotifyTapAt<180000){spotifyTapAt=0;return;}spotifyTapAt=fromBtn?spotifyTapAt:0;const r=spotifyParse(spotifyPlaylist);if(!r){logAppend('Spotify : rien lancé — '+spotifyWhyBad(spotifyPlaylist)+'.');return;}const ua=navigator.userActivation;if(!fromBtn&&ua&&!ua.isActive){logAppend('Spotify : tap sur DÉMARRER trop ancien (connexion capteur lente), lancement bloqué par Chrome → bouton « Lancer la musique ».');spotifyMusicBtn(true);return;}logAppend('Spotify : lancement de la playlist'+(fromBtn?' (bouton)':'')+(spotifyShuffle?', aléatoire':', dans l\'ordre')+'.');if(spotifyClientId){if(!spotifyShuffle)setTimeout(()=>spEnforceOrder(r.uri,'séance'),4000);location.href='intent://spotify?cid='+encodeURIComponent(spotifyClientId)+'&uri='+encodeURIComponent(r.uri)+'&shuffle='+(spotifyShuffle?1:0)+'#Intent;scheme=hiitbridge;package=io.github.vincentaravantinos.hiitbridge;end';return;}const webUrl=r.web;const w=window.open(webUrl,'_blank');if(!w)window.location.href=webUrl;}
 function resetData(){if(!confirm('Supprimer toutes les données ?'))return;workouts=[];S.set(KEYS.workouts,[]);renderDashboard();showToast('Données effacées');}
 async function requestNotifPermission(){if(!('Notification'in window)){showToast('Non supporté');return;}const p=await Notification.requestPermission();updateNotifBtn(p);if(p==='granted'){showToast('Notifications activées');scheduleReminder();}}
 function updateNotifBtn(p){const b=document.getElementById('notif-perm-btn');b.textContent=p==='granted'?'✓ Notifications activées':'Activer les notifications';b.classList.toggle('granted',p==='granted');}
