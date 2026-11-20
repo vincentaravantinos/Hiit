@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-20T11:35:21Z';</script>
+<script>const APP_BUILD = '2026-11-20T11:41:25Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -4337,6 +4337,15 @@ function ellipOnDisconnect() {
   if (ellipWanted) setTimeout(() => { if (ellipWanted && !ellipConnected) ellipConnect(); }, 1500);
 }
 
+// (20/11) Rechargement de la page (mise à jour) avec la console connectée : Android garde
+// l'ancienne connexion de la page morte, et la nouvelle page voit ensuite ses abonnements
+// refusés pendant des minutes (journal du 20/11 : échecs après chaque mise à jour). On
+// coupe donc proprement les liens Bluetooth quand la page s'en va — hors séance seulement.
+window.addEventListener('pagehide', () => {
+  if (ellipSessionLive()) return;
+  try { ellipWanted = false; if (ellipDev && ellipDev.gatt.connected) ellipDev.gatt.disconnect(); } catch (e) {}
+  try { if (typeof device !== 'undefined' && device && device.gatt && device.gatt.connected) device.gatt.disconnect(); } catch (e) {}
+});
 function ellipDisconnect() {
   ellipWanted = false;
   try { if (ellipDev && ellipDev.gatt.connected) ellipDev.gatt.disconnect(); } catch (e) {}
