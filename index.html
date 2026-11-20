@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-19T07:46:06Z';</script>
+<script>const APP_BUILD = '2026-11-20T11:20:29Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -625,6 +625,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
     <h3 id="ellip-modal-title">CHOISIR L'ELLIPTIQUE</h3>
     <p id="ellip-modal-text">Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.</p>
     <button class="btn-connect" id="ellip-modal-pick" onclick="ellipModalPick()">Choisir l'elliptique</button>
+    <button class="btn-connect" id="ellip-modal-bt" onclick="btEnableNow()" style="display:none">Activer le Bluetooth</button>
     <button class="btn-skip" id="ellip-modal-search" onclick="ellipModalPick()" style="display:none">Rechercher dans la liste Bluetooth</button>
     <button class="btn-skip" id="ellip-modal-skip" onclick="ellipModalSkip()">Continuer sans elliptique</button>
   </div>
@@ -1922,10 +1923,23 @@ document.addEventListener('visibilitychange', async () => {
   await sleep(800); // laisse le Bluetooth finir de démarrer
   if (await btAdapterOff()) return;
   sensorLastError = null;
+  const em = document.getElementById('ellip-modal');
+  if (em && em.style.display !== 'none' && em.dataset.mode === 'btoff') { ellipResumeAfterBt(); return; }
   const m = document.getElementById('sensor-modal');
-  if (m && m.style.display !== 'none' && device) sensorModalRetry(false);
+  if (m && m.style.display !== 'none') {
+    if (!device) device = pickKnownSensor(await knownDevices());
+    if (device) sensorModalRetry(false); else sensorModalOpen();
+  }
   else showToast('✓ Bluetooth activé');
 });
+// (20/11) Bluetooth coupé : Chrome Android ne renvoie alors plus aucun appareil autorisé
+// (getDevices vide) alors que getAvailability() peut rester à true. Un appareil déjà
+// utilisé qui « disparaît » signale donc un Bluetooth coupé, pas une première utilisation.
+async function btOffLikely(knownEmpty, lsKey) {
+  if (await btAdapterOff()) return true;
+  if (!knownEmpty) return false;
+  try { return !!localStorage.getItem(lsKey); } catch (e) { return false; }
+}
 async function btAdapterOff(err) {
   if (err && isBtOffMsg(err.message)) return true;
   try {
@@ -2674,8 +2688,9 @@ async function sensorPromptThenStart(btn) {
   }
   if (!device) {
     // Aucun capteur connu : seule la liste Bluetooth peut en fournir un, et elle exige
-    // un tap — la modale le propose.
-    sensorLastError = null;
+    // un tap — la modale le propose. Sauf si un capteur a déjà servi : Bluetooth coupé.
+    sensorLastError = (await btOffLikely(true, SENSOR_ID_LS)) ? BT_OFF_MSG : null;
+    if (gen !== sensorStartGen) return;
     showPopupAndResetButton();
     return;
   }
@@ -4107,7 +4122,7 @@ async function ellipFindKnown() {
   if (ellipDev) return ellipDev;
   const known = await knownDevices();
   const d = (known || []).find(x => x.name && x.name.toUpperCase().startsWith('FAL'));
-  if (d) ellipDev = d;
+  if (d) { ellipDev = d; try { localStorage.setItem(ELLIP_KNOWN_LS, '1'); } catch (e) {} }
   return ellipDev;
 }
 async function ellipWaitAdv(dev, ms) {
@@ -4155,20 +4170,22 @@ function ellipAutoStart(fromTab) {
 // fenêtre identique à celle du capteur Polar (« Choisir… » / « Continuer sans… »). Ensuite
 // tout est automatique. « Continuer sans » est retenu ; Réglages → Vélo elliptique permet
 // d'associer ou de changer la console plus tard.
-var ELLIP_SKIP_LS = 'hiitEllipSkip';
+var ELLIP_SKIP_LS = 'hiitEllipSkip', ELLIP_KNOWN_LS = 'hiitEllipKnown';
 var ellipGateBtn = null;
 // DÉMARRER attend l'elliptique comme il attend la Polar : fenêtre « Connexion… » avec
 // « Démarrer sans elliptique ». La console endormie se réveille en pédalant ; l'app
 // réessaie en boucle tant que la fenêtre est ouverte.
 var ellipGateGen = 0;
 function ellipModalShow(mode) {
-  const pick = mode === 'pick';
-  document.getElementById('ellip-modal-title').textContent = pick ? 'CHOISIR L\'ELLIPTIQUE' : 'CONNEXION À L\'ELLIPTIQUE...';
-  document.getElementById('ellip-modal-text').textContent = pick
-    ? 'Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.'
+  const pick = mode === 'pick', off = mode === 'btoff';
+  document.getElementById('ellip-modal-title').textContent = off ? 'BLUETOOTH DÉSACTIVÉ' : pick ? 'CHOISIR L\'ELLIPTIQUE' : 'CONNEXION À L\'ELLIPTIQUE...';
+  document.getElementById('ellip-modal-text').textContent = off
+    ? 'Le Bluetooth du téléphone est coupé. La connexion reprend toute seule une fois activé.'
+    : pick ? 'Pédale quelques secondes pour réveiller la console, puis sélectionne « FAL-SPORTS… » dans la liste.'
     : 'Pédale quelques secondes pour réveiller la console. La séance démarre dès qu\'il est connecté.';
+  document.getElementById('ellip-modal-bt').style.display = off ? '' : 'none';
   document.getElementById('ellip-modal-pick').style.display = pick ? '' : 'none';
-  document.getElementById('ellip-modal-search').style.display = pick ? 'none' : '';
+  document.getElementById('ellip-modal-search').style.display = pick || off ? 'none' : '';
   document.getElementById('ellip-modal-skip').textContent = pick ? 'Continuer sans elliptique' : 'Démarrer sans elliptique';
   document.getElementById('ellip-modal').dataset.mode = mode;
   document.getElementById('ellip-modal').style.display = 'flex';
@@ -4185,7 +4202,14 @@ async function ellipGateThenStart(btn) {
   ellipGateBtn = btn;
   if (skip || !navigator.bluetooth || ellipConnected) { sensorPromptThenStart(btn); return; }
   await ellipFindKnown();
-  if (!ellipDev) { ellipModalShow('pick'); return; }
+  if (!ellipDev) { ellipModalShow((await btOffLikely(true, ELLIP_KNOWN_LS)) ? 'btoff' : 'pick'); return; }
+  ellipWaitThenStart();
+}
+// Retour après activation du Bluetooth : on reprend là où DÉMARRER s'était arrêté.
+async function ellipResumeAfterBt() {
+  ellipModalHide();
+  await ellipFindKnown();
+  if (!ellipDev) { ellipModalShow((await btOffLikely(true, ELLIP_KNOWN_LS)) ? 'btoff' : 'pick'); return; }
   ellipWaitThenStart();
 }
 async function ellipWaitThenStart() {
@@ -4195,7 +4219,10 @@ async function ellipWaitThenStart() {
     ellipModalShow('connect');
     while (!ellipConnected && gen === ellipGateGen) {
       await ellipAutoConnect();
-      if (!ellipConnected && gen === ellipGateGen) await sleep(1500);
+      if (ellipConnected || gen !== ellipGateGen) break;
+      // Console retenue mais plus aucun appareil autorisé visible : Bluetooth coupé.
+      if (await btAdapterOff() || (typeof navigator.bluetooth?.getDevices === 'function' && !(await knownDevices()).length)) { ellipGateGen++; ellipModalShow('btoff'); return; }
+      await sleep(1500);
     }
     if (gen !== ellipGateGen) return; // « Démarrer sans elliptique » choisi entre-temps
     ellipModalHide();
@@ -4208,7 +4235,7 @@ async function ellipRequest() {
   try {
     ellipDev = await navigator.bluetooth.requestDevice({ filters: [{ services: [FTMS_SVC] }, { namePrefix: 'FAL' }], optionalServices: [FTMS_SVC, IC_SVC] });
   } catch (e) { logError('Elliptique non sélectionné', e); return false; }
-  try { localStorage.removeItem(ELLIP_SKIP_LS); } catch (e) {}
+  try { localStorage.removeItem(ELLIP_SKIP_LS); localStorage.setItem(ELLIP_KNOWN_LS, '1'); } catch (e) {}
   ellipAfterSession = false;
   ellipAutoStart();
   return true;
