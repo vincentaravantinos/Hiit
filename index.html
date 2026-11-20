@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-20T11:20:29Z';</script>
+<script>const APP_BUILD = '2026-11-20T11:23:57Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -2321,6 +2321,22 @@ function liveOnData(dv) {
   }
   st.lastTs = ts;
   for (const smp of dec) st.samples.push(smp.map(v => v * st.factor));
+  liveLagNote(now, ts);
+}
+// (20/11) Diagnostic retard : chaque trame porte l'heure du capteur. L'écart heure de
+// réception − heure capteur, rapporté au plus petit écart vu, donne le retard pris par
+// le lien Bluetooth (file d'attente). Journal toutes les 30 s, avec la FC de la console
+// (reçue de la même Polar en ANT+, sans passer par ce lien) pour comparaison.
+function liveLagNote(now, ts) {
+  const L = liveSession; if (!L) return;
+  const off = now - ts * 1000;
+  const g = L.lag || (L.lag = { min: off, max: 0, at: now });
+  if (off < g.min) g.min = off;
+  g.max = Math.max(g.max, off - g.min);
+  if (now - g.at < 30000) return;
+  const ant = typeof ellipCur !== 'undefined' && ellipCur && ellipCur.hrAny ? ellipCur.hrAny : '--';
+  logAppend(`Diag : retard Polar BLE max ${(g.max / 1000).toFixed(1)} s · FC app ${L.hr.latest || '--'} / console ${ant}`);
+  g.max = 0; g.at = now;
 }
 function liveOnHr(dv) {
   const L = liveSession; if (!L) return;
