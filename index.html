@@ -1001,10 +1001,10 @@ function testVoice(){const el=document.getElementById('tts-status');let n=0;try{
 setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+fmtBuild(APP_BUILD);},0);
 // Reps de la dernière séance, même exercice et même tour (historique local).
 let lastRepsIntroDone=false;
-function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
+function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){if(!repsSummaryUsable(idx[i],name))continue;const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
 // Annonce de début de phase : nom de l'exercice + reps de la dernière fois.
 // (05/11) Même séance de référence que lastRepsFor, avec les instants de la 1re et de la dernière rep.
-function lastRepPaceFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0){const t=idx[i].summary.repTimes&&idx[i].summary.repTimes[name]&&idx[i].summary.repTimes[name][round];return t?{n:v,first:t[0],last:t[1]}:null;}}}catch(e){}return null;}
+function lastRepPaceFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){if(!repsSummaryUsable(idx[i],name))continue;const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0){const t=idx[i].summary.repTimes&&idx[i].summary.repTimes[name]&&idx[i].summary.repTimes[name][round];return t?{n:v,first:t[0],last:t[1]}:null;}}}catch(e){}return null;}
 // (05/11) afterNext : passage automatique — « Prochainement : X » a déjà nommé l'exercice, on ne le répète pas
 // (il ne reste que l'info chiffrée éventuelle : reps de la dernière séance sans lièvre, mètres du sprint).
 function phaseSpeech(i,afterNext){const p=SEQ[i];let t=p.spoken;if(p.type==='work'&&p.phase==='CIRCUIT'&&p.name===ELLIP_EX){const s=ellipConnected?lastSprintFor(p.round||1,ellipLevelNow()):null;if(s){t+=' '+s.d+' mètres';if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}else if(p.type==='work'&&p.phase==='CIRCUIT'&&!pacerRefFor(i)){const n=lastRepsFor(p.name,p.round);if(n!=null){t+=' '+n+(n>1?' répétitions':' répétition');if(!lastRepsIntroDone){t+=' lors de la dernière séance';lastRepsIntroDone=true;}}}if(afterNext&&p.type==='work'&&i>0&&SEQ[i-1].duration>=8&&t.startsWith(p.spoken))t=t.slice(p.spoken.length).trim();return t;}
@@ -4714,9 +4714,13 @@ function sessionLoadFor(loads, ex) {
   const legacy = JSON.parse(localStorage.getItem('hiitLegacyLoads') || '{}');
   return legacy[ex] != null ? legacy[ex] : null;
 }
+// (20/11) Les reps du goblet squat dépendent de la version de l'algo (profondeur) : tant que le
+// recalcul en arrière-plan n'a pas mis à jour une ancienne séance, elle ne sert pas de référence
+// (sinon couleurs et annonces comparent des reps valides à d'anciennes reps toutes profondeurs).
+function repsSummaryUsable(e, ex) { return !(ex in SQUAT_DEPTH_EX) || (e.summary && e.summary.repAlgo === REP_ALGO_VERSION); }
 function sameLoadHistory(history, ex, currentLoads) {
   const cur = sessionLoadFor(currentLoads, ex);
-  return history.filter(e => e.summary.repsByEx && (cur == null || sessionLoadFor(e.summary.loads, ex) === cur));
+  return history.filter(e => e.summary.repsByEx && repsSummaryUsable(e, ex) && (cur == null || sessionLoadFor(e.summary.loads, ex) === cur));
 }
 
 function renderProgressionHtml(results, combined, history) {
