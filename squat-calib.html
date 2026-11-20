@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Calibration squat</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#111;color:#eee;margin:0;padding:16px;max-width:520px}
+h1{font-size:20px;margin:0 0 12px}
+button{display:block;width:100%;font-size:18px;padding:16px;margin:8px 0;border:0;border-radius:12px;background:#333;color:#eee}
+button:disabled{opacity:.35}
+.go{background:#2d6a4f}.stop{background:#9d0208}.send{background:#1d4ed8}
+#status{font-size:15px;margin:8px 0;color:#aaa}
+#segs div{padding:4px 0;border-bottom:1px solid #222}
+#log{font-size:11px;color:#777;white-space:pre-wrap;margin-top:16px;max-height:200px;overflow:auto}
+.rec{color:#f87171;font-weight:bold}
+</style>
+</head>
+<body>
+<h1>Calibration amplitude — goblet squat</h1>
+<div id="status">Mets la Verity Sense à l'extérieur du bras, comme en séance.</div>
+<button id="btnConnect">Connecter la Polar</button>
+<button class="go" data-label="courtes" disabled>▶ 3 reps COURTES (demi-squat)</button>
+<button class="go" data-label="normales" disabled>▶ 3 reps NORMALES (comme lundi)</button>
+<button class="go" data-label="profondes" disabled>▶ 3 reps PROFONDES (le plus bas possible)</button>
+<button class="stop" id="btnStop" disabled>■ Stop série</button>
+<div id="segs"></div>
+<button class="send" id="btnSend" disabled>Envoyer pour analyse</button>
+<div id="log"></div>
+<script>
+const PMD_SERVICE='fb005c80-02e7-f387-1cad-8acd2d8df0c8',PMD_CONTROL='fb005c81-02e7-f387-1cad-8acd2d8df0c8',PMD_DATA='fb005c82-02e7-f387-1cad-8acd2d8df0c8';
+let device,controlChar,dataChar;
+const acc=[];        // [tMs, x, y, z]  (t = horodatage de réception réparti sur le paquet)
+const segs=[];       // {label, startMs, endMs}
+let cur=null,t0=null,lastPktMs=null;
+const $=s=>document.querySelector(s);
+function log(m){const l=$('#log');l.textContent=new Date().toLocaleTimeString()+' '+m+'\n'+l.textContent;}
+function status(h){$('#status').innerHTML=h;}
+function withTimeout(p,ms,l){return Promise.race([p,new Promise((_,r)=>setTimeout(()=>r(new Error('Timeout '+l)),ms))]);}
+
+function bits(bytes){const b=[];for(const x of bytes)for(let i=0;i<8;i++)b.push((x>>i)&1);return b;}
+function deltaFrame(data,ch,w){const b=bits(data),out=[];let o=0;while(o+w*ch<=b.length){const s=[];for(let c=0;c<ch;c++){let v=0;for(let i=0;i<w;i++)v|=b[o+i]<<i;o+=w;if(w>1&&(v&(1<<(w-1))))v|=(-1<<w);s.push(v);}out.push(s);}return out;}
+function framesAll(data,ch,res){if(!data.length)return[];const rb=Math.ceil(res/8);let o=0;const ref=[];for(let c=0;c<ch;c++){let v=0;for(let b=0;b<rb;b++)v|=data[o+b]<<(8*b);const bt=rb*8;if(v&(1<<(bt-1)))v|=(-1<<bt);o+=rb;ref.push(v);}const s=[ref];while(o<data.length){if(o+2>data.length)break;const ds=data[o++],sc=data[o++];const len=Math.ceil(sc*ds*ch/8);if(o+len>data.length)break;for(const d of deltaFrame(data.slice(o,o+len),ch,ds)){if(d.length!==ch)continue;const l=s[s.length-1];s.push(l.map((v,i)=>v+d[i]));}o+=len;}return s;}
+
+function onData(e){
+  const v=e.target.value;if(v.byteLength<=10||v.getUint8(0)!==0x02)return;
+  const ft=v.getUint8(9);if(!((ft&0x80)&&(ft&0x7f)===1))return;
+  const list=framesAll(new Uint8Array(v.buffer,v.byteOffset+10,v.byteLength-10),3,16);
+  const now=performance.now();if(t0===null)t0=now;
+  const n=list.length,dt=1000/52;
+  list.forEach((s,i)=>acc.push([Math.round((now-t0-(n-1-i)*dt)*10)/10,s[0],s[1],s[2]]));
+  lastPktMs=now;
+  if(cur)status(`<span class="rec">● Enregistrement « ${cur.label} »</span> — ${((now-t0-cur.startMs)/1000).toFixed(0)} s`);
+}
+
+$('#btnConnect').onclick=async()=>{
+  const b=$('#btnConnect');b.disabled=true;b.textContent='Connexion…';
+  try{
+    device=await navigator.bluetooth.requestDevice({filters:[{namePrefix:'Polar'}],optionalServices:[PMD_SERVICE]});
+    device.addEventListener('gattserverdisconnected',()=>{log('Déconnecté');status('⚠️ Capteur déconnecté — reconnecte puis refais la série en cours');b.disabled=false;b.textContent='Reconnecter';});
+    const srv=await withTimeout(device.gatt.connect(),15000,'connect');
+    const svc=await withTimeout(srv.getPrimaryService(PMD_SERVICE),15000,'service');
+    controlChar=await svc.getCharacteristic(PMD_CONTROL);dataChar=await svc.getCharacteristic(PMD_DATA);
+    await controlChar.startNotifications();await dataChar.startNotifications();
+    dataChar.addEventListener('characteristicvaluechanged',onData);
+    await withTimeout(controlChar.writeValue(new Uint8Array([0x02,0x02,0x00,0x01,52,0,0x01,0x01,16,0,0x02,0x01,8,0,0x04,0x01,3])),15000,'start ACC');
+    b.textContent='Connecté ✓ ('+device.name+')';
+    document.querySelectorAll('.go').forEach(x=>x.disabled=false);
+    status('Prêt. Haltère en main, appuie sur une série, fais 3 reps, puis Stop.');
+    log('ACC 52 Hz démarré');
+  }catch(err){log('Erreur: '+err);b.disabled=false;b.textContent='Connecter (réessayer)';}
+};
+
+document.querySelectorAll('.go').forEach(btn=>btn.onclick=()=>{
+  if(t0===null){status('Pas encore de données du capteur — attends une seconde.');return;}
+  cur={label:btn.dataset.label,startMs:performance.now()-t0};
+  document.querySelectorAll('.go').forEach(x=>x.disabled=true);$('#btnStop').disabled=false;
+});
+$('#btnStop').onclick=()=>{
+  if(!cur)return;cur.endMs=performance.now()-t0;segs.push(cur);
+  const d=document.createElement('div');d.textContent=`✓ ${cur.label} — ${((cur.endMs-cur.startMs)/1000).toFixed(1)} s`;$('#segs').appendChild(d);
+  cur=null;$('#btnStop').disabled=true;document.querySelectorAll('.go').forEach(x=>x.disabled=false);$('#btnSend').disabled=false;
+  status('Série enregistrée. Une autre, ou Envoyer.');
+};
+
+// Chiffrement identique à l'app (même origine → même clé localStorage)
+function b64e(u){let s='';for(let i=0;i<u.length;i+=0x8000)s+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(s);}
+function b64d(s){const b=atob(s),o=new Uint8Array(b.length);for(let i=0;i<b.length;i++)o[i]=b.charCodeAt(i);return o;}
+async function encryptJson(obj){
+  const kb=localStorage.getItem('hiitDataKey');if(!kb)throw new Error('Clé de chiffrement introuvable (ouvre cette page dans le même navigateur que l\'app)');
+  const key=await crypto.subtle.importKey('raw',b64d(kb),'AES-GCM',false,['encrypt']);
+  const plain=new Uint8Array(await new Response(new Blob([new TextEncoder().encode(JSON.stringify(obj))]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer());
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const ct=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,plain));
+  return JSON.stringify({enc:'aes-256-gcm+gzip',v:1,iv:b64e(iv),ct:b64e(ct)});
+}
+$('#btnSend').onclick=async()=>{
+  const b=$('#btnSend');b.disabled=true;b.textContent='Envoi…';
+  try{
+    const token=localStorage.getItem('hiitGithubToken');if(!token)throw new Error('Token GitHub introuvable (même navigateur que l\'app ?)');
+    const name='squat-calib_'+new Date().toISOString().replace(/[:.]/g,'-')+'.json';
+    const body=await encryptJson({fs:52,unit:'mG',startedAt:new Date(Date.now()-(performance.now()-t0)).toISOString(),segments:segs,acc});
+    const r=await fetch('https://api.github.com/repos/vincentaravantinos/Hiit/contents/data/calib/'+name,{method:'PUT',headers:{Authorization:'token '+token,'Content-Type':'application/json'},body:JSON.stringify({message:'Calibration squat',content:btoa(body)})});
+    if(!r.ok)throw new Error('GitHub '+r.status);
+    b.textContent='Envoyé ✓';status('Envoyé. Tu peux me le dire dans le chat.');log('OK '+name);
+  }catch(err){log('Erreur envoi: '+err);b.disabled=false;b.textContent='Envoyer (réessayer)';status('⚠️ '+err.message);}
+};
+</script>
+</body>
+</html>
