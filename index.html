@@ -3864,6 +3864,41 @@ function phaseSensorStart(p, t0) {
   }
   return p.tElapsedStart;
 }
+// (20/11) Profondeur du goblet squat : seules les reps assez profondes comptent.
+// Le capteur au bras suit l'haltère tenu contre la poitrine. Sur la fenêtre des reps : axe
+// vertical = gravité moyenne, accélération verticale lissée (~3 Hz), intégrée deux fois avec
+// correction de dérive (vitesse : tendance linéaire, position : quadratique). Un filtre passe-haut
+// écrasait les reps lentes (= profondes) : calibration du 20/11 courtes ~24, normales ~35,
+// profondes ~53 cm. Amplitude d'une rep = sommet voisin − creux. Reps valides = reps comptées ×
+// part des creux ≥ seuil (robuste à un petit écart de comptage entre les deux méthodes).
+const SQUAT_DEPTH_EX = { 'Goblet squat': 45 };   // seuil en cm
+function repDepthStats(accSamples, s0, firstS, lastS, reps) {
+  const FS = FS_ALGO, i0 = Math.round((s0 + firstS - 0.3) * FS), i1 = Math.round((s0 + lastS + 0.6) * FS);
+  if (i0 < 0 || i1 > accSamples.length || i1 - i0 < 3 * FS || reps < 2) return null;
+  const x = accSamples.slice(i0, i1).map(s => s.map(v => v * 9.81 / 1000)), n = x.length;
+  const g = [0, 1, 2].map(c => x.reduce((a, s) => a + s[c], 0) / n), gn = Math.hypot(...g) || 1;
+  let av = gaussFilterReflect(x.map(s => (s[0] * g[0] + s[1] * g[1] + s[2] * g[2]) / gn - gn), 0.05 * FS);
+  const mean = a => a.reduce((p, q) => p + q, 0) / a.length;
+  const m0 = mean(av); av = av.map(v => v - m0);
+  const t = av.map((_, i) => i / FS);
+  const integ = a => { let s = 0; return a.map(v => (s += v / FS)); };
+  const detrend = (y, deg) => {   // moindres carrés polynôme deg 1 ou 2
+    const k = deg + 1, A = Array.from({ length: k }, () => new Array(k).fill(0)), b = new Array(k).fill(0);
+    for (let i = 0; i < n; i++) for (let r = 0; r < k; r++) { b[r] += y[i] * t[i] ** r; for (let c = 0; c < k; c++) A[r][c] += t[i] ** (r + c); }
+    for (let r = 0; r < k; r++) { let p = r; for (let q = r + 1; q < k; q++) if (Math.abs(A[q][r]) > Math.abs(A[p][r])) p = q;
+      [A[r], A[p]] = [A[p], A[r]]; [b[r], b[p]] = [b[p], b[r]];
+      for (let q = 0; q < k; q++) if (q !== r) { const f = A[q][r] / A[r][r]; for (let c = r; c < k; c++) A[q][c] -= f * A[r][c]; b[q] -= f * b[r]; } }
+    const co = b.map((v, r) => v / A[r][r]);
+    return y.map((v, i) => v - co.reduce((a, cc, r) => a + cc * t[i] ** r, 0));
+  };
+  const d = detrend(integ(detrend(integ(av), 1)), 2).map(v => v * 100);
+  const P = (lastS - firstS) / (reps - 1), W = Math.round(P * FS);
+  const lows = repFindPeaks(d.map(v => -v), Math.max(1, Math.round(0.6 * P * FS)), 5);
+  const amps = lows.map(k => { let mx = -Infinity; for (let i = Math.max(0, k - W); i < Math.min(n, k + W); i++) mx = Math.max(mx, d[i]); return mx - d[k]; });
+  if (amps.length < 2) return null;
+  const s = amps.slice().sort((a, b) => a - b), med = s.length % 2 ? s[s.length >> 1] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2;
+  return { amps: amps.map(Math.round), ampCm: Math.round(med) };
+}
 function analyzeSessionReps(accSamples, phaseLog, t0) {
   if (!accSamples || !phaseLog || accSamples.length < 20) return null;
   const results = [];
@@ -3875,7 +3910,13 @@ function analyzeSessionReps(accSamples, phaseLog, t0) {
     if (s0 - REP_WIN_BEFORE_S < 0) return;
     const r = countRepsWindow(seg, minStart);
     if (!r) return;
-    results.push({ name: p.name, round: p.round || 1, reps: r.reps, axis: r.axis, firstS: r.firstS, lastS: r.lastS });
+    const out = { name: p.name, round: p.round || 1, reps: r.reps, axis: r.axis, firstS: r.firstS, lastS: r.lastS };
+    const thr = SQUAT_DEPTH_EX[p.name];
+    if (thr != null && r.reps >= 2 && r.firstS != null && r.lastS != null) {
+      const st = repDepthStats(accSamples, s0, r.firstS, r.lastS, r.reps);
+      if (st) { out.repsTotal = r.reps; out.ampCm = st.ampCm; out.reps = Math.round(r.reps * st.amps.filter(a => a >= thr).length / st.amps.length); }
+    }
+    results.push(out);
   });
   return results;
 }
@@ -4762,8 +4803,8 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
   let html = '<table style="width:100%;border-collapse:collapse;font-size:13px;">';
   html += '<tr style="color:var(--muted);text-align:left;"><th style="padding:4px 0;">Exercice</th><th>R1</th><th>R2</th><th>R3</th><th>R4</th><th>Total</th></tr>';
   for (const name in byExercise) {
-    const byRound = {};
-    byExercise[name].forEach(r => byRound[r.round] = r.reps);
+    const byRound = {}, totRound = {}, ampRound = {};
+    byExercise[name].forEach(r => { byRound[r.round] = r.reps; if (r.repsTotal != null) { totRound[r.round] = r.repsTotal; ampRound[r.round] = r.ampCm; } });
     const loadNow = sessionLoadFor(combined.loads, name);
     const past = sameLoadHistory(history, name, combined.loads).map(e => e.summary.repsByEx);
     html += `<tr><td style="padding:4px 0;">${name}${loadNow != null ? ` <span style="color:var(--muted);font-size:11px;">${loadNow} kg</span>` : ''}</td>`;
@@ -4772,12 +4813,16 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
       if (v === undefined) { html += '<td>—</td>'; continue; }
       const c = compareLast(v, past.map(p => p[name] ? p[name][r] : null));
       if (c) anyColor = true;
-      html += `<td style="${c ? `color:${c.color};font-weight:bold;` : ''}">${v}</td>`;
+      html += `<td style="${c ? `color:${c.color};font-weight:bold;` : ''}">${v}${totRound[r] != null && totRound[r] !== v ? `<span style="color:var(--muted);font-size:10px;font-weight:normal;">/${totRound[r]}</span>` : ''}</td>`;
     }
     const total = Object.values(byRound).reduce((a,b) => a+b, 0);
     const pastTotals = past.map(p => p[name] && Object.keys(p[name]).length === Object.keys(byRound).length ? Object.values(p[name]).reduce((a,b) => a+b, 0) : null);
     const ct = compareLast(total, pastTotals);
     html += `<td style="font-weight:bold;${ct ? `color:${ct.color};` : ''}">${total}</td></tr>`;
+    if (Object.keys(ampRound).length) {
+      const thr = SQUAT_DEPTH_EX[name];
+      html += `<tr style="color:var(--muted);font-size:11px;"><td style="padding:0 0 6px 8px;">↳ profondeur</td>${[1,2,3,4].map(r => ampRound[r] == null ? '<td></td>' : `<td style="${ampRound[r] < thr ? 'color:#e74c3c;' : ''}">${ampRound[r]} cm</td>`).join('')}<td></td></tr>`;
+    }
     if (trend[name]) html += `<tr><td colspan="6" style="padding:0 0 6px;color:#2ecc71;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;">💪 ${trend[name]}</td></tr>`;
   }
   html += '</table>';
@@ -4844,7 +4889,8 @@ function hiitZoneOpts(combined) {
 // NOT bumped currently: the low/asymmetric-amplitude rowing bug found on 30/09
 // is still open, so bumping now would just force a slow recompute that returns
 // the same wrong-ish numbers. Bump this string when that's actually fixed.
-const REP_ALGO_VERSION = 'v3-gabarit-d1c-t0';  // t0 (06/11) : phases recalées sur le départ réel du capteur ; d1 (05/11) : garde-fou de début abaissé à ~1 s ; d1b (06/11) : simple recalcul forcé (séance du 06/11, R3 rowing/vélo inversés) ; d1c : idem, sprint elliptique R3 recalculé
+const REP_ALGO_VERSION = 'v3-gabarit-d1c-t0-p45';  // p45 (20/11) : goblet squat, seules les reps ≥ 45 cm de profondeur comptent
+// (historique)   // t0 (06/11) : phases recalées sur le départ réel du capteur ; d1 (05/11) : garde-fou de début abaissé à ~1 s ; d1b (06/11) : simple recalcul forcé (séance du 06/11, R3 rowing/vélo inversés) ; d1c : idem, sprint elliptique R3 recalculé
 // Analyse en cache utilisable : bonne version d'algo ET instants des reps (05/11, lièvre).
 function repsAnalysisFresh(a) { return !!(a && a.reps && a.algoVersion === REP_ALGO_VERSION && a.reps.every(r => 'firstS' in r)); }
 
