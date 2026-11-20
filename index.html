@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-20T11:23:57Z';</script>
+<script>const APP_BUILD = '2026-11-20T11:27:10Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -4296,7 +4296,13 @@ async function ellipConnect(tries = 3) {
       ellipDataChar.removeEventListener('characteristicvaluechanged', ellipOnData);
       ellipDataChar.addEventListener('characteristicvaluechanged', ellipOnData);
       ellipLastD = null;
-      await withTimeout(ellipDataChar.startNotifications(), 5000, 'notifications elliptique');
+      // (20/11) Juste après une séance ou un rechargement de page, la console met jusqu'à
+      // ~90 s à réaccepter les notifications FTMS (timeout en boucle). Le protocole iConsole
+      // suffit (vitesse → distance, niveau) : on continue sans FTMS, et on n'abandonne que
+      // si l'iConsole échoue aussi.
+      let ftmsOk = true;
+      try { await withTimeout(ellipDataChar.startNotifications(), 5000, 'notifications elliptique'); }
+      catch (e) { ftmsOk = false; logError('Elliptique : FTMS muet, on tente l\'iConsole seul', e); }
       if (ellipCp) {
         ellipCp.removeEventListener('characteristicvaluechanged', ellipOnCp);
         ellipCp.addEventListener('characteristicvaluechanged', ellipOnCp);
@@ -4307,6 +4313,14 @@ async function ellipConnect(tries = 3) {
       ellipConnected = true; ellipConnecting = false;
       log(`Elliptique connecté : ${ellipDev.name || 'console FTMS'}`);
       ellipRenderStatus(); ellipRenderLive();
+      if (!ftmsOk) {
+        let ok = await ellipIcStart(server);
+        if (ok) { await sleep(2000); ok = !!(ellipIc && Date.now() - ellipIc.at < 3000); } // des trames arrivent-elles ?
+        if (!ok) { ellipConnected = false; ellipConnecting = true; ellipIcStop(); throw new Error('ni FTMS ni iConsole ne répondent'); }
+        logAppend('Elliptique : connecté via iConsole seul (FTMS muet)');
+        ellipApplyLevel();
+        return true;
+      }
       ellipIcStart(server).then(ok => { if (ok) ellipApplyLevel(); });
       return true;
     } catch (e) {
