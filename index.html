@@ -362,7 +362,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-20T11:32:04Z';</script>
+<script>const APP_BUILD = '2026-11-20T11:35:21Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -994,11 +994,11 @@ function countSay(word,last){if(ttsFails>=1)beep(last?990:750,last?.18:.12,1.0,1
 // Test : essaie chaque voix française tour à tour jusqu'à en trouver une qui parle.
 function testVoice(){const el=document.getElementById('tts-status');let n=0;try{n=speechSynthesis.getVoices().length;}catch(e){}
   try{localStorage.removeItem(TTS_LS);}catch(e){}ttsIdx=0;ttsFails=0;const c=ttsCandidates();
-  const base='Version '+APP_BUILD+' · '+n+' voix, '+(c.length-1)+' fr-FR';getACtx();beep(825,.14,1.0);
+  const base='Version '+fmtBuild(APP_BUILD)+' · '+n+' voix, '+(c.length-1)+' fr-FR';getACtx();beep(825,.14,1.0);
   const tryOne=i=>{if(i>=c.length){el.innerHTML=base+' · ÉCHEC avec toutes les voix — <a href="#" onclick="chromeReset();return false" style="color:#ff7a7a">redémarrer Chrome</a>';return;}ttsIdx=i;el.textContent=base+' · essai '+(i+1)+'/'+c.length+' : '+c[i].key+'…';
     speak('Test de la voix.',{onstart:()=>{el.textContent=base+' · voix OK ✔ ('+c[i].key+')';},onfail:()=>{ttsIdx=i;setTimeout(()=>tryOne(i+1),400);}});};
   setTimeout(()=>tryOne(0),300);}
-setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+APP_BUILD;},0);
+setTimeout(()=>{const e=document.getElementById('tts-status');if(e)e.textContent='Version '+fmtBuild(APP_BUILD);},0);
 // Reps de la dernière séance, même exercice et même tour (historique local).
 let lastRepsIntroDone=false;
 function lastRepsFor(name,round){try{const idx=JSON.parse(localStorage.getItem('hiitHistoryIndex')||'[]').filter(e=>e.type==='hiit'&&e.summary&&e.summary.repsByEx&&sameVariant(e)).sort((a,b)=>a.filename<b.filename?-1:1);for(let i=idx.length-1;i>=0;i--){const ex=idx[i].summary.repsByEx[name];const v=ex?ex[round]:null;if(v!=null&&v>0)return v;}}catch(e){}return null;}
@@ -1136,14 +1136,14 @@ async function healStaleBuild() {
     if (seen && new Date(APP_BUILD) > new Date(seen)) {
       const d = new Date(APP_BUILD);
       setTimeout(() => showToast(`✓ App mise à jour (${d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' })} ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })})`), 800);
-      logAppend(`App mise à jour : ${seen} → ${APP_BUILD}`);
+      logAppend(`App mise à jour : ${fmtBuild(seen)} → ${fmtBuild(APP_BUILD)}`);
     }
     return false;
   }
   try { if (sessionStorage.getItem('hiitHealTried')) return false; sessionStorage.setItem('hiitHealTried', '1'); } catch (e) { return false; }
   const fresh = await refreshStartUrlCache();
   if (!fresh || !(new Date(fresh) > new Date(APP_BUILD))) return false;
-  logAppend(`Version périmée chargée depuis le cache (${APP_BUILD}), rechargement vers ${fresh}.`);
+  logAppend(`Version périmée chargée depuis le cache (${fmtBuild(APP_BUILD)}), rechargement vers ${fmtBuild(fresh)}.`);
   staleReload();
   return true;
 }
@@ -1155,7 +1155,7 @@ function buildInfoRender(latest, err) {
   let st = '';
   if (err) st = ' · vérification impossible (hors ligne ?)';
   else if (latest) st = new Date(latest) > new Date(APP_BUILD) ? ' · ⚠ nouvelle version en ligne (' + fmtBuild(latest) + ') — touche le bandeau orange' : ' · ✓ à jour';
-  el.textContent = 'Build du ' + fmtBuild(APP_BUILD) + ' (' + APP_BUILD + ')' + st;
+  el.textContent = 'Build du ' + fmtBuild(APP_BUILD) + st;
 }
 async function buildCheckNow(btn) { if (btn) btn.disabled = true; await checkForUpdate(); if (btn) btn.disabled = false; }
 async function checkForUpdate() {
