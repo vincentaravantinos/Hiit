@@ -4823,10 +4823,6 @@ function renderRepsResultsHtml(results, history = [], combined = {}) {
     const pastTotals = past.map(p => p[name] && Object.keys(p[name]).length === Object.keys(byRound).length ? Object.values(p[name]).reduce((a,b) => a+b, 0) : null);
     const ct = compareLast(total, pastTotals);
     html += `<td style="font-weight:bold;${ct ? `color:${ct.color};` : ''}">${total}</td></tr>`;
-    if (Object.keys(ampRound).length) {
-      const thr = SQUAT_DEPTH_EX[name];
-      html += `<tr style="color:var(--muted);font-size:11px;"><td style="padding:0 0 6px 8px;">↳ profondeur</td>${[1,2,3,4].map(r => ampRound[r] == null ? '<td></td>' : `<td style="${ampRound[r] < thr ? 'color:#e74c3c;' : ''}">${ampRound[r]} cm</td>`).join('')}<td></td></tr>`;
-    }
     if (trend[name]) html += `<tr><td colspan="6" style="padding:0 0 6px;color:#2ecc71;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0;">💪 ${trend[name]}</td></tr>`;
   }
   html += '</table>';
