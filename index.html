@@ -94,6 +94,10 @@ body {
 .day-dot.done-recup { background: var(--recup-dim); border-color: var(--recup); color: var(--recup); }
 .day-dot.missed { opacity: .22; }
 .day-dot.future { opacity: .15; border-style: dashed; }
+.day-dot.sick { opacity: 1; border-style: solid; border-color: var(--border2); background: var(--surface2); font-size: 17px; }
+.sick-btn { display: block; margin: -12px auto 20px; background: none; border: 1px solid var(--border2); color: var(--muted); font-family: var(--font); font-size: 14px; border-radius: 18px; padding: 7px 16px; cursor: pointer; }
+.sick-btn.on { color: var(--text); border-color: var(--text); }
+.sick-btn:disabled { opacity: .4; cursor: default; }
 .stats-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; }
 .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px; text-align: center; }
 .stat-value { font-size: 34px; font-weight: 900; color: var(--accent); line-height: 1; }
@@ -262,6 +266,7 @@ html.oura .day-dot.done-recup { background: var(--recup); border-color: var(--re
 html.oura .day-dot.today-ring { border-color: var(--text); border-width: 2px; }
 html.oura .day-dot.missed { opacity: .35; }
 html.oura .day-dot.future { opacity: .55; border-style: solid; border-color: rgba(255,255,255,.07); }
+html.oura .day-dot.sick { opacity: 1; background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.18); }
 html.oura .day-label { font-size: 11px; font-weight: 500; letter-spacing: .6px; }
 
 /* Cartes génériques */
@@ -362,7 +367,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-20T15:28:27Z';</script>
+<script>const APP_BUILD = '2026-11-23T20:42:10Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -401,6 +406,7 @@ html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !importa
       <span class="week-score" id="week-score">0 / 5</span>
     </div>
     <div class="week-grid" id="week-grid"></div>
+    <button class="sick-btn" id="sick-btn" onclick="toggleSickToday()" style="display:none"></button>
     <div class="stats-row">
       <div class="stat-card"><div class="stat-value gold" id="stat-streak">0</div><div class="stat-label">🔥 Streak (semaines)</div></div>
       <div class="stat-card"><div class="stat-value" id="stat-total">0</div><div class="stat-label">Total séances</div></div>
@@ -647,6 +653,29 @@ const hasEntry=dstr=>!!getEntry(dstr);
 const hasTrainedToday=()=>hasEntry(todayStr());
 function logWorkout(type,silent=false,dstr=null){const t=dstr||todayStr();if(hasEntry(t))return;workouts.unshift({date:t,type});workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);if(!silent)showToast(type==='I'?'Séance Intense enregistrée ✓':'Séance Récup enregistrée ✓');renderDashboard();}
 function toggleDay(dstr){const cur=getEntry(dstr);if(!cur){workouts.push({date:dstr,type:'I'});showToast('Intense ajouté ✓');}else if(cur.type==='I'){cur.type='R';showToast('Passé en Récup');}else{workouts=workouts.filter(w=>w.date!==dstr);showToast('Séance retirée');}workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);renderDashboard();}
+// Jours malade : déclarés le jour même uniquement (pas après coup), plafonnés à SICK_CAP par année civile.
+// Ils allègent l'exigence de la semaine au prorata des jours en forme : ceil(streakMin × jours en forme / 7).
+// Un jour malade où une séance a quand même été loggée compte comme jour en forme.
+const SICK_KEY='hiit_sickDays_v1',SICK_CAP=14;let sickDays=S.get(SICK_KEY,[]);
+const sickYearCount=y=>sickDays.filter(s=>s.startsWith(y+'-')).length;
+const isSick=dstr=>sickDays.includes(dstr)&&!hasEntry(dstr);
+function sickInWeek(mon){let n=0;for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);if(isSick(ds(d)))n++;}return n;}
+const weekRequired=mon=>Math.ceil(streakMin*(7-sickInWeek(mon))/7);
+function toggleSickToday(){
+  const t=todayStr();
+  if(sickDays.includes(t)){sickDays=sickDays.filter(s=>s!==t);S.set(SICK_KEY,sickDays);showToast('Jour malade retiré');renderDashboard();return;}
+  if(hasEntry(t)){showToast('Séance déjà loggée aujourd\'hui');return;}
+  if(sickYearCount(t.slice(0,4))>=SICK_CAP){showToast('Plafond de '+SICK_CAP+' jours malade atteint cette année');return;}
+  sickDays.push(t);sickDays.sort();S.set(SICK_KEY,sickDays);
+  const req=weekRequired(mondayOf(new Date()));showToast('Jour malade 🤒 · '+req+' Intense requise'+(req>1?'s':'')+' cette semaine');renderDashboard();
+}
+function renderSickBtn(){
+  const b=document.getElementById('sick-btn');if(!b)return;const t=todayStr();
+  if(weekOffset!==0||(hasEntry(t)&&!sickDays.includes(t))){b.style.display='none';return;}
+  const on=sickDays.includes(t),used=sickYearCount(t.slice(0,4));
+  b.style.display='block';b.classList.toggle('on',on);b.disabled=!on&&used>=SICK_CAP;
+  b.textContent=on?'🤒 Malade aujourd\'hui · annuler':'🤒 Malade aujourd\'hui ('+used+'/'+SICK_CAP+')';
+}
 // Streak en SEMAINES (lundi → dimanche). Une semaine compte si elle contient au moins streakMin
 // séances Intense (Récup ignorées). La semaine en cours ne casse pas le streak tant que le minimum
 // reste atteignable (assez de jours libres d'ici dimanche) ; elle ajoute +1 dès qu'il est atteint.
@@ -659,11 +688,11 @@ function computeWeekStreaks(){
   const first=mondayOf(parseDay([...workouts].map(w=>w.date).sort()[0])),thisMon=mondayOf(new Date()),today=todayStr();
   let len=0;
   for(const mon=new Date(first);mon<=thisMon;mon.setDate(mon.getDate()+7)){
-    const n=intenseInWeek(mon),isCur=mon.getTime()===thisMon.getTime();
-    if(n>=streakMin){len++;continue;}
+    const n=intenseInWeek(mon),isCur=mon.getTime()===thisMon.getTime(),req=weekRequired(mon);
+    if(n>=req){len++;continue;}
     if(isCur){
-      let free=0;for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);const s=ds(d);if(s>=today&&!hasEntry(s))free++;}
-      if(n+free>=streakMin)continue; // encore atteignable : la semaine en cours ne casse rien
+      let free=0;for(let i=0;i<7;i++){const d=new Date(mon);d.setDate(mon.getDate()+i);const s=ds(d);if(s>=today&&!hasEntry(s)&&!isSick(s))free++;}
+      if(n+free>=req)continue; // encore atteignable : la semaine en cours ne casse rien
     }
     if(len>0)res.runs.push(len);len=0;
   }
@@ -686,11 +715,11 @@ function renderDashboard(){
   const grid=document.getElementById('week-grid');grid.innerHTML='';
   weekDates.forEach((d,i)=>{
     const dstr=ds(d),isToday=dstr===today,isFuture=d>now&&!isToday,isPast=!isToday&&!isFuture;
-    const entry=getEntry(dstr),isDone=!!entry,isMissed=isPast&&!isDone,isClickable=!isFuture;
+    const entry=getEntry(dstr),isDone=!!entry,sick=isSick(dstr),isMissed=isPast&&!isDone&&!sick,isClickable=!isFuture&&!sick;
     const cell=document.createElement('div');cell.className='day-cell';cell.style.position='relative';
     const dot=document.createElement('div');
-    let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=entry.type==='I'?' done':' done-recup';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';
-    dot.className=cls;dot.textContent=isDone?'✓':'';
+    let cls='day-dot';if(isClickable)cls+=' clickable';if(isDone)cls+=entry.type==='I'?' done':' done-recup';if(isToday)cls+=' today-ring';if(isMissed)cls+=' missed';if(isFuture)cls+=' future';if(sick)cls+=' sick';
+    dot.className=cls;dot.textContent=isDone?'✓':sick?'🤒':'';
     const histEntries=getHistoryEntries(dstr);const hcEx=hcExForDay(dstr);
     if(isClickable){
       if(histEntries.length||hcEx.length){dot.onclick=()=>showDayActionMenu(dstr,histEntries,entry,hcEx);dot.title='Voir les options';}
@@ -707,6 +736,7 @@ function renderDashboard(){
     }
     grid.appendChild(cell);
   });
+  renderSickBtn();
   const streak=getCurrentStreak();
   document.getElementById('streak-count').textContent=streak;document.getElementById('streak-unit').textContent=wkUnit(streak);document.getElementById('stat-streak').textContent=streak;document.getElementById('stat-total').textContent=workouts.length;
   const top3=getAllStreaks().slice(0,3),maxVal=top3[0]||1,container=document.getElementById('top-streaks');
@@ -6669,6 +6699,7 @@ function renderOuraHero(weekDone){
   if(weekOffset<0)msg=weekDone>=goal?'Objectif atteint cette semaine-là':'Semaine passée';
   else if(hasTrainedToday())msg=left>0?'Séance du jour faite. Encore '+left+' Intense cette semaine':'Séance faite, objectif de la semaine atteint';
   else msg=left>0?'Encore '+left+' Intense cette semaine':'Objectif de la semaine atteint';
+  if(weekOffset===0&&isSick(todayStr())){const r=weekRequired(mondayOf(new Date())),l=Math.max(0,r-weekDone);msg='Repos, soigne-toi. '+(l>0?'Streak : encore '+l+' Intense cette semaine':'Streak de la semaine assuré');}
   document.getElementById('oh-msg').textContent=msg;
 }
 
