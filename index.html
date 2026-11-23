@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-23T20:48:04Z';</script>
+<script>const APP_BUILD = '2026-11-23T20:52:10Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -653,7 +653,7 @@ function toggleDay(dstr){const cur=getEntry(dstr),isToday=dstr===todayStr();
   if(!cur&&isToday&&sickDays.includes(dstr)){sickDays=sickDays.filter(s=>s!==dstr);S.set(SICK_KEY,sickDays);showToast('Jour malade retiré');renderDashboard();return;}
   if(!cur){workouts.push({date:dstr,type:'I'});showToast('Intense ajouté ✓');}else if(cur.type==='I'){cur.type='R';showToast('Passé en Récup');}
   else{workouts=workouts.filter(w=>w.date!==dstr);
-    if(isToday&&sickYearCount(dstr.slice(0,4))<SICK_CAP){sickDays.push(dstr);sickDays.sort();S.set(SICK_KEY,sickDays);const req=weekRequired(mondayOf(new Date()));showToast('Malade 🤒 · '+req+' Intense requise'+(req>1?'s':'')+' cette semaine ('+sickYearCount(dstr.slice(0,4))+'/'+SICK_CAP+' j cette année)');}
+    if(isToday&&sickYearCount(dstr.slice(0,4))<SICK_CAP){sickDays.push(dstr);sickDays.sort();S.set(SICK_KEY,sickDays);showToast('Malade 🤒 · '+sickYearCount(dstr.slice(0,4))+'/'+SICK_CAP+' j cette année');}
     else showToast(isToday?'Séance retirée · plafond de '+SICK_CAP+' jours malade atteint':'Séance retirée');}workouts.sort((a,b)=>b.date.localeCompare(a.date));S.set(KEYS.workouts,workouts);renderDashboard();}
 // Jours malade : déclarés le jour même uniquement (pas après coup), plafonnés à SICK_CAP par année civile.
 // Ils allègent l'exigence de la semaine au prorata des jours en forme : ceil(streakMin × jours en forme / 7).
