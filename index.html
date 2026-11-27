@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-23T20:52:10Z';</script>
+<script>const APP_BUILD = '2026-11-27T12:33:11Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -1928,26 +1928,45 @@ function btOffError() { const e = fatalError(BT_OFF_MSG); e.btOff = true; return
 function isBtOffMsg(m) { return m === BT_OFF_MSG || /adapter|bluetooth (is )?(off|disabled|turned off|not available)|radio/i.test(m || ''); }
 // Un tap : le pont Android ouvre la fenêtre système « Activer le Bluetooth ? » (ou, à
 // défaut, l'écran Bluetooth des paramètres). Au retour dans l'app, nouvel essai automatique.
-let btEnableAsked = false;
+// (27/11) Le pont est une activité transparente : Chrome n'est pas masqué, donc
+// visibilitychange ne se déclenche pas (et rien du tout si le Bluetooth était déjà
+// allumé). On surveille plutôt le Bluetooth toutes les secondes tant qu'une fenêtre
+// « Bluetooth désactivé » est ouverte — qu'il soit activé via le bouton ou à la main.
 function btEnableNow() {
-  btEnableAsked = true;
+  btWatchStart();
   location.href = `intent://bluetooth#Intent;scheme=hiitbridge;package=${HC_BRIDGE_PKG};S.browser_fallback_url=${encodeURIComponent(HC_APK_URL)};end`;
 }
-document.addEventListener('visibilitychange', async () => {
-  if (document.hidden || !btEnableAsked) return;
-  btEnableAsked = false;
-  await sleep(800); // laisse le Bluetooth finir de démarrer
-  if (await btAdapterOff()) return;
+let btWatchTimer = null;
+function btOffModalOpen() {
+  const em = document.getElementById('ellip-modal'), sm = document.getElementById('sensor-modal');
+  if (em && em.style.display !== 'none' && em.dataset.mode === 'btoff') return 'ellip';
+  if (sm && sm.style.display !== 'none' && isBtOffMsg(sensorLastError)) return 'sensor';
+  return null;
+}
+function btWatchStart() {
+  if (btWatchTimer) return;
+  let onSince = 0;
+  const tick = async () => {
+    if (!btOffModalOpen()) { btWatchTimer = null; return; } // fermée (ex. « sans capteur »)
+    if (!(await btAdapterOff())) {
+      if (!onSince) { onSince = Date.now(); log('Bluetooth réactivé — reprise de la connexion.'); }
+      // Chrome met parfois quelques secondes à redonner les appareils autorisés.
+      const ready = typeof navigator.bluetooth?.getDevices !== 'function' || (await knownDevices()).length > 0;
+      if (ready || Date.now() - onSince > 8000) { btWatchTimer = null; await btResumeAfterOn(); return; }
+    }
+    btWatchTimer = setTimeout(tick, 1000);
+  };
+  btWatchTimer = setTimeout(tick, 1000);
+}
+async function btResumeAfterOn() {
+  const which = btOffModalOpen();
   sensorLastError = null;
-  const em = document.getElementById('ellip-modal');
-  if (em && em.style.display !== 'none' && em.dataset.mode === 'btoff') { ellipResumeAfterBt(); return; }
-  const m = document.getElementById('sensor-modal');
-  if (m && m.style.display !== 'none') {
+  if (which === 'ellip') { ellipResumeAfterBt(); return; }
+  if (which === 'sensor') {
     if (!device) device = pickKnownSensor(await knownDevices());
     if (device) sensorModalRetry(false); else sensorModalOpen();
   }
-  else showToast('✓ Bluetooth activé');
-});
+}
 // (20/11) Bluetooth coupé : Chrome Android ne renvoie alors plus aucun appareil autorisé
 // (getDevices vide) alors que getAvailability() peut rester à true. Un appareil déjà
 // utilisé qui « disparaît » signale donc un Bluetooth coupé, pas une première utilisation.
@@ -2753,6 +2772,7 @@ function sensorModalOpen() {
   document.getElementById('sensor-modal-pick').style.display = has && !btOff ? '' : 'none';
   document.getElementById('sensor-modal-skip').textContent = 'Continuer sans capteur';
   document.getElementById('sensor-modal').style.display = 'flex';
+  if (btOff) btWatchStart();
 }
 // Même modale pendant la recherche : un seul bouton, pour partir tout de suite sans capteur.
 function sensorModalConnecting() {
@@ -4262,6 +4282,7 @@ function ellipModalShow(mode) {
   document.getElementById('ellip-modal-skip').textContent = pick ? 'Continuer sans elliptique' : 'Démarrer sans elliptique';
   document.getElementById('ellip-modal').dataset.mode = mode;
   document.getElementById('ellip-modal').style.display = 'flex';
+  if (off) btWatchStart();
 }
 function ellipModalBusyNote() {
   const m = document.getElementById('ellip-modal');
@@ -4288,7 +4309,7 @@ async function ellipGateThenStart(btn) {
 async function ellipResumeAfterBt() {
   ellipModalHide();
   await ellipFindKnown();
-  if (!ellipDev) { ellipModalShow((await btOffLikely(true, ELLIP_KNOWN_LS)) ? 'btoff' : 'pick'); return; }
+  if (!ellipDev) { ellipModalShow((await btAdapterOff()) ? 'btoff' : 'pick'); return; }
   ellipWaitThenStart();
 }
 async function ellipWaitThenStart() {
@@ -4296,6 +4317,7 @@ async function ellipWaitThenStart() {
   ellipAfterSession = false;
   if (!ellipConnected) {
     ellipModalShow('connect');
+    if (await btAdapterOff()) { ellipGateGen++; ellipModalShow('btoff'); return; } // sans attendre un essai de connexion
     while (!ellipConnected && gen === ellipGateGen) {
       await ellipAutoConnect();
       if (ellipConnected || gen !== ellipGateGen) break;
