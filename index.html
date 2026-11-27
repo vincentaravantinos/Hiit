@@ -364,7 +364,7 @@ html.oura .sensor-modal .btn-skip { border: none; background: rgba(255,255,255,.
 html.oura #update-banner { background: linear-gradient(90deg,#3a4f7a,#5a4a8c) !important; }
 html.oura #update-btn { color: #3a4f7a !important; border-radius: 999px !important; }
 </style>
-<script>const APP_BUILD = '2026-11-27T12:33:11Z';</script>
+<script>const APP_BUILD = '2026-11-27T12:56:31Z';</script>
 </head>
 <body>
 <div id="update-banner" style="display:none;position:sticky;top:0;z-index:1000;background:#e67e22;color:#fff;padding:10px 14px;font-size:13px;text-align:center;font-family:var(--font);">
@@ -6707,7 +6707,12 @@ function renderOuraHero(weekDone){
   if(weekOffset<0)msg=weekDone>=goal?'Objectif atteint cette semaine-là':'Semaine passée';
   else if(hasTrainedToday())msg=left>0?'Séance du jour faite. Encore '+left+' Intense cette semaine':'Séance faite, objectif de la semaine atteint';
   else msg=left>0?'Encore '+left+' Intense cette semaine':'Objectif de la semaine atteint';
-  if(weekOffset===0&&isSick(todayStr())){const r=weekRequired(mondayOf(new Date())),l=Math.max(0,r-weekDone);msg='Repos, soigne-toi. '+(l>0?'Streak : encore '+l+' Intense cette semaine':'Streak de la semaine assuré');}
+  // Semaine avec jours malade : le message suit l'exigence de streak ajustée (pas l'objectif de l'anneau).
+  const thisMon=mondayOf(new Date());
+  if(weekOffset===0&&sickInWeek(thisMon)>0){
+    const l=Math.max(0,weekRequired(thisMon)-weekDone),rest=l>0?'Encore '+l+' Intense cette semaine':'Streak de la semaine assuré';
+    msg=isSick(todayStr())?'Repos, soigne-toi. '+rest:hasTrainedToday()?'Séance du jour faite. '+rest:rest;
+  }
   document.getElementById('oh-msg').textContent=msg;
 }
 
